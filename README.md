@@ -1,22 +1,23 @@
 # Home Assistant Blueprints
 
-Reusable, documented Home Assistant blueprints maintained by [3115a083](https://github.com/3115a083). Each blueprint has its own folder with the installable YAML and a README.
+A collection of reusable, configurable **Home Assistant blueprints** maintained by [3115a083](https://github.com/3115a083). Each blueprint lives in its own directory, with an installable YAML file and a dedicated README that covers setup, examples, limitations, and safety notes.
 
-## Available blueprints
+## Blueprint catalog
 
-| Blueprint | Description | Install |
-| --- | --- | --- |
-| [Area Occupancy Manager](blueprints/automation/occupancy/README.md) | Derive occupancy directly from persons/device trackers, optionally publish the result to a Boolean helper, and combine guest/sleep protection, diagnostics, and three independent timed arrival actions. | [Import into Home Assistant](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2F3115a083%2Fha-blueprints%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Foccupancy%2Farea_occupancy_manager.yaml) |
+| Blueprint | Description | Documentation | Install |
+| --- | --- | --- | --- |
+| **Area Occupancy Manager** | Detect occupied/vacant areas using people, devices, and optional sensors. Run configurable actions, with guest/sleep protections and independent timed routines. | [Setup and examples](blueprints/automation/occupancy/README.md) | [Import blueprint](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2F3115a083%2Fha-blueprints%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Foccupancy%2Farea_occupancy_manager.yaml) |
 
-## Installation
+## How to install a blueprint
 
-1. Use the direct import link above, or select **Settings → Automations & scenes → Blueprints → Import blueprint** in Home Assistant.
-2. Enter the YAML URL: `https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/occupancy/area_occupancy_manager.yaml`.
-3. Create an automation and select person/device trackers. Add an optional `input_boolean` helper only when you need a published occupancy state, combined sensor rules, or other automations to read the result; see the [occupancy setup guide](blueprints/automation/occupancy/README.md).
+1. Choose a blueprint from the catalog and open its **Documentation** for prerequisites and configuration.
+2. Click **Import blueprint** or open **Home Assistant -> Settings -> Automations & scenes -> Blueprints -> Import blueprint** and provide the YAML URL.
+3. Create an automation from the imported blueprint and configure its inputs.
+4. Test with non-critical actions before enabling alarms, locks, motors, or similar devices.
 
-Each timed-action profile has independent conditions, actions, a duration, and optional dedicated timer helpers. The occupancy blueprint declares Home Assistant **2024.10.0** as its minimum version and does not require HACS or an additional integration.
+The catalog is a starting point. **Blueprint-specific settings and use cases are documented in the linked README inside each blueprint folder**, rather than in this repository overview.
 
-## Repository layout
+## Repository structure
 
 ```text
 blueprints/
@@ -30,8 +31,8 @@ tests/
   test_blueprint.py
 ```
 
-Future automation blueprints belong in `blueprints/automation/<topic>/`. Script blueprints can use `blueprints/script/<topic>/`.
+New automation blueprints belong in `blueprints/automation/<topic>/`; script blueprints can use `blueprints/script/<topic>/`.
 
-## Testing and security
+## Validation
 
-GitHub Actions performs static YAML and Jinja validation and checks selected safety scenarios. A live Home Assistant runtime test is still required before using critical actions such as arming alarms or closing garage doors. See the detailed [documentation](blueprints/automation/occupancy/README.md).
+Static tests are provided in [tests](tests/) and configured in [GitHub Actions](.github/workflows/validate-blueprints.yml). Static validation does not replace testing on a live Home Assistant instance, particularly for safety-critical actions.
