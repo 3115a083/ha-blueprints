@@ -51,7 +51,7 @@ In den Automations-Traces erscheinen außerdem die berechneten Variablen (`diagn
 
 ### Türfolge konfigurieren
 
-In **04 | Türen** zwei `binary_sensor`-Türkontakte wählen. `Tür 1 → Tür 2` innerhalb von 30 s (änderbar) gilt als Abgang; `Tür 2 → Tür 1` als Ankunft. Entscheidend ist, dass **der zweite Kontakt erst nach dem ersten auslöst**. Nicht geeignet für Türen, die normalerweise offen stehen, oder bei denen die Bewegungsrichtung nicht eindeutig ist. Ein alleiniger Öffnungsimpuls gilt nicht als abgeschlossene Folge.
+In **05 | Türen** zwei `binary_sensor`-Türkontakte wählen. `Tür 1 → Tür 2` innerhalb von 30 s (änderbar) gilt als Abgang; `Tür 2 → Tür 1` als Ankunft. Entscheidend ist, dass **der zweite Kontakt erst nach dem ersten auslöst**. Nicht geeignet für Türen, die normalerweise offen stehen, oder bei denen die Bewegungsrichtung nicht eindeutig ist. Ein alleiniger Öffnungsimpuls gilt nicht als abgeschlossene Folge.
 
 ### Eigene Trigger
 
