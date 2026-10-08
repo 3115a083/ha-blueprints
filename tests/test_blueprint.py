@@ -234,6 +234,60 @@ class BlueprintTests(unittest.TestCase):
         self.assertIn("BELEGT", c["diagnostic_line"])
         self.assertIn("255", next(a["variables"]["diagnostic_value"] for a in self.data["actions"] if "diagnostic_value" in a.get("variables", {})))
 
+    def test_no_invalid_bare_sequence_actions(self):
+        """A sequence mapping is valid inside parallel, but not as a standalone action."""
+        invalid = []
+
+        def visit(node, parent=None):
+            if isinstance(node, list):
+                for item in node:
+                    if isinstance(item, dict) and list(item) == ["sequence"] and parent != "parallel":
+                        invalid.append((parent, item))
+                    visit(item, parent)
+            elif isinstance(node, dict):
+                for key, value in node.items():
+                    visit(value, key)
+
+        visit(self.data["actions"])
+        self.assertEqual(invalid, [])
+
+    def test_persistent_timer_due_guard(self):
+        import types
+
+        due = next(
+            b for b in self.data["actions"][-1]["choose"]
+            if "fälliger Auftrag" in b["alias"]
+        )
+        template = self.env.from_string(due["conditions"][0]["value_template"])
+        now = dt.datetime(2026, 10, 8, 8, 0, tzinfo=dt.timezone.utc)
+
+        def timestamp(value, default=0):
+            try:
+                if isinstance(value, dt.datetime):
+                    return value.timestamp()
+                return dt.datetime.fromisoformat(value).replace(tzinfo=dt.timezone.utc).timestamp()
+            except (ValueError, TypeError):
+                return default
+
+        def evaluate(*, pending="on", deadline="2026-10-08 07:59:00", trigger="temporary_tick"):
+            entities = {"input_boolean.pending": pending, "input_datetime.deadline": deadline}
+            return template.render(
+                trigger=types.SimpleNamespace(id=trigger),
+                temporary_enabled=True,
+                temporary_deadline="input_datetime.deadline",
+                temporary_pending="input_boolean.pending",
+                is_state=lambda entity, value: entities[entity] == value,
+                states=lambda entity: entities[entity],
+                as_timestamp=timestamp,
+                now=lambda: now,
+            ).strip().lower() == "true"
+
+        self.assertTrue(evaluate())
+        self.assertFalse(evaluate(pending="off"))
+        self.assertFalse(evaluate(deadline="2026-10-08 08:01:00"))
+        self.assertFalse(evaluate(deadline="unavailable"))
+        self.assertFalse(evaluate(trigger="reconcile"))
+
     def test_persistent_timer_is_restart_recoverable_and_guarded(self):
         self.assertEqual(self.inputs["temporary_deadline"]["default"], "")
         self.assertEqual(self.inputs["temporary_pending"]["default"], "")
