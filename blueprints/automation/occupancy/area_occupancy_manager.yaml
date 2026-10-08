@@ -1,0 +1,526 @@
+blueprint:
+  name: "Area Occupancy Manager | Anwesenheit & Abwesenheit"
+  description: >-
+    Verwaltet die Belegung eines Hauses oder Bereichs über einen input_boolean-Helfer.
+    Kombiniert Tracker, Bewegungs-/Präsenzsensoren, optionale Türsequenzen und
+    frei definierbare Trigger mit Sicherheitsbedingungen (Gäste, zusätzliche
+    Präsenzsensoren, Stabilitätszeiten). Aktionen für Ankunft, Abwesenheit
+    und zeitlich begrenzte Abläufe sind frei konfigurierbar.
+
+    WICHTIG: Ohne geeignete Anwesenheitssensoren oder aktivierten Gastmodus
+    kann eine schlafende oder bewegungslose Person nicht sicher erkannt werden.
+    Schlösser, Alarmanlagen und Garagentore nur mit geeigneten zusätzlichen
+    Sicherheitsbedingungen automatisieren. Bei temporären Aktionen sind
+    Verzögerungen über einen Home-Assistant-Neustart nicht persistent.
+
+    Eigene Trigger müssen die Trigger-ID `custom_away` oder `custom_home`
+    erhalten, damit ihre Richtung erkannt wird.
+  domain: automation
+  author: "3115a083"
+  homeassistant:
+    min_version: "2024.10.0"
+  input:
+    base:
+      name: "01 | Belegungsstatus"
+      icon: mdi:home-account
+      input:
+        occupancy_helper:
+          name: "Belegungsstatus (Pflicht)"
+          description: >-
+            Vorher angelegter Umschalter (input_boolean).
+            EIN = belegt, AUS = leer. Manuelle Umschaltung löst ebenfalls Aktionen aus.
+          selector:
+            entity:
+              filter:
+                domain: input_boolean
+    automatic_evidence:
+      name: "02 | Automatische Erkennung"
+      icon: mdi:account-search
+      input:
+        tracked_entities:
+          name: "Personen / Geräte (optional)"
+          description: >-
+            Alle hier gewählten Tracker müssen für eine sichere Abwesenheit
+            außerhalb von 'home' sein. Andere Zonen (z. B. work) gelten als weg.
+            Unbekannte/nicht verfügbare Zustände verhindern Abwesenheit.
+          default: []
+          selector:
+            entity:
+              multiple: true
+              filter:
+                - domain: person
+                - domain: device_tracker
+        tracked_away_minutes:
+          name: "Mindestdauer Tracker weg (Minuten)"
+          default: 3
+          selector:
+            number:
+              min: 0
+              max: 120
+              step: 1
+              unit_of_measurement: min
+              mode: box
+        activity_sensors:
+          name: "Bewegungs-/Präsenzsensoren (optional)"
+          description: >-
+            Für automatische Abwesenheit müssen alle Sensoren AUS und stabil sein.
+            Bei Bewegung/Präsenz (EIN) wird die Belegung sofort wieder hergestellt.
+          default: []
+          selector:
+            entity:
+              multiple: true
+              filter:
+                domain: binary_sensor
+        inactive_minutes:
+          name: "Inaktivität für Abwesenheit (Minuten)"
+          description: >-
+            Für PIR-Bewegungsmelder eher großzügig wählen; für mmWave-Präsenzsensoren
+            darf die Dauer kürzer sein.
+          default: 20
+          selector:
+            number:
+              min: 0
+              max: 240
+              step: 1
+              unit_of_measurement: min
+              mode: box
+        evidence_policy:
+          name: "Wie werden Abwesenheitssignale kombiniert?"
+          description: >-
+            ALLE (empfohlen): Alle ausgewählten Tracker UND alle Sensoren
+            müssen Abwesenheit bestätigen. EINES: Ein Signal reicht, sofern
+            keine Sicherheitssperre greift. Bekannte anwesende Tracker und
+            aktive/ausgefallene Bewegungssensoren sperren IMMER. Türfolge/Custom-Trigger
+            gelten in EINES ebenfalls als unabhängiges Signal.
+          default: all
+          selector:
+            select:
+              options:
+                - label: "ALLE konfigurierten Methoden (sicherer)"
+                  value: all
+                - label: "EINE Methode reicht (schneller)"
+                  value: any
+    safeguards:
+      name: "03 | Schutz vor Fehlentscheidungen"
+      icon: mdi:shield-check
+      input:
+        guest_mode:
+          name: "Gastmodus-Sperre (optional)"
+          description: >-
+            Solange dieser input_boolean EIN oder nicht verfügbar ist,
+            wird automatische Abwesenheit verhindert. Manuelle Änderung
+            des Belegungsstatus bleibt möglich.
+          default: ""
+          selector:
+            entity:
+              filter:
+                domain: input_boolean
+        blocking_sensors:
+          name: "Weitere Anwesenheits-Sperrsensoren (optional)"
+          description: >-
+            Abwesenheit nur, wenn ALLE AUS sind. EIN / unknown / unavailable
+            blockieren die Umschaltung, etwa bei mmWave oder Bettsensoren.
+          default: []
+          selector:
+            entity:
+              multiple: true
+              filter:
+                domain: binary_sensor
+        away_conditions:
+          name: "Zusätzliche Bedingungen für automatisch leer"
+          description: >-
+            Beliebige HA-Bedingungen, alle müssen zutreffen. Beispiel:
+            Niemand im Gästezimmer, ein Freigabe-Helfer steht auf EIN.
+            Diese Bedingungen werden vor dem Umschalten geprüft.
+          default: []
+          selector:
+            condition: {}
+        home_conditions:
+          name: "Zusätzliche Bedingungen für automatisch belegt"
+          description: >-
+            Nur für die automatische Statusänderung, nicht für manuelle
+            Statuswechsel. Licht nur nachts besser direkt in den Ankunftsaktionen steuern.
+          default: []
+          selector:
+            condition: {}
+    entrances:
+      name: "04 | Türen und zusätzliche Trigger"
+      icon: mdi:door
+      collapsed: true
+      input:
+        exit_first_door:
+          name: "Türfolge: Tür 1 (optional)"
+          description: "AUS -> EIN, dann Tür 2: Auszug. Umgekehrte Reihenfolge: Ankunft."
+          default: ""
+          selector:
+            entity:
+              filter:
+                domain: binary_sensor
+        exit_second_door:
+          name: "Türfolge: Tür 2 (optional)"
+          description: "Nur zusammen mit Tür 1 konfigurieren. Der 2. Kontakt muss nach dem 1. auslösen."
+          default: ""
+          selector:
+            entity:
+              filter:
+                domain: binary_sensor
+        door_route_seconds:
+          name: "Maximale Zeit zwischen Tür 1 und 2 (Sekunden)"
+          default: 30
+          selector:
+            number:
+              min: 1
+              max: 300
+              step: 1
+              unit_of_measurement: s
+              mode: box
+        arrival_lock:
+          name: "Türschloss entriegelt = Ankunft (optional)"
+          description: >-
+            Ein Entriegelungsereignis kann Belegung herstellen. Nicht allein
+            auf ungesicherte, ferngesteuerte Entsperrungen vertrauen.
+          default: ""
+          selector:
+            entity:
+              filter:
+                domain: lock
+        extra_away_triggers:
+          name: "Eigene Abwesenheits-Trigger (optional)"
+          description: >-
+            Frei wählbar. WICHTIG: Im Trigger die Trigger-ID `custom_away`
+            einstellen. Alle Sicherheitsbedingungen werden danach geprüft.
+          default: []
+          selector:
+            trigger: {}
+        extra_home_triggers:
+          name: "Eigene Ankunfts-Trigger (optional)"
+          description: >-
+            Frei wählbar. WICHTIG: Im Trigger die Trigger-ID `custom_home`
+            einstellen, sonst wird das Ereignis nicht verarbeitet.
+          default: []
+          selector:
+            trigger: {}
+    actions_section:
+      name: "05 | Aktionen"
+      icon: mdi:lightning-bolt
+      input:
+        away_actions:
+          name: "Aktionen bei leer"
+          description: >-
+            Beliebige Aktionen wie alarm_control_panel.alarm_arm_away,
+            light.turn_off, media_player.media_stop, lock.lock oder Skripte.
+            Laufen einmalig bei EIN -> AUS des Belegungshelfers.
+          default: []
+          selector:
+            action: {}
+        home_actions:
+          name: "Aktionen bei belegt"
+          description: >-
+            Beliebige Aktionen, einmalig bei AUS -> EIN. Nacht-/Tageslichtlogik
+            mit 'Wenn/Dann' und einer Sonnenbedingung direkt hier konfigurieren.
+          default: []
+          selector:
+            action: {}
+    temporary:
+      name: "06 | Zeitlich begrenzte Ankunftsaktionen"
+      icon: mdi:timer-outline
+      collapsed: true
+      input:
+        temporary_enabled:
+          name: "Temporäre Aktionen aktivieren"
+          default: false
+          selector:
+            boolean: {}
+        temporary_start_conditions:
+          name: "Nur starten, wenn ..."
+          description: >-
+            Zum Beispiel: Handy mit Auto per Bluetooth verbunden.
+            Alle Bedingungen müssen erfüllt sein.
+          default: []
+          selector:
+            condition: {}
+        temporary_start_actions:
+          name: "Aktionen sofort bei Ankunft"
+          description: "Beispiel: Garagentor öffnen."
+          default: []
+          selector:
+            action: {}
+        temporary_minutes:
+          name: "Dauer bis zur Folgeaktion (Minuten)"
+          default: 40
+          selector:
+            number:
+              min: 1
+              max: 1440
+              step: 1
+              unit_of_measurement: min
+              mode: box
+        temporary_end_conditions:
+          name: "Sicherheitsbedingungen für Folgeaktion"
+          description: >-
+            Für ein Garagentor zwingend passende Hindernis- und Torstatus-
+            Prüfungen ergänzen. Sonst können die Folgeaktionen unabhängig
+            vom aktuellen Belegungsstatus ausgeführt werden.
+          default: []
+          selector:
+            condition: {}
+        temporary_end_actions:
+          name: "Aktionen nach Ablauf"
+          description: "Beispiel: Garagentor schließen. Verzögerung ist nicht neustartfest."
+          default: []
+          selector:
+            action: {}
+
+# Blueprint-Eingaben für Template- und Action-Kontext verfügbar machen.
+trigger_variables:
+  _trackers: !input tracked_entities
+  _activity: !input activity_sensors
+  _lock: !input arrival_lock
+  _first_door: !input exit_first_door
+  _second_door: !input exit_second_door
+
+variables:
+  occupancy_helper: !input occupancy_helper
+  tracked_entities: !input tracked_entities
+  activity_sensors: !input activity_sensors
+  blocking_sensors: !input blocking_sensors
+  guest_mode: !input guest_mode
+  tracked_away_minutes: !input tracked_away_minutes
+  inactive_minutes: !input inactive_minutes
+  evidence_policy: !input evidence_policy
+  arrival_lock: !input arrival_lock
+  exit_first_door: !input exit_first_door
+  exit_second_door: !input exit_second_door
+  temporary_enabled: !input temporary_enabled
+
+triggers:
+  # Ein individueller Trigger muss in HA die passende Trigger-ID erhalten.
+  - triggers: !input extra_away_triggers
+  - triggers: !input extra_home_triggers
+  - trigger: template
+    id: tracker_away
+    value_template: >-
+      {% set ns = namespace(valid=(_trackers | count > 0)) %}
+      {% for entity in _trackers %}
+        {% if states(entity) in ['home', 'unknown', 'unavailable'] %}
+          {% set ns.valid = false %}
+        {% endif %}
+      {% endfor %}
+      {{ ns.valid }}
+    for:
+      minutes: !input tracked_away_minutes
+  - trigger: template
+    id: tracker_home
+    value_template: >-
+      {{ _trackers | count > 0
+         and (expand(_trackers) | selectattr('state', 'eq', 'home') | list | count) > 0 }}
+  - trigger: template
+    id: activity_away
+    value_template: >-
+      {% set ns = namespace(valid=(_activity | count > 0)) %}
+      {% for entity in _activity %}
+        {% if not is_state(entity, 'off') %}
+          {% set ns.valid = false %}
+        {% endif %}
+      {% endfor %}
+      {{ ns.valid }}
+    for:
+      minutes: !input inactive_minutes
+  - trigger: template
+    id: activity_home
+    value_template: >-
+      {{ _activity | count > 0
+         and (expand(_activity) | selectattr('state', 'eq', 'on') | list | count) > 0 }}
+  - trigger: template
+    id: lock_home
+    value_template: "{{ _lock != '' and is_state(_lock, 'unlocked') }}"
+  - trigger: template
+    id: exit_first
+    value_template: "{{ _first_door != '' and _second_door != '' and is_state(_first_door, 'on') }}"
+  - trigger: template
+    id: entry_first
+    value_template: "{{ _first_door != '' and _second_door != '' and is_state(_second_door, 'on') }}"
+  - trigger: state
+    id: became_away
+    entity_id: !input occupancy_helper
+    from: "on"
+    to: "off"
+  - trigger: state
+    id: became_home
+    entity_id: !input occupancy_helper
+    from: "off"
+    to: "on"
+  - trigger: homeassistant
+    id: reconcile
+    event: start
+  - trigger: time_pattern
+    id: reconcile
+    minutes: "/5"
+
+# Parallele Ausführungen sind nötig, damit die 40-Minuten-Aktion
+# neue Statuswechsel nicht blockiert oder durch 'restart' abgebrochen wird.
+mode: parallel
+max: 20
+max_exceeded: warning
+
+actions:
+  # Türfolge ist absichtlich ein echtes geordnetes Ereignisfenster.
+  - if:
+      - condition: template
+        value_template: "{{ trigger.id == 'exit_first' }}"
+    then:
+      - wait_for_trigger:
+          - trigger: template
+            value_template: "{{ exit_second_door != '' and is_state(exit_second_door, 'on') }}"
+        timeout:
+          seconds: !input door_route_seconds
+        continue_on_timeout: false
+  - if:
+      - condition: template
+        value_template: "{{ trigger.id == 'entry_first' }}"
+    then:
+      - wait_for_trigger:
+          - trigger: template
+            value_template: "{{ exit_first_door != '' and is_state(exit_first_door, 'on') }}"
+        timeout:
+          seconds: !input door_route_seconds
+        continue_on_timeout: false
+
+  # Re-evaluation in jedem Lauf: keine veralteten Beweise verwenden.
+  - variables:
+      all_trackers_away_stable: >-
+        {% set ns = namespace(valid=(tracked_entities | count > 0)) %}
+        {% for entity in tracked_entities %}
+          {% set item = states[entity] %}
+          {% if item is none or item.state in ['home', 'unknown', 'unavailable']
+                or (as_timestamp(now()) - as_timestamp(item.last_changed, 0)) < (tracked_away_minutes | int * 60) %}
+            {% set ns.valid = false %}
+          {% endif %}
+        {% endfor %}
+        {{ ns.valid }}
+      all_activity_quiet_stable: >-
+        {% set ns = namespace(valid=(activity_sensors | count > 0)) %}
+        {% for entity in activity_sensors %}
+          {% set item = states[entity] %}
+          {% if item is none or item.state != 'off'
+                or (as_timestamp(now()) - as_timestamp(item.last_changed, 0)) < (inactive_minutes | int * 60) %}
+            {% set ns.valid = false %}
+          {% endif %}
+        {% endfor %}
+        {{ ns.valid }}
+      known_trackers_safe: >-
+        {% set ns = namespace(safe=true) %}
+        {% for entity in tracked_entities %}
+          {% if states(entity) in ['home', 'unknown', 'unavailable'] %}
+            {% set ns.safe = false %}
+          {% endif %}
+        {% endfor %}
+        {{ ns.safe }}
+      activity_clear: >-
+        {% set ns = namespace(clear=true) %}
+        {% for entity in activity_sensors %}
+          {% if not is_state(entity, 'off') %}
+            {% set ns.clear = false %}
+          {% endif %}
+        {% endfor %}
+        {{ ns.clear }}
+      blockers_clear: >-
+        {% set ns = namespace(clear=true) %}
+        {% for entity in blocking_sensors %}
+          {% if not is_state(entity, 'off') %}
+            {% set ns.clear = false %}
+          {% endif %}
+        {% endfor %}
+        {{ ns.clear }}
+      anyone_home_now: >-
+        {{ (tracked_entities | count > 0
+             and (expand(tracked_entities) | selectattr('state', 'eq', 'home') | list | count) > 0)
+           or (activity_sensors | count > 0
+             and (expand(activity_sensors) | selectattr('state', 'eq', 'on') | list | count) > 0) }}
+  - variables:
+      absence_evidence_ok: >-
+        {% set has_tracker = tracked_entities | count > 0 %}
+        {% set has_activity = activity_sensors | count > 0 %}
+        {% if evidence_policy == 'all' %}
+          {{ (not has_tracker or all_trackers_away_stable | bool)
+             and (not has_activity or all_activity_quiet_stable | bool) }}
+        {% else %}
+          {{ all_trackers_away_stable | bool or all_activity_quiet_stable | bool
+             or trigger.id in ['exit_first', 'custom_away'] }}
+        {% endif %}
+
+  - choose:
+      - alias: "Belegungsstatus hat auf leer gewechselt"
+        conditions:
+          - condition: template
+            value_template: "{{ trigger.id == 'became_away' }}"
+        sequence: !input away_actions
+
+      - alias: "Belegungsstatus hat auf belegt gewechselt"
+        conditions:
+          - condition: template
+            value_template: "{{ trigger.id == 'became_home' }}"
+        sequence:
+          - parallel:
+              - sequence: !input home_actions
+              - sequence:
+                  - condition: template
+                    value_template: "{{ temporary_enabled }}"
+                  - condition: and
+                    conditions: !input temporary_start_conditions
+                  - sequence: !input temporary_start_actions
+                  - delay:
+                      minutes: !input temporary_minutes
+                  # Keine ältere Ankunft darf eine spätere temporäre Aktion vorzeitig beenden.
+                  # Wenn der Bereich mittlerweile leer ist, darf das Aufräumen dennoch laufen.
+                  - condition: template
+                    value_template: >-
+                      {{ is_state(occupancy_helper, 'off')
+                         or as_timestamp(states[occupancy_helper].last_changed, 0)
+                            == as_timestamp(trigger.to_state.last_changed, 0) }}
+                  - condition: and
+                    conditions: !input temporary_end_conditions
+                  - sequence: !input temporary_end_actions
+
+      - alias: "Automatische Ankunft"
+        conditions:
+          - condition: template
+            value_template: >-
+              {{ trigger.id in ['tracker_home', 'activity_home', 'lock_home', 'entry_first', 'custom_home']
+                 or (trigger.id == 'reconcile' and anyone_home_now | bool) }}
+          - condition: state
+            entity_id: !input occupancy_helper
+            state: "off"
+          - condition: and
+            conditions: !input home_conditions
+        sequence:
+          - action: input_boolean.turn_on
+            target:
+              entity_id: !input occupancy_helper
+
+      - alias: "Automatische Abwesenheit mit Sicherheitsprüfungen"
+        conditions:
+          - condition: template
+            value_template: >-
+              {{ trigger.id in ['tracker_away', 'activity_away', 'exit_first', 'custom_away']
+                 or (trigger.id == 'reconcile'
+                    and (all_trackers_away_stable | bool or all_activity_quiet_stable | bool)) }}
+          - condition: state
+            entity_id: !input occupancy_helper
+            state: "on"
+          - condition: template
+            value_template: "{{ guest_mode == '' or is_state(guest_mode, 'off') }}"
+          - condition: template
+            value_template: "{{ blockers_clear | bool }}"
+          - condition: template
+            value_template: "{{ known_trackers_safe | bool }}"
+          - condition: template
+            value_template: "{{ activity_clear | bool }}"
+          - condition: template
+            value_template: "{{ absence_evidence_ok | bool }}"
+          - condition: and
+            conditions: !input away_conditions
+        sequence:
+          - action: input_boolean.turn_off
+            target:
+              entity_id: !input occupancy_helper
