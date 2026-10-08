@@ -681,8 +681,12 @@ actions:
                and sleep_clear | bool
                and (guest_mode == '' or is_state(guest_mode, 'off'))
                and absence_evidence_ok | bool) }}
+  - variables:
       diagnostic_line: >-
         {% set ns = namespace(reasons=[]) %}
+        {% if occupancy_helper == '' and tracked_entities | count == 0 %}
+          {% set ns.reasons = ns.reasons + ['Select people/device trackers or an occupancy switch'] %}
+        {% endif %}
         {% if guest_mode != '' and not is_state(guest_mode, 'off') %}
           {% set ns.reasons = ns.reasons + ['Guest mode=' ~ states(guest_mode)] %}
         {% endif %}
