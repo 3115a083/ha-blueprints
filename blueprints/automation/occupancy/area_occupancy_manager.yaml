@@ -1,50 +1,45 @@
 blueprint:
-  name: "Area Occupancy Manager | Anwesenheit & Abwesenheit"
+  name: "Area Occupancy Manager | Presence & Vacancy"
   description: >-
-    Verwaltet die Belegung eines Hauses oder Bereichs über einen input_boolean-Helfer.
-    Kombiniert Tracker, Bewegungs-/Präsenzsensoren, optionale Türsequenzen und
-    frei definierbare Trigger mit Sicherheitsbedingungen (Gäste, zusätzliche
-    Präsenzsensoren, Stabilitätszeiten). Aktionen für Ankunft, Abwesenheit
-    und zeitlich begrenzte Abläufe sind frei konfigurierbar.
-    Optional: Diagnose im input_text-Helfer, Schlafmodus und neustartfeste
-    Folgeaktionen mit input_datetime + input_boolean.
+    Track occupied/vacant status for any home or area using an input_boolean.
+    Combine person/device tracking, motion or presence sensors, door sequences,
+    custom triggers, and fail-safe guards. Configure any Home Assistant actions
+    for vacancy, arrival, and optional temporary operations.
+    Supports guest mode, sleep mode, diagnostics, and restart-resilient timers.
 
-    WICHTIG: Ohne geeignete Anwesenheitssensoren oder aktivierten Gastmodus
-    kann eine schlafende oder bewegungslose Person nicht sicher erkannt werden.
-    Schlösser, Alarmanlagen und Garagentore nur mit geeigneten zusätzlichen
-    Sicherheitsbedingungen automatisieren. Ohne die optionalen Timer-Helfer
-    bleibt die bisherige Verzögerung nicht neustartfest.
+    IMPORTANT: Motion sensors alone cannot reliably detect sleeping or still
+    people. Configure reliable sensors or explicit guest/sleep protection.
+    Alarms, locks, and garage doors need independent safety checks.
+    Legacy in-memory delays do not survive Home Assistant restarts.
 
-    Eigene Trigger müssen die Trigger-ID `custom_away` oder `custom_home`
-    erhalten, damit ihre Richtung erkannt wird.
+    Set custom trigger IDs to custom_away or custom_home.
   domain: automation
   author: "3115a083"
   homeassistant:
     min_version: "2024.10.0"
   input:
     base:
-      name: "01 | Belegungsstatus"
+      name: "01 | Occupancy state"
       icon: mdi:home-account
       input:
         occupancy_helper:
-          name: "Belegungsstatus (Pflicht)"
+          name: "Occupancy helper (required)"
           description: >-
-            Vorher angelegter Umschalter (input_boolean).
-            EIN = belegt, AUS = leer. Manuelle Umschaltung löst ebenfalls Aktionen aus.
+            Create an input_boolean first. ON means occupied; OFF means vacant. Manually toggling it also
+            runs the configured actions.
           selector:
             entity:
               filter:
                 domain: input_boolean
     automatic_evidence:
-      name: "02 | Automatische Erkennung"
+      name: "02 | Automatic detection"
       icon: mdi:account-search
       input:
         tracked_entities:
-          name: "Personen / Geräte (optional)"
+          name: "People / device trackers (optional)"
           description: >-
-            Alle hier gewählten Tracker müssen für eine sichere Abwesenheit
-            außerhalb von 'home' sein. Andere Zonen (z. B. work) gelten als weg.
-            Unbekannte/nicht verfügbare Zustände verhindern Abwesenheit.
+            All selected trackers must leave the home zone to confirm vacancy. Other zones count as away.
+            Unknown and unavailable trackers always block vacancy.
           default: []
           selector:
             entity:
@@ -53,7 +48,7 @@ blueprint:
                 - domain: person
                 - domain: device_tracker
         tracked_away_minutes:
-          name: "Mindestdauer Tracker weg (Minuten)"
+          name: "Minimum away time (minutes)"
           default: 3
           selector:
             number:
@@ -63,10 +58,10 @@ blueprint:
               unit_of_measurement: min
               mode: box
         activity_sensors:
-          name: "Bewegungs-/Präsenzsensoren (optional)"
+          name: "Motion / presence sensors (optional)"
           description: >-
-            Für automatische Abwesenheit müssen alle Sensoren AUS und stabil sein.
-            Bei Bewegung/Präsenz (EIN) wird die Belegung sofort wieder hergestellt.
+            All selected sensors must be OFF and stable before vacancy. Any ON sensor immediately restores
+            occupancy. PIR motion alone cannot detect sleeping people.
           default: []
           selector:
             entity:
@@ -74,10 +69,10 @@ blueprint:
               filter:
                 domain: binary_sensor
         inactive_minutes:
-          name: "Inaktivität für Abwesenheit (Minuten)"
+          name: "Minimum inactivity (minutes)"
           description: >-
-            Für PIR-Bewegungsmelder eher großzügig wählen; für mmWave-Präsenzsensoren
-            darf die Dauer kürzer sein.
+            Use a generous period for PIR detectors. Reliable mmWave presence sensors may use shorter
+            periods.
           default: 20
           selector:
             number:
@@ -87,52 +82,49 @@ blueprint:
               unit_of_measurement: min
               mode: box
         evidence_policy:
-          name: "Wie werden Abwesenheitssignale kombiniert?"
+          name: "How should vacancy evidence be combined?"
           description: >-
-            ALLE (empfohlen): Alle ausgewählten Tracker UND alle Sensoren
-            müssen Abwesenheit bestätigen. EINES: Ein Signal reicht, sofern
-            keine Sicherheitssperre greift. Bekannte anwesende Tracker und
-            aktive/ausgefallene Bewegungssensoren sperren IMMER. Türfolge/Custom-Trigger
-            gelten in EINES ebenfalls als unabhängiges Signal.
+            ALL (recommended) requires every configured tracker and activity sensor to confirm absence. ANY
+            accepts one qualifying signal, completed exit sequence, or custom vacancy trigger. Known
+            occupants, active/unavailable sensors, and enabled guest/sleep modes always block automatic
+            vacancy.
           default: all
           selector:
             select:
               options:
-                - label: "ALLE konfigurierten Methoden (sicherer)"
+                - label: "ALL configured methods (safer)"
                   value: all
-                - label: "EINE Methode reicht (schneller)"
+                - label: "ANY one qualifying method (faster)"
                   value: any
     safeguards:
-      name: "03 | Schutz vor Fehlentscheidungen"
+      name: "03 | False-vacancy protection"
       icon: mdi:shield-check
       input:
         guest_mode:
-          name: "Gastmodus-Sperre (optional)"
+          name: "Guest mode / vacancy blocker (optional)"
           description: >-
-            Solange dieser input_boolean EIN oder nicht verfügbar ist,
-            wird automatische Abwesenheit verhindert. Manuelle Änderung
-            des Belegungsstatus bleibt möglich.
+            ON means guests are present: restore occupancy and block automatic vacancy. Unknown or
+            unavailable status also blocks vacancy. Manual occupancy changes remain possible.
           default: ""
           selector:
             entity:
               filter:
                 domain: input_boolean
         sleep_mode:
-          name: "Schlafmodus (optional)"
+          name: "Sleep mode (optional)"
           description: >-
-            EIN bedeutet weiterhin belegt und blockiert automatische Abwesenheit,
-            selbst bei längerer Bewegungslosigkeit. Beim Aktivieren wird belegt gesetzt.
-            unknown/unavailable sperrt vorsichtshalber Abwesenheit.
+            ON explicitly indicates occupancy and prevents vacancy even without activity. Turning it ON
+            restores occupancy. Unknown or unavailable status blocks vacancy.
           default: ""
           selector:
             entity:
               filter:
                 domain: input_boolean
         blocking_sensors:
-          name: "Weitere Anwesenheits-Sperrsensoren (optional)"
+          name: "Additional presence protection sensors (optional)"
           description: >-
-            Abwesenheit nur, wenn ALLE AUS sind. EIN / unknown / unavailable
-            blockieren die Umschaltung, etwa bei mmWave oder Bettsensoren.
+            Every sensor must be OFF for automatic vacancy. ON restores occupancy. Unknown and unavailable
+            also block vacancy. Use reliable bed or mmWave presence sensors.
           default: []
           selector:
             entity:
@@ -140,73 +132,75 @@ blueprint:
               filter:
                 domain: binary_sensor
         away_conditions:
-          name: "Zusätzliche Bedingungen für automatisch leer"
+          name: "Additional conditions for automatic vacancy"
           description: >-
-            Beliebige HA-Bedingungen, alle müssen zutreffen. Beispiel:
-            Niemand im Gästezimmer, ein Freigabe-Helfer steht auf EIN.
-            Diese Bedingungen werden vor dem Umschalten geprüft.
+            All custom Home Assistant conditions must pass before marking the area vacant. Use for extra
+            sensors or authorization checks.
           default: []
           selector:
             condition: {}
         home_conditions:
-          name: "Zusätzliche Bedingungen für automatisch belegt"
+          name: "Additional conditions for automatic occupancy"
           description: >-
-            Nur für die automatische Statusänderung, nicht für manuelle
-            Statuswechsel. Licht nur nachts besser direkt in den Ankunftsaktionen steuern.
+            These apply to automatic arrival, but not manual changes or explicit guest/sleep presence. For
+            night-only lights, put sun/lux conditions in the arrival actions instead.
           default: []
           selector:
             condition: {}
     diagnostics:
-      name: "04 | Diagnose"
+      name: "04 | Diagnostics"
       icon: mdi:clipboard-text-search
       collapsed: true
       input:
         diagnostics_enabled:
-          name: "Diagnosemodus aktivieren"
-          description: "Begründungen in Automations-Traces und optional im Text-Helfer bereitstellen."
+          name: "Enable diagnostics"
+          description: >-
+            Expose reasons in automation traces and optionally in a text helper.
           default: false
           selector:
             boolean: {}
         diagnostics_text:
-          name: "Diagnose-Texthelfer (optional)"
+          name: "Diagnostics text helper (optional)"
           description: >-
-            Vorher angelegter input_text-Helfer. Zeigt den aktuellen Grund für
-            Belegung oder blockierte Abwesenheit auf dem Dashboard.
-            Empfohlen: maximale Länge 255 Zeichen.
+            Select an input_text helper to show occupancy and reasons on a dashboard. Up to 255 characters
+            can be stored.
           default: ""
           selector:
             entity:
               filter:
                 domain: input_text
         diagnostics_log:
-          name: "Blockierte Abwesenheitsversuche ins Systemprotokoll schreiben"
-          description: "Nur bei passenden Abwesenheitstriggern, nicht jede Minute."
+          name: "Log blocked vacancy attempts"
+          description: >-
+            Write system-log entries for relevant vacancy events. This does not log every minute.
           default: false
           selector:
             boolean: {}
     entrances:
-      name: "05 | Türen und zusätzliche Trigger"
+      name: "05 | Doors and custom triggers"
       icon: mdi:door
       collapsed: true
       input:
         exit_first_door:
-          name: "Türfolge: Tür 1 (optional)"
-          description: "AUS -> EIN, dann Tür 2: Auszug. Umgekehrte Reihenfolge: Ankunft."
+          name: "Door sequence: door 1 (optional)"
+          description: >-
+            Door 1 ON then door 2 ON indicates exit; the reverse order indicates entry.
           default: ""
           selector:
             entity:
               filter:
                 domain: binary_sensor
         exit_second_door:
-          name: "Türfolge: Tür 2 (optional)"
-          description: "Nur zusammen mit Tür 1 konfigurieren. Der 2. Kontakt muss nach dem 1. auslösen."
+          name: "Door sequence: door 2 (optional)"
+          description: >-
+            Configure together with door 1. The second contact must open after the first.
           default: ""
           selector:
             entity:
               filter:
                 domain: binary_sensor
         door_route_seconds:
-          name: "Maximale Zeit zwischen Tür 1 und 2 (Sekunden)"
+          name: "Maximum time between door contacts (seconds)"
           default: 30
           selector:
             number:
@@ -216,78 +210,75 @@ blueprint:
               unit_of_measurement: s
               mode: box
         arrival_lock:
-          name: "Türschloss entriegelt = Ankunft (optional)"
+          name: "Unlocked door means arrival (optional)"
           description: >-
-            Ein Entriegelungsereignis kann Belegung herstellen. Nicht allein
-            auf ungesicherte, ferngesteuerte Entsperrungen vertrauen.
+            Unlocking a selected lock can restore occupancy. Apply extra arrival conditions for remote
+            unlocks.
           default: ""
           selector:
             entity:
               filter:
                 domain: lock
         extra_away_triggers:
-          name: "Eigene Abwesenheits-Trigger (optional)"
+          name: "Custom vacancy triggers (optional)"
           description: >-
-            Frei wählbar. WICHTIG: Im Trigger die Trigger-ID `custom_away`
-            einstellen. Alle Sicherheitsbedingungen werden danach geprüft.
+            Use any Home Assistant trigger, and set its ID to custom_away. Vacancy protection still applies.
           default: []
           selector:
             trigger: {}
         extra_home_triggers:
-          name: "Eigene Ankunfts-Trigger (optional)"
+          name: "Custom arrival triggers (optional)"
           description: >-
-            Frei wählbar. WICHTIG: Im Trigger die Trigger-ID `custom_home`
-            einstellen, sonst wird das Ereignis nicht verarbeitet.
+            Use any Home Assistant trigger, and set its ID to custom_home.
           default: []
           selector:
             trigger: {}
     actions_section:
-      name: "06 | Aktionen"
+      name: "06 | Actions"
       icon: mdi:lightning-bolt
       input:
         away_actions:
-          name: "Aktionen bei leer"
+          name: "Actions when the area becomes vacant"
           description: >-
-            Beliebige Aktionen wie alarm_control_panel.alarm_arm_away,
-            light.turn_off, media_player.media_stop, lock.lock oder Skripte.
-            Laufen einmalig bei EIN -> AUS des Belegungshelfers.
+            Choose any Home Assistant actions: alarm, lights, media, locks, or scripts. Runs once on ON to
+            OFF.
           default: []
           selector:
             action: {}
         home_actions:
-          name: "Aktionen bei belegt"
+          name: "Actions when the area becomes occupied"
           description: >-
-            Beliebige Aktionen, einmalig bei AUS -> EIN. Nacht-/Tageslichtlogik
-            mit 'Wenn/Dann' und einer Sonnenbedingung direkt hier konfigurieren.
+            Choose any Home Assistant actions. Runs once on OFF to ON. For night-only lighting add a sun or
+            lux condition here.
           default: []
           selector:
             action: {}
     temporary:
-      name: "07 | Zeitlich begrenzte Ankunftsaktionen"
+      name: "07 | Temporary arrival actions"
       icon: mdi:timer-outline
       collapsed: true
       input:
         temporary_enabled:
-          name: "Temporäre Aktionen aktivieren"
+          name: "Enable temporary arrival actions"
           default: false
           selector:
             boolean: {}
         temporary_start_conditions:
-          name: "Nur starten, wenn ..."
+          name: "Only start when ..."
           description: >-
-            Zum Beispiel: Handy mit Auto per Bluetooth verbunden.
-            Alle Bedingungen müssen erfüllt sein.
+            All conditions must pass. Example: a phone is connected to its owner's car by Bluetooth.
           default: []
           selector:
             condition: {}
         temporary_start_actions:
-          name: "Aktionen sofort bei Ankunft"
-          description: "Beispiel: Garagentor öffnen."
+          name: "Actions immediately on arrival"
+          description: >-
+            Example: open the garage door after suitable safety checks.
           default: []
           selector:
             action: {}
         temporary_minutes:
-          name: "Dauer bis zur Folgeaktion (Minuten)"
+          name: "Delay before follow-up (minutes)"
           default: 40
           selector:
             number:
@@ -297,42 +288,41 @@ blueprint:
               unit_of_measurement: min
               mode: box
         temporary_deadline:
-          name: "Neustartfest: Ablaufzeitpunkt (optional)"
+          name: "Restart-resilient: deadline helper (optional)"
           description: >-
-            input_datetime-Helfer mit DATUM UND UHRZEIT. Nur zusammen mit
-            "Vorgang aktiv" konfigurieren. Beim Start wird das Ziel gespeichert.
+            Select an input_datetime with BOTH date and time. Configure together with the pending helper.
           default: ""
           selector:
             entity:
               filter:
                 domain: input_datetime
         temporary_pending:
-          name: "Neustartfest: Vorgang aktiv (optional)"
+          name: "Restart-resilient: pending helper (optional)"
           description: >-
-            Separater input_boolean-Helfer. Nur zusammen mit Ablaufzeitpunkt
-            konfigurieren. Initial AUS setzen. Schaltet nach einmaligem Ablauf AUS.
+            Select a dedicated input_boolean, initially OFF. Configure together with the deadline helper. It
+            is cleared before running the follow-up.
           default: ""
           selector:
             entity:
               filter:
                 domain: input_boolean
         temporary_end_conditions:
-          name: "Sicherheitsbedingungen für Folgeaktion"
+          name: "Safety checks before follow-up"
           description: >-
-            Für ein Garagentor zwingend passende Hindernis- und Torstatus-
-            Prüfungen ergänzen. Sonst können die Folgeaktionen unabhängig
-            vom aktuellen Belegungsstatus ausgeführt werden.
+            For garage doors, verify obstacle protection and door state. Failed checks skip the follow-up;
+            they do not trigger retries.
           default: []
           selector:
             condition: {}
         temporary_end_actions:
-          name: "Aktionen nach Ablauf"
-          description: "Beispiel: Garagentor schließen. Mit beiden Timer-Helfern neustartfest (Prüfung spätestens nach ca. einer Minute)."
+          name: "Actions after the delay"
+          description: >-
+            Example: close a garage door. With both timer helpers, the deadline is recovered after restarts
+            and checked roughly once per minute.
           default: []
           selector:
             action: {}
 
-# Blueprint-Eingaben für Template- und Action-Kontext verfügbar machen.
 trigger_variables:
   _trackers: !input tracked_entities
   _activity: !input activity_sensors
@@ -340,6 +330,8 @@ trigger_variables:
   _first_door: !input exit_first_door
   _second_door: !input exit_second_door
   _sleep: !input sleep_mode
+  _guest: !input guest_mode
+  _blockers: !input blocking_sensors
 
 variables:
   occupancy_helper: !input occupancy_helper
@@ -362,8 +354,8 @@ variables:
   temporary_deadline: !input temporary_deadline
   temporary_pending: !input temporary_pending
 
+# Custom trigger IDs: custom_away or custom_home.
 triggers:
-  # Ein individueller Trigger muss in HA die passende Trigger-ID erhalten.
   - triggers: !input extra_away_triggers
   - triggers: !input extra_home_triggers
   - trigger: template
@@ -401,6 +393,14 @@ triggers:
       {{ _activity | count > 0
          and (expand(_activity) | selectattr('state', 'eq', 'on') | list | count) > 0 }}
   - trigger: template
+    id: guest_home
+    value_template: "{{ _guest != '' and is_state(_guest, 'on') }}"
+  - trigger: template
+    id: blocker_home
+    value_template: >-
+      {{ _blockers | count > 0
+         and (expand(_blockers) | selectattr('state', 'eq', 'on') | list | count) > 0 }}
+  - trigger: template
     id: sleep_home
     value_template: "{{ _sleep != '' and is_state(_sleep, 'on') }}"
   - trigger: template
@@ -428,19 +428,17 @@ triggers:
   - trigger: time_pattern
     id: reconcile
     minutes: "/5"
-  # Verzögerte Aktionen nach einem Neustart spätestens im nächsten Minuten-Takt nachholen.
   - trigger: time_pattern
     id: temporary_tick
     minutes: "*"
 
-# Parallele Ausführungen sind nötig, damit die 40-Minuten-Aktion
-# neue Statuswechsel nicht blockiert oder durch 'restart' abgebrochen wird.
+# Parallel runs keep legacy delayed actions from blocking status transitions.
 mode: parallel
 max: 20
 max_exceeded: warning
 
+# Recheck current sensors at action time.
 actions:
-  # Türfolge ist absichtlich ein echtes geordnetes Ereignisfenster.
   - if:
       - condition: template
         value_template: "{{ trigger.id == 'exit_first' }}"
@@ -462,7 +460,6 @@ actions:
           seconds: !input door_route_seconds
         continue_on_timeout: false
 
-  # Re-evaluation in jedem Lauf: keine veralteten Beweise verwenden.
   - variables:
       all_trackers_away_stable: >-
         {% set ns = namespace(valid=(tracked_entities | count > 0)) %}
@@ -511,6 +508,9 @@ actions:
       sleep_clear: "{{ sleep_mode == '' or is_state(sleep_mode, 'off') }}"
       anyone_home_now: >-
         {{ (sleep_mode != '' and is_state(sleep_mode, 'on'))
+            or (guest_mode != '' and is_state(guest_mode, 'on'))
+            or (blocking_sensors | count > 0
+              and (expand(blocking_sensors) | selectattr('state', 'eq', 'on') | list | count) > 0)
             or (tracked_entities | count > 0
              and (expand(tracked_entities) | selectattr('state', 'eq', 'home') | list | count) > 0)
            or (activity_sensors | count > 0
@@ -527,15 +527,14 @@ actions:
              or trigger.id in ['exit_first', 'custom_away'] }}
         {% endif %}
 
-  # Diagnosevariablen erscheinen immer in den Traces; Schreiben/Logging sind optional.
   - variables:
       diagnostic_line: >-
         {% set ns = namespace(reasons=[]) %}
         {% if guest_mode != '' and not is_state(guest_mode, 'off') %}
-          {% set ns.reasons = ns.reasons + ['Gästemodus=' ~ states(guest_mode)] %}
+          {% set ns.reasons = ns.reasons + ['Guest mode=' ~ states(guest_mode)] %}
         {% endif %}
         {% if sleep_mode != '' and not is_state(sleep_mode, 'off') %}
-          {% set ns.reasons = ns.reasons + ['Schlafmodus=' ~ states(sleep_mode)] %}
+          {% set ns.reasons = ns.reasons + ['Sleep mode=' ~ states(sleep_mode)] %}
         {% endif %}
         {% for entity in blocking_sensors %}
           {% if not is_state(entity, 'off') %}
@@ -553,20 +552,20 @@ actions:
           {% endif %}
         {% endfor %}
         {% if tracked_entities | count > 0 and not all_trackers_away_stable | bool and known_trackers_safe | bool %}
-          {% set ns.reasons = ns.reasons + ['Tracker-Mindestdauer läuft'] %}
+          {% set ns.reasons = ns.reasons + ['Tracker away delay not met'] %}
         {% endif %}
         {% if activity_sensors | count > 0 and not all_activity_quiet_stable | bool and activity_clear | bool %}
-          {% set ns.reasons = ns.reasons + ['Inaktivitätsdauer läuft'] %}
+          {% set ns.reasons = ns.reasons + ['Inactivity delay not met'] %}
         {% endif %}
         {% if not absence_evidence_ok | bool and ns.reasons | count == 0 %}
-          {% set ns.reasons = ns.reasons + ['Abwesenheitsnachweis fehlt'] %}
+          {% set ns.reasons = ns.reasons + ['No valid vacancy evidence'] %}
         {% endif %}
         {% if is_state(occupancy_helper, 'off') %}
-          {{ 'LEER | ' ~ (ns.reasons | join('; ') if ns.reasons else 'kein erkannter Blocker') }}
+          {{ 'VACANT | ' ~ (ns.reasons | join('; ') if ns.reasons else 'No active blockers') }}
         {% elif ns.reasons %}
-          {{ 'BELEGT | Abwesenheit gesperrt: ' ~ (ns.reasons | join('; ')) }}
+          {{ 'OCCUPIED | Vacancy blocked: ' ~ (ns.reasons | join('; ')) }}
         {% else %}
-          {{ 'BELEGT | Abwesenheit möglich, warte auf Auslöser/Zusatzbedingungen' }}
+          {{ 'OCCUPIED | Awaiting trigger / extra conditions' }}
         {% endif %}
   - variables:
       diagnostic_value: >-
@@ -577,9 +576,11 @@ actions:
       - condition: template
         value_template: >-
           {{ diagnostics_enabled and diagnostics_text != ''
+             and states(diagnostics_text) not in ['unknown', 'unavailable']
              and states(diagnostics_text) != diagnostic_value | trim }}
     then:
       - action: input_text.set_value
+        continue_on_error: true
         target:
           entity_id: "{{ diagnostics_text }}"
         data:
@@ -595,12 +596,13 @@ actions:
                   or (guest_mode != '' and not is_state(guest_mode, 'off'))) }}
     then:
       - action: system_log.write
+        continue_on_error: true
         data:
           level: info
-          message: "Area Occupancy Manager: {{ diagnostic_line | trim }} (Trigger: {{ trigger.id }})"
+          message: "Area Occupancy Manager: {{ diagnostic_line | trim }} (trigger: {{ trigger.id }})"
 
   - choose:
-      - alias: "Neustartfeste Folgeaktion: fälliger Auftrag"
+      - alias: "Restart-resilient follow-up: deadline reached"
         conditions:
           - condition: template
             value_template: >-
@@ -610,7 +612,6 @@ actions:
                  and as_timestamp(states(temporary_deadline), 0) > 0
                  and as_timestamp(states(temporary_deadline), 0) <= as_timestamp(now()) }}
         sequence:
-          # Direkt vor Ausführung erneut prüfen; danach Auftrag zuerst deaktivieren.
           - condition: template
             value_template: >-
               {{ is_state(temporary_pending, 'on')
@@ -629,17 +630,18 @@ actions:
                     value_template: "{{ diagnostics_enabled and diagnostics_log }}"
                 then:
                   - action: system_log.write
+                    continue_on_error: true
                     data:
                       level: warning
-                      message: "Area Occupancy Manager: Folgeaktion wegen Sicherheitsbedingungen ausgelassen."
+                      message: "Area Occupancy Manager: follow-up skipped because safety conditions failed."
 
-      - alias: "Belegungsstatus hat auf leer gewechselt"
+      - alias: "Occupancy changed to vacant"
         conditions:
           - condition: template
             value_template: "{{ trigger.id == 'became_away' }}"
         sequence: !input away_actions
 
-      - alias: "Belegungsstatus hat auf belegt gewechselt"
+      - alias: "Occupancy changed to occupied"
         conditions:
           - condition: template
             value_template: "{{ trigger.id == 'became_home' }}"
@@ -655,13 +657,11 @@ actions:
                   - condition: and
                     conditions: !input temporary_start_conditions
                   - choose:
-                      - alias: "Neustartfeste Zeitaktion"
+                      - alias: "Restart-resilient timer"
                         conditions:
                           - condition: template
                             value_template: "{{ temporary_deadline != '' and temporary_pending != '' }}"
                         sequence:
-                          # Vor dem Öffnen speichern, damit auch ein unerwarteter Absturz
-                          # zwischen Startaktion und Zeitplanung den Auftrag nicht verliert.
                           - action: input_datetime.set_datetime
                             target:
                               entity_id: "{{ temporary_deadline }}"
@@ -675,7 +675,6 @@ actions:
                                 value_template: "{{ temporary_enabled }}"
                             then: !input temporary_start_actions
                     default:
-                      # Kompatibilität mit bestehenden Installationen ohne Timer-Helfer.
                       - if:
                           - condition: template
                             value_template: "{{ temporary_enabled }}"
@@ -692,21 +691,21 @@ actions:
                             conditions: !input temporary_end_conditions
                         then: !input temporary_end_actions
 
-      - alias: "Automatische Ankunft"
+      - alias: "Automatic arrival"
         conditions:
           - condition: template
             value_template: >-
-              {{ trigger.id in ['tracker_home', 'activity_home', 'lock_home', 'entry_first', 'custom_home', 'sleep_home']
+              {{ trigger.id in ['tracker_home', 'activity_home', 'lock_home', 'entry_first', 'custom_home', 'sleep_home', 'guest_home', 'blocker_home']
                  or (trigger.id == 'reconcile' and anyone_home_now | bool) }}
           - condition: state
             entity_id: !input occupancy_helper
             state: "off"
-          # Ein ausdrücklich aktivierter Schlafmodus ist bereits ein Belegungsbeweis.
-          # Andere automatische Ankunftssignale bleiben an home_conditions gebunden.
           - condition: or
             conditions:
               - condition: template
-                value_template: "{{ sleep_mode != '' and is_state(sleep_mode, 'on') }}"
+                value_template: >-
+                  {{ (sleep_mode != '' and is_state(sleep_mode, 'on'))
+                     or (guest_mode != '' and is_state(guest_mode, 'on')) }}
               - condition: and
                 conditions: !input home_conditions
         sequence:
@@ -714,7 +713,7 @@ actions:
             target:
               entity_id: !input occupancy_helper
 
-      - alias: "Automatische Abwesenheit mit Sicherheitsprüfungen"
+      - alias: "Automatic vacancy with safety checks"
         conditions:
           - condition: template
             value_template: >-
