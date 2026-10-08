@@ -917,7 +917,7 @@ actions:
                                (is_state(occupancy_helper, 'off') or
                                 (states[occupancy_helper] is not none and
                                  as_timestamp(states[occupancy_helper].last_changed, 0)
-                                   <= (arrival_started_at | float))))
+                                   <= (arrival_started_at | float)))
                              or (occupancy_helper == '' and
                                  (tracked_entities | count > 0) and
                                  (expand(tracked_entities) | selectattr('state', 'eq', 'home') | list | count > 0)
@@ -969,7 +969,7 @@ actions:
                                (is_state(occupancy_helper, 'off') or
                                 (states[occupancy_helper] is not none and
                                  as_timestamp(states[occupancy_helper].last_changed, 0)
-                                   <= (arrival_started_at | float))))
+                                   <= (arrival_started_at | float)))
                              or (occupancy_helper == '' and
                                  (tracked_entities | count > 0) and
                                  (expand(tracked_entities) | selectattr('state', 'eq', 'home') | list | count > 0)
@@ -1021,7 +1021,7 @@ actions:
                                (is_state(occupancy_helper, 'off') or
                                 (states[occupancy_helper] is not none and
                                  as_timestamp(states[occupancy_helper].last_changed, 0)
-                                   <= (arrival_started_at | float))))
+                                   <= (arrival_started_at | float)))
                              or (occupancy_helper == '' and
                                  (tracked_entities | count > 0) and
                                  (expand(tracked_entities) | selectattr('state', 'eq', 'home') | list | count > 0)
