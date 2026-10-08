@@ -738,38 +738,87 @@ actions:
           message: "Area Occupancy Manager: {{ diagnostic_line | trim }} (trigger: {{ trigger.id }})"
 
   - choose:
-      - alias: "Restart-resilient follow-up: deadline reached"
+      - alias: "Process all independent restart-resilient timed actions"
         conditions:
           - condition: template
-            value_template: >-
-              {{ trigger.id == 'temporary_tick' and temporary_enabled
-                 and temporary_deadline != '' and temporary_pending != ''
-                 and is_state(temporary_pending, 'on')
-                 and as_timestamp(states(temporary_deadline), 0) > 0
-                 and as_timestamp(states(temporary_deadline), 0) <= as_timestamp(now()) }}
+            value_template: "{{ trigger.id == 'temporary_tick' }}"
         sequence:
-          - condition: template
-            value_template: >-
-              {{ is_state(temporary_pending, 'on')
-                 and as_timestamp(states(temporary_deadline), 0) > 0
-                 and as_timestamp(states(temporary_deadline), 0) <= as_timestamp(now()) }}
-          - action: input_boolean.turn_off
-            target:
-              entity_id: "{{ temporary_pending }}"
-          - if:
-              - condition: and
-                conditions: !input temporary_end_conditions
-            then: !input temporary_end_actions
-            else:
-              - if:
+          - parallel:
+              - sequence:
                   - condition: template
-                    value_template: "{{ diagnostics_enabled and diagnostics_log }}"
-                then:
-                  - action: system_log.write
-                    continue_on_error: true
-                    data:
-                      level: warning
-                      message: "Area Occupancy Manager: follow-up skipped because safety conditions failed."
+                    value_template: >-
+                      {{ temporary_enabled and temporary_helpers_unique | bool
+                         and temporary_deadline != '' and temporary_pending != ''
+                         and is_state(temporary_pending, 'on')
+                         and as_timestamp(states(temporary_deadline), 0) > 0
+                         and as_timestamp(states(temporary_deadline), 0) <= as_timestamp(now()) }}
+                  - action: input_boolean.turn_off
+                    target:
+                      entity_id: "{{ temporary_pending }}"
+                  - if:
+                      - condition: and
+                        conditions: !input temporary_end_conditions
+                    then: !input temporary_end_actions
+                    else:
+                      - if:
+                          - condition: template
+                            value_template: "{{ diagnostics_enabled and diagnostics_log }}"
+                        then:
+                          - action: system_log.write
+                            continue_on_error: true
+                            data:
+                              level: warning
+                              message: "Area Occupancy Manager: timed action 1 skipped because safety conditions failed."
+              - sequence:
+                  - condition: template
+                    value_template: >-
+                      {{ temporary_2_enabled and temporary_helpers_unique | bool
+                         and temporary_2_deadline != '' and temporary_2_pending != ''
+                         and is_state(temporary_2_pending, 'on')
+                         and as_timestamp(states(temporary_2_deadline), 0) > 0
+                         and as_timestamp(states(temporary_2_deadline), 0) <= as_timestamp(now()) }}
+                  - action: input_boolean.turn_off
+                    target:
+                      entity_id: "{{ temporary_2_pending }}"
+                  - if:
+                      - condition: and
+                        conditions: !input temporary_2_end_conditions
+                    then: !input temporary_2_end_actions
+                    else:
+                      - if:
+                          - condition: template
+                            value_template: "{{ diagnostics_enabled and diagnostics_log }}"
+                        then:
+                          - action: system_log.write
+                            continue_on_error: true
+                            data:
+                              level: warning
+                              message: "Area Occupancy Manager: timed action 2 skipped because safety conditions failed."
+              - sequence:
+                  - condition: template
+                    value_template: >-
+                      {{ temporary_3_enabled and temporary_helpers_unique | bool
+                         and temporary_3_deadline != '' and temporary_3_pending != ''
+                         and is_state(temporary_3_pending, 'on')
+                         and as_timestamp(states(temporary_3_deadline), 0) > 0
+                         and as_timestamp(states(temporary_3_deadline), 0) <= as_timestamp(now()) }}
+                  - action: input_boolean.turn_off
+                    target:
+                      entity_id: "{{ temporary_3_pending }}"
+                  - if:
+                      - condition: and
+                        conditions: !input temporary_3_end_conditions
+                    then: !input temporary_3_end_actions
+                    else:
+                      - if:
+                          - condition: template
+                            value_template: "{{ diagnostics_enabled and diagnostics_log }}"
+                        then:
+                          - action: system_log.write
+                            continue_on_error: true
+                            data:
+                              level: warning
+                              message: "Area Occupancy Manager: timed action 3 skipped because safety conditions failed."
 
       - alias: "Occupancy changed to vacant"
         conditions:
@@ -787,7 +836,7 @@ actions:
               - sequence:
                   - condition: template
                     value_template: >-
-                      {{ temporary_enabled and (
+                      {{ temporary_enabled and temporary_helpers_unique | bool and (
                             (temporary_deadline == '' and temporary_pending == '')
                             or (temporary_deadline != '' and temporary_pending != '')) }}
                   - condition: and
@@ -826,6 +875,268 @@ actions:
                           - condition: and
                             conditions: !input temporary_end_conditions
                         then: !input temporary_end_actions
+              - sequence:
+                  - condition: template
+                    value_template: >-
+                      {{ temporary_2_enabled and temporary_helpers_unique | bool
+                         and temporary_2_deadline != '' and temporary_2_pending != ''
+                         and is_state(temporary_2_pending, 'on')
+                         and as_timestamp(states(temporary_2_deadline), 0) > 0
+                         and as_timestamp(states(temporary_2_deadline), 0) <= as_timestamp(now()) }}
+                  - action: input_boolean.turn_off
+                    target:
+                      entity_id: "{{ temporary_2_pending }}"
+                  - if:
+                      - condition: and
+                        conditions: !input temporary_2_end_conditions
+                    then: !input temporary_2_end_actions
+                    else:
+                      - if:
+                          - condition: template
+                            value_template: "{{ diagnostics_enabled and diagnostics_log }}"
+                        then:
+                          - action: system_log.write
+                            continue_on_error: true
+                            data:
+                              level: warning
+                              message: "Area Occupancy Manager: timed action 1 skipped because safety conditions failed."
+              - sequence:
+                  - condition: template
+                    value_template: >-
+                      {{ temporary_2_2_enabled and temporary_helpers_unique | bool
+                         and temporary_2_2_deadline != '' and temporary_2_2_pending != ''
+                         and is_state(temporary_2_2_pending, 'on')
+                         and as_timestamp(states(temporary_2_2_deadline), 0) > 0
+                         and as_timestamp(states(temporary_2_2_deadline), 0) <= as_timestamp(now()) }}
+                  - action: input_boolean.turn_off
+                    target:
+                      entity_id: "{{ temporary_2_2_pending }}"
+                  - if:
+                      - condition: and
+                        conditions: !input temporary_2_2_end_conditions
+                    then: !input temporary_2_2_end_actions
+                    else:
+                      - if:
+                          - condition: template
+                            value_template: "{{ diagnostics_enabled and diagnostics_log }}"
+                        then:
+                          - action: system_log.write
+                            continue_on_error: true
+                            data:
+                              level: warning
+                              message: "Area Occupancy Manager: timed action 2 skipped because safety conditions failed."
+              - sequence:
+                  - condition: template
+                    value_template: >-
+                      {{ temporary_2_3_enabled and temporary_helpers_unique | bool
+                         and temporary_2_3_deadline != '' and temporary_2_3_pending != ''
+                         and is_state(temporary_2_3_pending, 'on')
+                         and as_timestamp(states(temporary_2_3_deadline), 0) > 0
+                         and as_timestamp(states(temporary_2_3_deadline), 0) <= as_timestamp(now()) }}
+                  - action: input_boolean.turn_off
+                    target:
+                      entity_id: "{{ temporary_2_3_pending }}"
+                  - if:
+                      - condition: and
+                        conditions: !input temporary_2_3_end_conditions
+                    then: !input temporary_2_3_end_actions
+                    else:
+                      - if:
+                          - condition: template
+                            value_template: "{{ diagnostics_enabled and diagnostics_log }}"
+                        then:
+                          - action: system_log.write
+                            continue_on_error: true
+                            data:
+                              level: warning
+                              message: "Area Occupancy Manager: timed action 3 skipped because safety conditions failed."
+
+      - alias: "Occupancy changed to vacant"
+        conditions:
+          - condition: template
+            value_template: "{{ trigger.id == 'became_away' }}"
+        sequence: !input away_actions
+
+      - alias: "Occupancy changed to occupied"
+        conditions:
+          - condition: template
+            value_template: "{{ trigger.id == 'became_home' }}"
+        sequence:
+          - parallel:
+              - sequence: !input home_actions
+              - sequence:
+                  - condition: template
+                    value_template: >-
+                      {{ temporary_2_enabled and temporary_helpers_unique | bool and (
+                            (temporary_2_deadline == '' and temporary_2_pending == '')
+                            or (temporary_2_deadline != '' and temporary_2_pending != '')) }}
+                  - condition: and
+                    conditions: !input temporary_2_start_conditions
+                  - choose:
+                      - alias: "Restart-resilient timer"
+                        conditions:
+                          - condition: template
+                            value_template: "{{ temporary_2_deadline != '' and temporary_2_pending != '' }}"
+                        sequence:
+                          - action: input_datetime.set_datetime
+                            target:
+                              entity_id: "{{ temporary_2_deadline }}"
+                            data:
+                              timestamp: "{{ (as_timestamp(now()) + (temporary_2_minutes | int * 60)) | int }}"
+                          - action: input_boolean.turn_on
+                            target:
+                              entity_id: "{{ temporary_2_pending }}"
+                          - if:
+                              - condition: template
+                                value_template: "{{ temporary_2_enabled }}"
+                            then: !input temporary_2_start_actions
+                    default:
+                      - if:
+                          - condition: template
+                            value_template: "{{ temporary_2_enabled }}"
+                        then: !input temporary_2_start_actions
+                      - delay:
+                          minutes: !input temporary_2_minutes
+                      - condition: template
+                        value_template: >-
+                          {{ is_state(occupancy_helper, 'off')
+                             or as_timestamp(states[occupancy_helper].last_changed, 0)
+                                == as_timestamp(trigger.to_state.last_changed, 0) }}
+                      - if:
+                          - condition: and
+                            conditions: !input temporary_2_end_conditions
+                        then: !input temporary_2_end_actions
+              - sequence:
+                  - condition: template
+                    value_template: >-
+                      {{ temporary_3_enabled and temporary_helpers_unique | bool
+                         and temporary_3_deadline != '' and temporary_3_pending != ''
+                         and is_state(temporary_3_pending, 'on')
+                         and as_timestamp(states(temporary_3_deadline), 0) > 0
+                         and as_timestamp(states(temporary_3_deadline), 0) <= as_timestamp(now()) }}
+                  - action: input_boolean.turn_off
+                    target:
+                      entity_id: "{{ temporary_3_pending }}"
+                  - if:
+                      - condition: and
+                        conditions: !input temporary_3_end_conditions
+                    then: !input temporary_3_end_actions
+                    else:
+                      - if:
+                          - condition: template
+                            value_template: "{{ diagnostics_enabled and diagnostics_log }}"
+                        then:
+                          - action: system_log.write
+                            continue_on_error: true
+                            data:
+                              level: warning
+                              message: "Area Occupancy Manager: timed action 1 skipped because safety conditions failed."
+              - sequence:
+                  - condition: template
+                    value_template: >-
+                      {{ temporary_3_2_enabled and temporary_helpers_unique | bool
+                         and temporary_3_2_deadline != '' and temporary_3_2_pending != ''
+                         and is_state(temporary_3_2_pending, 'on')
+                         and as_timestamp(states(temporary_3_2_deadline), 0) > 0
+                         and as_timestamp(states(temporary_3_2_deadline), 0) <= as_timestamp(now()) }}
+                  - action: input_boolean.turn_off
+                    target:
+                      entity_id: "{{ temporary_3_2_pending }}"
+                  - if:
+                      - condition: and
+                        conditions: !input temporary_3_2_end_conditions
+                    then: !input temporary_3_2_end_actions
+                    else:
+                      - if:
+                          - condition: template
+                            value_template: "{{ diagnostics_enabled and diagnostics_log }}"
+                        then:
+                          - action: system_log.write
+                            continue_on_error: true
+                            data:
+                              level: warning
+                              message: "Area Occupancy Manager: timed action 2 skipped because safety conditions failed."
+              - sequence:
+                  - condition: template
+                    value_template: >-
+                      {{ temporary_3_3_enabled and temporary_helpers_unique | bool
+                         and temporary_3_3_deadline != '' and temporary_3_3_pending != ''
+                         and is_state(temporary_3_3_pending, 'on')
+                         and as_timestamp(states(temporary_3_3_deadline), 0) > 0
+                         and as_timestamp(states(temporary_3_3_deadline), 0) <= as_timestamp(now()) }}
+                  - action: input_boolean.turn_off
+                    target:
+                      entity_id: "{{ temporary_3_3_pending }}"
+                  - if:
+                      - condition: and
+                        conditions: !input temporary_3_3_end_conditions
+                    then: !input temporary_3_3_end_actions
+                    else:
+                      - if:
+                          - condition: template
+                            value_template: "{{ diagnostics_enabled and diagnostics_log }}"
+                        then:
+                          - action: system_log.write
+                            continue_on_error: true
+                            data:
+                              level: warning
+                              message: "Area Occupancy Manager: timed action 3 skipped because safety conditions failed."
+
+      - alias: "Occupancy changed to vacant"
+        conditions:
+          - condition: template
+            value_template: "{{ trigger.id == 'became_away' }}"
+        sequence: !input away_actions
+
+      - alias: "Occupancy changed to occupied"
+        conditions:
+          - condition: template
+            value_template: "{{ trigger.id == 'became_home' }}"
+        sequence:
+          - parallel:
+              - sequence: !input home_actions
+              - sequence:
+                  - condition: template
+                    value_template: >-
+                      {{ temporary_3_enabled and temporary_helpers_unique | bool and (
+                            (temporary_3_deadline == '' and temporary_3_pending == '')
+                            or (temporary_3_deadline != '' and temporary_3_pending != '')) }}
+                  - condition: and
+                    conditions: !input temporary_3_start_conditions
+                  - choose:
+                      - alias: "Restart-resilient timer"
+                        conditions:
+                          - condition: template
+                            value_template: "{{ temporary_3_deadline != '' and temporary_3_pending != '' }}"
+                        sequence:
+                          - action: input_datetime.set_datetime
+                            target:
+                              entity_id: "{{ temporary_3_deadline }}"
+                            data:
+                              timestamp: "{{ (as_timestamp(now()) + (temporary_3_minutes | int * 60)) | int }}"
+                          - action: input_boolean.turn_on
+                            target:
+                              entity_id: "{{ temporary_3_pending }}"
+                          - if:
+                              - condition: template
+                                value_template: "{{ temporary_3_enabled }}"
+                            then: !input temporary_3_start_actions
+                    default:
+                      - if:
+                          - condition: template
+                            value_template: "{{ temporary_3_enabled }}"
+                        then: !input temporary_3_start_actions
+                      - delay:
+                          minutes: !input temporary_3_minutes
+                      - condition: template
+                        value_template: >-
+                          {{ is_state(occupancy_helper, 'off')
+                             or as_timestamp(states[occupancy_helper].last_changed, 0)
+                                == as_timestamp(trigger.to_state.last_changed, 0) }}
+                      - if:
+                          - condition: and
+                            conditions: !input temporary_3_end_conditions
+                        then: !input temporary_3_end_actions
 
       - alias: "Automatic arrival"
         conditions:
