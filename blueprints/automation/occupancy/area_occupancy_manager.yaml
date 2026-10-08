@@ -1,9 +1,11 @@
 blueprint:
   name: "Area Occupancy Manager | Presence & Vacancy"
   description: >-
-    Track occupied/vacant status for any home or area using an input_boolean.
-    Combine person/device tracking, motion or presence sensors, door sequences,
-    custom triggers, and fail-safe guards. Configure any Home Assistant actions
+    Derive area occupancy automatically from persons, device trackers, and optional
+    presence signals. An input_boolean can publish the computed result for dashboards
+    and other automations, but is not required for tracker-only operation.
+    Combine motion/presence sensors, door sequences, custom triggers and safety guards.
+    Configure any Home Assistant actions
     for vacancy, arrival, and multiple independent timed operations.
     Supports guest mode, sleep mode, diagnostics, and restart-resilient timers per timed action.
 
@@ -19,14 +21,18 @@ blueprint:
     min_version: "2024.10.0"
   input:
     base:
-      name: "01 | Occupancy state"
+      name: "01 | Occupancy source and published state"
       icon: mdi:home-account
       input:
         occupancy_helper:
-          name: "Occupancy helper (required)"
+          name: "Published occupancy switch (optional)"
           description: >-
-            Create an input_boolean first. ON means occupied; OFF means vacant. Manually toggling it also
-            runs the configured actions.
+            Optional input_boolean OUTPUT. The automation sets it automatically: ON = occupied,
+            OFF = vacant. Other automations can read this switch. Do not manually set it for
+            normal arrivals/departures. If left empty, selected person/device trackers directly
+            trigger arrival/vacancy actions; for multi-sensor occupancy, guest-aware status,
+            door/custom trigger workflows, or persistent shared status, select a switch.
+          default: ""
           selector:
             entity:
               filter:
@@ -36,10 +42,13 @@ blueprint:
       icon: mdi:account-search
       input:
         tracked_entities:
-          name: "People / device trackers (optional)"
+          name: "People / device trackers (required without a switch)"
           description: >-
-            All selected trackers must leave the home zone to confirm vacancy. Other zones count as away.
-            Unknown and unavailable trackers always block vacancy.
+            Select one or more person or device_tracker entities. They are the primary presence
+            sources: a person at home means occupied; ALL selected trackers away long enough
+            means potentially vacant. Other zones count as away. Unknown and unavailable states
+            block vacancy. Without a published occupancy switch, only these tracker transitions
+            can directly run arrival/vacancy actions.
           default: []
           selector:
             entity:
@@ -455,6 +464,7 @@ trigger_variables:
   _sleep: !input sleep_mode
   _guest: !input guest_mode
   _blockers: !input blocking_sensors
+  _occupancy_helper: !input occupancy_helper
 
 variables:
   occupancy_helper: !input occupancy_helper
@@ -548,16 +558,13 @@ triggers:
   - trigger: template
     id: entry_first
     value_template: "{{ _first_door != '' and _second_door != '' and is_state(_second_door, 'on') }}"
-  - trigger: state
+  # Template triggers keep the optional helper valid when left empty.
+  - trigger: template
     id: became_away
-    entity_id: !input occupancy_helper
-    from: "on"
-    to: "off"
-  - trigger: state
+    value_template: "{{ _occupancy_helper != '' and is_state(_occupancy_helper, 'off') }}"
+  - trigger: template
     id: became_home
-    entity_id: !input occupancy_helper
-    from: "off"
-    to: "on"
+    value_template: "{{ _occupancy_helper != '' and is_state(_occupancy_helper, 'on') }}"
   - trigger: homeassistant
     id: reconcile
     event: start
@@ -664,6 +671,16 @@ actions:
         {% endif %}
 
   - variables:
+      derived_vacant: >-
+        {{ (occupancy_helper != '' and is_state(occupancy_helper, 'off'))
+           or (occupancy_helper == '' and tracked_entities | count > 0
+               and all_trackers_away_stable | bool
+               and known_trackers_safe | bool
+               and activity_clear | bool
+               and blockers_clear | bool
+               and sleep_clear | bool
+               and (guest_mode == '' or is_state(guest_mode, 'off'))
+               and absence_evidence_ok | bool) }}
       diagnostic_line: >-
         {% set ns = namespace(reasons=[]) %}
         {% if guest_mode != '' and not is_state(guest_mode, 'off') %}
@@ -696,7 +713,7 @@ actions:
         {% if not absence_evidence_ok | bool and ns.reasons | count == 0 %}
           {% set ns.reasons = ns.reasons + ['No valid vacancy evidence'] %}
         {% endif %}
-        {% if is_state(occupancy_helper, 'off') %}
+        {% if derived_vacant | bool %}
           {{ 'VACANT | ' ~ (ns.reasons | join('; ') if ns.reasons else 'No active blockers') }}
         {% elif ns.reasons %}
           {{ 'OCCUPIED | Vacancy blocked: ' ~ (ns.reasons | join('; ')) }}
@@ -820,17 +837,46 @@ actions:
                               level: warning
                               message: "Area Occupancy Manager: timed action 3 skipped because safety conditions failed."
 
-      - alias: "Occupancy changed to vacant"
+      - alias: "Area became vacant"
         conditions:
-          - condition: template
-            value_template: "{{ trigger.id == 'became_away' }}"
+          - condition: or
+            conditions:
+              - condition: template
+                value_template: "{{ occupancy_helper != '' and trigger.id == 'became_away' }}"
+              - condition: and
+                conditions:
+                  - condition: template
+                    value_template: >-
+                      {{ occupancy_helper == '' and trigger.id == 'tracker_away'
+                         and tracked_entities | count > 0
+                         and known_trackers_safe | bool
+                         and activity_clear | bool
+                         and blockers_clear | bool
+                         and sleep_clear | bool
+                         and absence_evidence_ok | bool
+                         and (guest_mode == '' or is_state(guest_mode, 'off')) }}
+                  - condition: and
+                    conditions: !input away_conditions
         sequence: !input away_actions
 
-      - alias: "Occupancy changed to occupied"
+      - alias: "Area became occupied"
         conditions:
-          - condition: template
-            value_template: "{{ trigger.id == 'became_home' }}"
+          - condition: or
+            conditions:
+              - condition: template
+                value_template: "{{ occupancy_helper != '' and trigger.id == 'became_home' }}"
+              - condition: and
+                conditions:
+                  - condition: template
+                    value_template: >-
+                      {{ occupancy_helper == '' and trigger.id == 'tracker_home'
+                         and tracked_entities | count > 0 }}
+                  - condition: and
+                    conditions: !input home_conditions
         sequence:
+          - variables:
+              arrival_started_at: "{{ as_timestamp(now()) }}"
+              arrival_started_at_datetime: "{{ now() }}"
           - parallel:
               - sequence: !input home_actions
               - sequence:
@@ -868,9 +914,16 @@ actions:
                           minutes: !input temporary_minutes
                       - condition: template
                         value_template: >-
-                          {{ is_state(occupancy_helper, 'off')
-                             or as_timestamp(states[occupancy_helper].last_changed, 0)
-                                == as_timestamp(trigger.to_state.last_changed, 0) }}
+                          {{ (occupancy_helper != '' and
+                               (is_state(occupancy_helper, 'off') or
+                                (states[occupancy_helper] is not none and
+                                 as_timestamp(states[occupancy_helper].last_changed, 0)
+                                   <= arrival_started_at)))
+                             or (occupancy_helper == '' and
+                                 (tracked_entities | count > 0) and
+                                 (expand(tracked_entities) | selectattr('state', 'eq', 'home') | list | count > 0)
+                                 and (expand(tracked_entities) | selectattr('last_changed', 'gt',
+                                      arrival_started_at_datetime) | list | count == 0)) }}
                       - if:
                           - condition: and
                             conditions: !input temporary_end_conditions
@@ -910,9 +963,16 @@ actions:
                           minutes: !input temporary_2_minutes
                       - condition: template
                         value_template: >-
-                          {{ is_state(occupancy_helper, 'off')
-                             or as_timestamp(states[occupancy_helper].last_changed, 0)
-                                == as_timestamp(trigger.to_state.last_changed, 0) }}
+                          {{ (occupancy_helper != '' and
+                               (is_state(occupancy_helper, 'off') or
+                                (states[occupancy_helper] is not none and
+                                 as_timestamp(states[occupancy_helper].last_changed, 0)
+                                   <= arrival_started_at)))
+                             or (occupancy_helper == '' and
+                                 (tracked_entities | count > 0) and
+                                 (expand(tracked_entities) | selectattr('state', 'eq', 'home') | list | count > 0)
+                                 and (expand(tracked_entities) | selectattr('last_changed', 'gt',
+                                      arrival_started_at_datetime) | list | count == 0)) }}
                       - if:
                           - condition: and
                             conditions: !input temporary_2_end_conditions
@@ -952,9 +1012,16 @@ actions:
                           minutes: !input temporary_3_minutes
                       - condition: template
                         value_template: >-
-                          {{ is_state(occupancy_helper, 'off')
-                             or as_timestamp(states[occupancy_helper].last_changed, 0)
-                                == as_timestamp(trigger.to_state.last_changed, 0) }}
+                          {{ (occupancy_helper != '' and
+                               (is_state(occupancy_helper, 'off') or
+                                (states[occupancy_helper] is not none and
+                                 as_timestamp(states[occupancy_helper].last_changed, 0)
+                                   <= arrival_started_at)))
+                             or (occupancy_helper == '' and
+                                 (tracked_entities | count > 0) and
+                                 (expand(tracked_entities) | selectattr('state', 'eq', 'home') | list | count > 0)
+                                 and (expand(tracked_entities) | selectattr('last_changed', 'gt',
+                                      arrival_started_at_datetime) | list | count == 0)) }}
                       - if:
                           - condition: and
                             conditions: !input temporary_3_end_conditions
@@ -963,12 +1030,13 @@ actions:
       - alias: "Automatic arrival"
         conditions:
           - condition: template
+            value_template: "{{ occupancy_helper != '' }}"
+          - condition: template
             value_template: >-
               {{ trigger.id in ['tracker_home', 'activity_home', 'lock_home', 'entry_first', 'custom_home', 'sleep_home', 'guest_home', 'blocker_home']
                  or (trigger.id == 'reconcile' and anyone_home_now | bool) }}
-          - condition: state
-            entity_id: !input occupancy_helper
-            state: "off"
+          - condition: template
+            value_template: "{{ is_state(occupancy_helper, 'off') }}"
           - condition: or
             conditions:
               - condition: template
@@ -985,13 +1053,14 @@ actions:
       - alias: "Automatic vacancy with safety checks"
         conditions:
           - condition: template
+            value_template: "{{ occupancy_helper != '' }}"
+          - condition: template
             value_template: >-
               {{ trigger.id in ['tracker_away', 'activity_away', 'exit_first', 'custom_away']
                  or (trigger.id == 'reconcile'
                     and (all_trackers_away_stable | bool or all_activity_quiet_stable | bool)) }}
-          - condition: state
-            entity_id: !input occupancy_helper
-            state: "on"
+          - condition: template
+            value_template: "{{ is_state(occupancy_helper, 'on') }}"
           - condition: template
             value_template: "{{ guest_mode == '' or is_state(guest_mode, 'off') }}"
           - condition: template
