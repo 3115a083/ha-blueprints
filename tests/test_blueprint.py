@@ -349,11 +349,10 @@ class BlueprintTests(unittest.TestCase):
             strings.append(group["name"])
             for spec in group["input"].values():
                 strings.extend([spec.get("name", ""), spec.get("description", "")])
-        forbidden = ("Anwesenheit", "Abwesenheit", "Belegung", "Gäste",
-                     "Schlafmodus", "Türfolge", "Aktionen", "Neustartfest")
         for value in strings:
-            for word in forbidden:
-                self.assertNotIn(word, value)
+            self.assertTrue(value.isascii(), f"Non-English UI character in: {value!r}")
+        self.assertIn("Presence & Vacancy", self.data["blueprint"]["name"])
+        self.assertIn("Automatic detection", str(strings))
 
     def test_vacancy_guards_remain_mandatory(self):
         checks = str(self.data["actions"][-1]["choose"][-1]["conditions"])
