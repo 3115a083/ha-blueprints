@@ -93,6 +93,7 @@ class BlueprintTests(unittest.TestCase):
         activity: dict[str, tuple[str, int]] | None = None,
         blockers: dict[str, tuple[str, int]] | None = None,
         guest: str = "off",
+        sleep: str = "off",
         policy: str = "all",
         trigger: str = "tracker_away",
     ) -> dict:
@@ -106,12 +107,19 @@ class BlueprintTests(unittest.TestCase):
             for e, (state, age) in d.items()
         }
         entities["input_boolean.guests"] = Entity(guest, 1, now)
+        entities["input_boolean.sleep"] = Entity(sleep, 1, now)
+        entities["input_boolean.area"] = Entity("on", 10, now)
         states = States(entities)
         context = {
             "tracked_entities": list(trackers),
             "activity_sensors": list(activity),
             "blocking_sensors": list(blockers),
             "guest_mode": "input_boolean.guests",
+            "sleep_mode": "input_boolean.sleep",
+            "occupancy_helper": "input_boolean.area",
+            "diagnostics_text": "",
+            "diagnostics_enabled": False,
+            "diagnostics_log": False,
             "tracked_away_minutes": 3,
             "inactive_minutes": 20,
             "evidence_policy": policy,
@@ -120,6 +128,7 @@ class BlueprintTests(unittest.TestCase):
             "now": lambda: now,
             "as_timestamp": lambda x, default=0: x.timestamp() if hasattr(x, "timestamp") else default,
             "is_state": lambda e, wanted: states(e) == wanted,
+            "state_attr": lambda e, attr: None,
             "expand": lambda entities: [states.entities[e] for e in entities if e in states.entities],
         }
         var_blocks = [action["variables"] for action in self.data["actions"] if "variables" in action]
@@ -194,6 +203,57 @@ class BlueprintTests(unittest.TestCase):
             activity={"binary_sensor.motion": ("off", 12)},
         )
         self.assertFalse(self.true(c["absence_evidence_ok"]))
+
+    def test_sleep_mode_blocks_away_and_reports_reason(self):
+        for sleep_state in ("on", "unknown", "unavailable"):
+            with self.subTest(state=sleep_state):
+                c = self.evaluate(trackers={"person.a": ("not_home", 40)}, sleep=sleep_state)
+                self.assertFalse(self.true(c["sleep_clear"]))
+                self.assertIn("Schlafmodus", c["diagnostic_line"])
+        c = self.evaluate(trackers={"person.a": ("not_home", 40)}, sleep="off")
+        self.assertTrue(self.true(c["sleep_clear"]))
+
+    def test_sleep_mode_works_as_arrival_evidence(self):
+        self.assertIn("sleep_home", {t.get("id") for t in self.data["triggers"]})
+        c = self.evaluate(sleep="on")
+        self.assertTrue(self.true(c["anyone_home_now"]))
+        arrival = next(b for b in self.data["actions"][-1]["choose"] if b["alias"] == "Automatische Ankunft")
+        self.assertIn("sleep_home", arrival["conditions"][0]["value_template"])
+        away = self.data["actions"][-1]["choose"][-1]
+        self.assertTrue(any("sleep_clear" in str(cond) for cond in away["conditions"]))
+
+    def test_diagnosis_contains_blocker_reasons(self):
+        c = self.evaluate(
+            trackers={"person.a": ("home", 10)},
+            activity={"binary_sensor.motion": ("unavailable", 10)},
+            guest="on",
+        )
+        self.assertIn("Gästemodus=on", c["diagnostic_line"])
+        self.assertIn("person.a=home", c["diagnostic_line"])
+        self.assertIn("binary_sensor.motion=unavailable", c["diagnostic_line"])
+        self.assertIn("BELEGT", c["diagnostic_line"])
+        self.assertIn("255", next(a["variables"]["diagnostic_value"] for a in self.data["actions"] if "diagnostic_value" in a.get("variables", {})))
+
+    def test_persistent_timer_is_restart_recoverable_and_guarded(self):
+        self.assertEqual(self.inputs["temporary_deadline"]["default"], "")
+        self.assertEqual(self.inputs["temporary_pending"]["default"], "")
+        self.assertEqual(self.inputs["temporary_enabled"]["default"], False)
+        self.assertIn("temporary_tick", {t.get("id") for t in self.data["triggers"]})
+        main = self.data["actions"][-1]["choose"]
+        due = next(b for b in main if "fälliger Auftrag" in b["alias"])
+        text = str(due)
+        self.assertIn("temporary_pending", text)
+        self.assertIn("temporary_deadline", text)
+        self.assertIn("input_boolean.turn_off", text)
+        self.assertIn("!input temporary_end_conditions", text)
+        self.assertIn("!input temporary_end_actions", text)
+        self.assertLess(text.find("input_boolean.turn_off"), text.find("!input temporary_end_actions"))
+        arrival = next(b for b in main if b["alias"] == "Belegungsstatus hat auf belegt gewechselt")
+        arrival_text = str(arrival)
+        self.assertIn("input_datetime.set_datetime", arrival_text)
+        self.assertIn("input_boolean.turn_on", arrival_text)
+        self.assertIn("!input temporary_start_actions", arrival_text)
+        self.assertIn("!input temporary_minutes", arrival_text)  # legacy fallback
 
     def test_custom_trigger_no_builtin_sources(self):
         c = self.evaluate(trigger="custom_away")
