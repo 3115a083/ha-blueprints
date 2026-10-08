@@ -925,7 +925,7 @@ actions:
                                     | map(attribute='last_changed')
                                     | map('as_timestamp')
                                     | select('gt', arrival_started_at | float)
-                                    | list | count) == 0)) }}
+                                    | list | count) == 0))) }}
                       - if:
                           - condition: and
                             conditions: !input temporary_end_conditions
@@ -977,7 +977,7 @@ actions:
                                     | map(attribute='last_changed')
                                     | map('as_timestamp')
                                     | select('gt', arrival_started_at | float)
-                                    | list | count) == 0)) }}
+                                    | list | count) == 0))) }}
                       - if:
                           - condition: and
                             conditions: !input temporary_2_end_conditions
@@ -1029,7 +1029,7 @@ actions:
                                     | map(attribute='last_changed')
                                     | map('as_timestamp')
                                     | select('gt', arrival_started_at | float)
-                                    | list | count) == 0)) }}
+                                    | list | count) == 0))) }}
                       - if:
                           - condition: and
                             conditions: !input temporary_3_end_conditions
