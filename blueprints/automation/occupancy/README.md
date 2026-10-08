@@ -64,27 +64,46 @@ For example, to turn on lights only after dark, add an **If/Then** block with a 
 
 Actions only fire when the occupancy helper genuinely changes state.
 
-## Temporary arrival actions
+## Multiple independent timed arrival actions
 
-Example: open a garage when the returning person's phone is connected to their car, then consider closing it after **40 minutes**:
+The blueprint includes **three independent timed action profiles** in sections 07, 08, and 09. All can start from the **same occupancy transition**, each with its own:
 
-1. Enable temporary actions.
-2. Choose start conditions requiring a valid car Bluetooth connection and suitable authorization.
-3. Choose safe start actions, e.g. `cover.open_cover`.
-4. Set the duration to **40 minutes**.
-5. Add independent end safety checks for obstruction detection, door state, etc. Configure `cover.close_cover` as the follow-up action.
+- **Enable switch**, start conditions, and immediately executed Home Assistant actions.
+- **Delay** (1 to 1440 minutes), independent from the other profiles.
+- **Follow-up safety conditions** and follow-up Home Assistant actions.
+- Optional **dedicated deadline and pending helpers** for restart-resilient scheduling.
 
-### Restart-resilient follow-up
+The first profile keeps all its existing input IDs and default delay (40 minutes), so previously saved automations remain compatible. The second profile defaults to 30 minutes, the third to 15 minutes; all delays are editable.
 
-Create **both** helpers:
-- `input_datetime` with **date and time**, for example `input_datetime.garage_close_due`.
-- `input_boolean`, initially **OFF**, for example `input_boolean.garage_close_pending`.
+### Example: garage and front door
 
-Select both in section **07 | Temporary arrival actions**. The deadline and pending flag are saved before the initial action. After a Home Assistant restart or automation reload, the blueprint checks for due follow-ups about every minute. The pending flag is cleared before the follow-up runs, so failed safety conditions cause the action to be **skipped**, not endlessly retried. A new arrival replaces the previously pending due time.
+| Configuration | Timed action 1: Garage | Timed action 2: Front door |
+| --- | --- | --- |
+| Start condition | Phone connected to the car, arrival authorized | Door lock is currently locked and unlocking is authorized |
+| Immediate action | `cover.open_cover` | `lock.unlock` |
+| Delay | **40 minutes** | **30 minutes** |
+| Follow-up checks | No obstruction, cover can safely close | Door safely closed, no conflicting access condition |
+| Follow-up action | `cover.close_cover` | `lock.lock` |
+| Dedicated timer helpers | Garage deadline + garage pending | Door deadline + door pending |
 
-Without both helpers, the original in-memory delay remains supported but **does not survive a restart**. If exactly one helper is configured, temporary actions do not run. Unavailable or invalid saved deadlines do not cause automatic closing; inspect and reset pending state manually when needed.
+Each enabled profile runs **independently**: both may start together, and one completing or failing a safety check does not cancel the other. Each profile also has its own pending flag and expiry timestamp, so a new arrival replaces the old schedule **only for that same profile**.
 
-**Important:** Never rely on automation alone for a motorized garage door's obstacle protection. Use built-in motor safety systems and independently verified sensors. Test the setup before enabling automatic closing.
+Avoid automatically unlocking external doors based solely on a tracker entering the home zone. Use explicit authorization and suitable security conditions.
+
+### Restart-resilient timers for each profile
+
+For **each enabled profile**, create two **unique** Home Assistant helpers:
+
+1. One `input_datetime` with **both date and time**, for example `input_datetime.garage_due` and `input_datetime.door_due`.
+2. One `input_boolean`, initially **OFF**, for example `input_boolean.garage_pending` and `input_boolean.door_pending`.
+
+Assign the pair in the corresponding profile. **Never reuse the same deadline or pending helper across two profiles.** If any helper is shared between profiles, timed operations stop for safety until the configuration is corrected.
+
+Saved deadlines are checked roughly once per minute, including after Home Assistant restarts and automation reloads. If two profiles are due together, their follow-ups are executed in parallel. Their pending flags are cleared before evaluating end conditions, preventing repeated execution if a safety check fails. If a deadline is invalid or a helper is unavailable, the follow-up is not executed.
+
+**Fallback:** If *both* helpers of an enabled profile are left empty, that profile uses a normal in-memory delay. This is compatible with earlier installations, but the delayed follow-up does **not** survive Home Assistant restarts/reloads. If *only one* helper is selected, that profile does not start.
+
+For all garage/lock automations, provide independent safety sensors and end-condition checks. Home Assistant automations are not a substitute for a garage motor's built-in obstruction safety or for lock security policies.
 
 ## Restart behavior, limitations, and tests
 
