@@ -701,8 +701,14 @@ actions:
           - condition: state
             entity_id: !input occupancy_helper
             state: "off"
-          - condition: and
-            conditions: !input home_conditions
+          # Ein ausdrücklich aktivierter Schlafmodus ist bereits ein Belegungsbeweis.
+          # Andere automatische Ankunftssignale bleiben an home_conditions gebunden.
+          - condition: or
+            conditions:
+              - condition: template
+                value_template: "{{ sleep_mode != '' and is_state(sleep_mode, 'on') }}"
+              - condition: and
+                conditions: !input home_conditions
         sequence:
           - action: input_boolean.turn_on
             target:
