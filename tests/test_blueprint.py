@@ -252,62 +252,109 @@ class BlueprintTests(unittest.TestCase):
         self.assertEqual(invalid, [])
 
     def test_persistent_timer_due_guard(self):
+        """Each deadline is evaluated independently against its own helpers."""
         import types
 
-        due = next(
-            b for b in self.data["actions"][-1]["choose"]
-            if "deadline reached" in b["alias"]
-        )
-        template = self.env.from_string(due["conditions"][0]["value_template"])
+        main = self.data["actions"][-1]["choose"]
+        due = next(b for b in main if b["alias"].startswith("Process all independent"))
+        self.assertIn("temporary_tick", due["conditions"][0]["value_template"])
+        branches = due["sequence"][0]["parallel"]
+        self.assertEqual(len(branches), 3)
         now = dt.datetime(2026, 10, 8, 8, 0, tzinfo=dt.timezone.utc)
 
         def timestamp(value, default=0):
             try:
-                if isinstance(value, dt.datetime):
-                    return value.timestamp()
                 return dt.datetime.fromisoformat(value).replace(tzinfo=dt.timezone.utc).timestamp()
             except (ValueError, TypeError):
                 return default
 
-        def evaluate(*, pending="on", deadline="2026-10-08 07:59:00", trigger="temporary_tick"):
-            entities = {"input_boolean.pending": pending, "input_datetime.deadline": deadline}
-            return template.render(
-                trigger=types.SimpleNamespace(id=trigger),
-                temporary_enabled=True,
-                temporary_deadline="input_datetime.deadline",
-                temporary_pending="input_boolean.pending",
-                is_state=lambda entity, value: entities[entity] == value,
-                states=lambda entity: entities[entity],
-                as_timestamp=timestamp,
-                now=lambda: now,
-            ).strip().lower() == "true"
+        for number, branch in enumerate(branches, start=1):
+            with self.subTest(slot=number):
+                prefix = "temporary_" if number == 1 else f"temporary_{number}_"
+                check = self.env.from_string(branch["sequence"][0]["value_template"])
+                pending_id = f"input_boolean.pending_{number}"
+                deadline_id = f"input_datetime.deadline_{number}"
 
-        self.assertTrue(evaluate())
-        self.assertFalse(evaluate(pending="off"))
-        self.assertFalse(evaluate(deadline="2026-10-08 08:01:00"))
-        self.assertFalse(evaluate(deadline="unavailable"))
-        self.assertFalse(evaluate(trigger="reconcile"))
+                def evaluate(*, pending="on", deadline="2026-10-08 07:59:00", unique=True):
+                    entities = {pending_id: pending, deadline_id: deadline}
+                    values = {
+                        prefix + "enabled": True,
+                        prefix + "deadline": deadline_id,
+                        prefix + "pending": pending_id,
+                        "temporary_helpers_unique": unique,
+                        "is_state": lambda entity, state: entities[entity] == state,
+                        "states": lambda entity: entities[entity],
+                        "as_timestamp": timestamp,
+                        "now": lambda: now,
+                    }
+                    return check.render(**values).strip().lower() == "true"
+
+                self.assertTrue(evaluate())
+                self.assertFalse(evaluate(pending="off"))
+                self.assertFalse(evaluate(deadline="2026-10-08 08:01:00"))
+                self.assertFalse(evaluate(deadline="unavailable"))
+                self.assertFalse(evaluate(unique=False))
+
+    def test_independent_timed_arrival_slots(self):
+        """One arrival runs up to three isolated routines, with their own durations."""
+        main = self.data["actions"][-1]["choose"]
+        due = next(b for b in main if b["alias"].startswith("Process all independent"))
+        branches = due["sequence"][0]["parallel"]
+        arrival = next(b for b in main if b["alias"] == "Occupancy changed to occupied")
+        parallel = arrival["sequence"][0]["parallel"]
+        self.assertEqual(len(parallel), 4)  # Home actions + 3 independent timer paths
+        self.assertEqual(len(branches), 3)
+        self.assertEqual(self.inputs["temporary_minutes"]["default"], 40)
+        self.assertEqual(self.inputs["temporary_2_minutes"]["default"], 30)
+        self.assertEqual(self.inputs["temporary_3_minutes"]["default"], 15)
+        for i in (1, 2, 3):
+            with self.subTest(slot=i):
+                prefix = "temporary_" if i == 1 else f"temporary_{i}_"
+                for name in ("enabled", "start_conditions", "start_actions", "minutes",
+                             "deadline", "pending", "end_conditions", "end_actions"):
+                    self.assertIn(prefix + name, self.inputs)
+                    self.assertIn("default", self.inputs[prefix + name])
+                self.assertIn(prefix + "deadline", str(branches[i-1]))
+                self.assertIn(prefix + "pending", str(branches[i-1]))
+                self.assertIn("input_boolean.turn_off", str(branches[i-1]))
+                self.assertIn("!input " + prefix + "end_conditions", str(branches[i-1]))
+                self.assertIn("!input " + prefix + "end_actions", str(branches[i-1]))
+                self.assertIn("input_datetime.set_datetime", str(parallel[i]))
+                self.assertIn("input_boolean.turn_on", str(parallel[i]))
+                self.assertIn("!input " + prefix + "start_actions", str(parallel[i]))
+                self.assertIn("!input " + prefix + "minutes", str(parallel[i]))
+
+    def test_reject_shared_timed_helpers(self):
+        """Reusing a helper in another slot must fail closed to prevent cross-action corruption."""
+        value = self.data["variables"]["temporary_helpers_unique"]
+        template = self.env.from_string(value)
+
+        def good(deadlines, pendings):
+            fields = {}
+            for index, (deadline, pending) in enumerate(zip(deadlines, pendings), start=1):
+                prefix = "temporary_" if index == 1 else f"temporary_{index}_"
+                fields[prefix + "deadline"] = deadline
+                fields[prefix + "pending"] = pending
+            return template.render(**fields).strip().lower() == "true"
+
+        self.assertTrue(good(["input_datetime.a", "input_datetime.b", "input_datetime.c"],
+                             ["input_boolean.a", "input_boolean.b", "input_boolean.c"]))
+        self.assertTrue(good(["", "", ""], ["", "", ""]))
+        self.assertFalse(good(["input_datetime.a", "input_datetime.a", ""],
+                              ["input_boolean.a", "input_boolean.b", ""]))
+        self.assertFalse(good(["input_datetime.a", "input_datetime.b", ""],
+                              ["input_boolean.a", "input_boolean.a", ""]))
 
     def test_persistent_timer_is_restart_recoverable_and_guarded(self):
-        self.assertEqual(self.inputs["temporary_deadline"]["default"], "")
-        self.assertEqual(self.inputs["temporary_pending"]["default"], "")
-        self.assertEqual(self.inputs["temporary_enabled"]["default"], False)
         self.assertIn("temporary_tick", {t.get("id") for t in self.data["triggers"]})
-        main = self.data["actions"][-1]["choose"]
-        due = next(b for b in main if "deadline reached" in b["alias"])
-        text = str(due)
-        self.assertIn("temporary_pending", text)
-        self.assertIn("temporary_deadline", text)
-        self.assertIn("input_boolean.turn_off", text)
-        self.assertIn("!input temporary_end_conditions", text)
-        self.assertIn("!input temporary_end_actions", text)
-        self.assertLess(text.find("input_boolean.turn_off"), text.find("!input temporary_end_actions"))
-        arrival = next(b for b in main if b["alias"] == "Occupancy changed to occupied")
-        arrival_text = str(arrival)
-        self.assertIn("input_datetime.set_datetime", arrival_text)
-        self.assertIn("input_boolean.turn_on", arrival_text)
-        self.assertIn("!input temporary_start_actions", arrival_text)
-        self.assertIn("!input temporary_minutes", arrival_text)  # legacy fallback
+        due = next(b for b in self.data["actions"][-1]["choose"]
+                   if b["alias"].startswith("Process all independent"))
+        self.assertIn("parallel", due["sequence"][0])
+        for branch in due["sequence"][0]["parallel"]:
+            sequence = branch["sequence"]
+            self.assertLess(str(sequence).find("input_boolean.turn_off"),
+                            str(sequence).find("end_actions"))
+            self.assertIn("temporary_helpers_unique", str(sequence))
 
     def test_custom_trigger_no_builtin_sources(self):
         c = self.evaluate(trigger="custom_away")
