@@ -302,7 +302,7 @@ class BlueprintTests(unittest.TestCase):
         due = next(b for b in main if b["alias"].startswith("Process all independent"))
         branches = due["sequence"][0]["parallel"]
         arrival = next(b for b in main if b["alias"] == "Occupancy changed to occupied")
-        parallel = arrival["sequence"][0]["parallel"]
+        parallel = next(action["parallel"] for action in arrival["sequence"] if "parallel" in action)
         self.assertEqual(len(parallel), 4)  # Home actions + 3 independent timer paths
         self.assertEqual(len(branches), 3)
         self.assertEqual(self.inputs["temporary_minutes"]["default"], 40)
