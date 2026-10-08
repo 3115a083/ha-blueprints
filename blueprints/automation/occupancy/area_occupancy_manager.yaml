@@ -20,26 +20,11 @@ blueprint:
   homeassistant:
     min_version: "2024.10.0"
   input:
-    base:
-      name: "01 | Occupancy source and published state"
-      icon: mdi:home-account
-      input:
-        occupancy_helper:
-          name: "Published occupancy switch (optional)"
-          description: >-
-            Optional input_boolean OUTPUT. The automation sets it automatically: ON = occupied,
-            OFF = vacant. Other automations can read this switch. Do not manually set it for
-            normal arrivals/departures. If left empty, selected person/device trackers directly
-            trigger arrival/vacancy actions; for multi-sensor occupancy, guest-aware status,
-            door/custom trigger workflows, or persistent shared status, select a switch.
-          default: ""
-          selector:
-            entity:
-              filter:
-                domain: input_boolean
     automatic_evidence:
-      name: "02 | Automatic detection"
+      name: "01 | Presence and absence triggers"
       icon: mdi:account-search
+      description: >-
+        Start here: select one or more person entities (recommended default), or device trackers. A person leaving home is a standard absence signal; arrival is detected automatically. Motion/presence sensors are optional additional evidence.
       input:
         tracked_entities:
           name: "People / device trackers (required without a switch)"
@@ -105,89 +90,11 @@ blueprint:
                   value: all
                 - label: "ANY one qualifying method (faster)"
                   value: any
-    safeguards:
-      name: "03 | False-vacancy protection"
-      icon: mdi:shield-check
-      input:
-        guest_mode:
-          name: "Guest mode / vacancy blocker (optional)"
-          description: >-
-            ON means guests are present: restore occupancy and block automatic vacancy. Unknown or
-            unavailable status also blocks vacancy. Manual occupancy changes remain possible.
-          default: ""
-          selector:
-            entity:
-              filter:
-                domain: input_boolean
-        sleep_mode:
-          name: "Sleep mode (optional)"
-          description: >-
-            ON explicitly indicates occupancy and prevents vacancy even without activity. Turning it ON
-            restores occupancy. Unknown or unavailable status blocks vacancy.
-          default: ""
-          selector:
-            entity:
-              filter:
-                domain: input_boolean
-        blocking_sensors:
-          name: "Additional presence protection sensors (optional)"
-          description: >-
-            Every sensor must be OFF for automatic vacancy. ON restores occupancy. Unknown and unavailable
-            also block vacancy. Use reliable bed or mmWave presence sensors.
-          default: []
-          selector:
-            entity:
-              multiple: true
-              filter:
-                domain: binary_sensor
-        away_conditions:
-          name: "Additional conditions for automatic vacancy"
-          description: >-
-            All custom Home Assistant conditions must pass before marking the area vacant. Use for extra
-            sensors or authorization checks.
-          default: []
-          selector:
-            condition: {}
-        home_conditions:
-          name: "Additional conditions for automatic occupancy"
-          description: >-
-            These apply to automatic arrival, but not manual changes or explicit guest/sleep presence. For
-            night-only lights, put sun/lux conditions in the arrival actions instead.
-          default: []
-          selector:
-            condition: {}
-    diagnostics:
-      name: "04 | Diagnostics"
-      icon: mdi:clipboard-text-search
-      collapsed: true
-      input:
-        diagnostics_enabled:
-          name: "Enable diagnostics"
-          description: >-
-            Expose reasons in automation traces and optionally in a text helper.
-          default: false
-          selector:
-            boolean: {}
-        diagnostics_text:
-          name: "Diagnostics text helper (optional)"
-          description: >-
-            Select an input_text helper to show occupancy and reasons on a dashboard. Up to 255 characters
-            can be stored.
-          default: ""
-          selector:
-            entity:
-              filter:
-                domain: input_text
-        diagnostics_log:
-          name: "Log blocked vacancy attempts"
-          description: >-
-            Write system-log entries for relevant vacancy events. This does not log every minute.
-          default: false
-          selector:
-            boolean: {}
     entrances:
-      name: "05 | Doors and custom triggers"
+      name: "02 | Optional door and custom triggers"
       icon: mdi:door
+      description: >-
+        Add direction-sensitive door sequences, unlock events, or custom triggers only if needed. Standard person tracking works without this section.
       collapsed: true
       input:
         exit_first_door:
@@ -243,8 +150,10 @@ blueprint:
           selector:
             trigger: {}
     actions_section:
-      name: "06 | Actions"
+      name: "03 | Actions on occupied / vacant"
       icon: mdi:lightning-bolt
+      description: >-
+        Choose what happens when occupancy changes. Use any Home Assistant actions, scripts, conditions or scenes.
       input:
         away_actions:
           name: "Actions when the area becomes vacant"
@@ -263,8 +172,10 @@ blueprint:
           selector:
             action: {}
     temporary:
-      name: "07 | Timed arrival action 1 (existing)"
+      name: "04 | Optional timed action 1"
       icon: mdi:timer-outline
+      description: >-
+        Separate arrival action with its own start conditions, actions, timer and follow-up. Existing input names remain unchanged.
       collapsed: true
       input:
         temporary_enabled:
@@ -331,10 +242,11 @@ blueprint:
           default: []
           selector:
             action: {}
-
     temporary_2:
-      name: "08 | Timed arrival action 2"
+      name: "05 | Optional timed action 2"
       icon: mdi:timer-outline
+      description: >-
+        A second independent timed action, for example lock a door 30 minutes after an authorized unlock.
       collapsed: true
       input:
         temporary_2_enabled:
@@ -394,8 +306,10 @@ blueprint:
           selector:
             action: {}
     temporary_3:
-      name: "09 | Timed arrival action 3"
+      name: "06 | Optional timed action 3"
       icon: mdi:timer-outline
+      description: >-
+        A third independent timed arrival action; configure a different duration and checks.
       collapsed: true
       input:
         temporary_3_enabled:
@@ -454,6 +368,111 @@ blueprint:
           default: []
           selector:
             action: {}
+    safeguards:
+      name: "07 | Optional occupancy safeguards"
+      icon: mdi:shield-check
+      description: >-
+        Guest and sleep modes, presence blockers and custom conditions prevent unsafe vacancy decisions. Strongly recommended when visitors or sleeping occupants may remain.
+      collapsed: true
+      input:
+        guest_mode:
+          name: "Guest mode / vacancy blocker (optional)"
+          description: >-
+            ON means guests are present: restore occupancy and block automatic vacancy. Unknown or
+            unavailable status also blocks vacancy. Manual occupancy changes remain possible.
+          default: ""
+          selector:
+            entity:
+              filter:
+                domain: input_boolean
+        sleep_mode:
+          name: "Sleep mode (optional)"
+          description: >-
+            ON explicitly indicates occupancy and prevents vacancy even without activity. Turning it ON
+            restores occupancy. Unknown or unavailable status blocks vacancy.
+          default: ""
+          selector:
+            entity:
+              filter:
+                domain: input_boolean
+        blocking_sensors:
+          name: "Additional presence protection sensors (optional)"
+          description: >-
+            Every sensor must be OFF for automatic vacancy. ON restores occupancy. Unknown and unavailable
+            also block vacancy. Use reliable bed or mmWave presence sensors.
+          default: []
+          selector:
+            entity:
+              multiple: true
+              filter:
+                domain: binary_sensor
+        away_conditions:
+          name: "Additional conditions for automatic vacancy"
+          description: >-
+            All custom Home Assistant conditions must pass before marking the area vacant. Use for extra
+            sensors or authorization checks.
+          default: []
+          selector:
+            condition: {}
+        home_conditions:
+          name: "Additional conditions for automatic occupancy"
+          description: >-
+            These apply to automatic arrival, but not manual changes or explicit guest/sleep presence. For
+            night-only lights, put sun/lux conditions in the arrival actions instead.
+          default: []
+          selector:
+            condition: {}
+    base:
+      name: "08 | Optional occupancy status output"
+      icon: mdi:home-account
+      description: >-
+        Publish the computed occupied/vacant result to a Home Assistant input_boolean so dashboards and other automations can read it. No manual toggle is needed for tracker changes.
+      collapsed: true
+      input:
+        occupancy_helper:
+          name: "Published occupancy switch (optional)"
+          description: >-
+            Optional input_boolean OUTPUT. The automation sets it automatically: ON = occupied,
+            OFF = vacant. Other automations can read this switch. Do not manually set it for
+            normal arrivals/departures. If left empty, selected person/device trackers directly
+            trigger arrival/vacancy actions; for multi-sensor occupancy, guest-aware status,
+            door/custom trigger workflows, or persistent shared status, select a switch.
+          default: ""
+          selector:
+            entity:
+              filter:
+                domain: input_boolean
+    diagnostics:
+      name: "09 | Optional diagnostics and debug"
+      icon: mdi:clipboard-text-search
+      description: >-
+        Inspect blocked transitions, write a diagnostic text helper or enable logging. Leave disabled for a simple setup.
+      collapsed: true
+      input:
+        diagnostics_enabled:
+          name: "Enable diagnostics"
+          description: >-
+            Expose reasons in automation traces and optionally in a text helper.
+          default: false
+          selector:
+            boolean: {}
+        diagnostics_text:
+          name: "Diagnostics text helper (optional)"
+          description: >-
+            Select an input_text helper to show occupancy and reasons on a dashboard. Up to 255 characters
+            can be stored.
+          default: ""
+          selector:
+            entity:
+              filter:
+                domain: input_text
+        diagnostics_log:
+          name: "Log blocked vacancy attempts"
+          description: >-
+            Write system-log entries for relevant vacancy events. This does not log every minute.
+          default: false
+          selector:
+            boolean: {}
 
 trigger_variables:
   _trackers: !input tracked_entities
