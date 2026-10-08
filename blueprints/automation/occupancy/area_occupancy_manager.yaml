@@ -837,7 +837,7 @@ actions:
                               level: warning
                               message: "Area Occupancy Manager: timed action 3 skipped because safety conditions failed."
 
-      - alias: "Area became vacant"
+      - alias: "Occupancy changed to vacant"
         conditions:
           - condition: or
             conditions:
@@ -859,7 +859,7 @@ actions:
                     conditions: !input away_conditions
         sequence: !input away_actions
 
-      - alias: "Area became occupied"
+      - alias: "Occupancy changed to occupied"
         conditions:
           - condition: or
             conditions:
@@ -876,7 +876,6 @@ actions:
         sequence:
           - variables:
               arrival_started_at: "{{ as_timestamp(now()) }}"
-              arrival_started_at_datetime: "{{ now() }}"
           - parallel:
               - sequence: !input home_actions
               - sequence:
@@ -918,12 +917,15 @@ actions:
                                (is_state(occupancy_helper, 'off') or
                                 (states[occupancy_helper] is not none and
                                  as_timestamp(states[occupancy_helper].last_changed, 0)
-                                   <= arrival_started_at)))
+                                   <= (arrival_started_at | float))))
                              or (occupancy_helper == '' and
                                  (tracked_entities | count > 0) and
                                  (expand(tracked_entities) | selectattr('state', 'eq', 'home') | list | count > 0)
-                                 and (expand(tracked_entities) | selectattr('last_changed', 'gt',
-                                      arrival_started_at_datetime) | list | count == 0)) }}
+                                 and ((expand(tracked_entities)
+                                    | map(attribute='last_changed')
+                                    | map('as_timestamp')
+                                    | select('gt', arrival_started_at | float)
+                                    | list | count) == 0)) }}
                       - if:
                           - condition: and
                             conditions: !input temporary_end_conditions
@@ -967,12 +969,15 @@ actions:
                                (is_state(occupancy_helper, 'off') or
                                 (states[occupancy_helper] is not none and
                                  as_timestamp(states[occupancy_helper].last_changed, 0)
-                                   <= arrival_started_at)))
+                                   <= (arrival_started_at | float))))
                              or (occupancy_helper == '' and
                                  (tracked_entities | count > 0) and
                                  (expand(tracked_entities) | selectattr('state', 'eq', 'home') | list | count > 0)
-                                 and (expand(tracked_entities) | selectattr('last_changed', 'gt',
-                                      arrival_started_at_datetime) | list | count == 0)) }}
+                                 and ((expand(tracked_entities)
+                                    | map(attribute='last_changed')
+                                    | map('as_timestamp')
+                                    | select('gt', arrival_started_at | float)
+                                    | list | count) == 0)) }}
                       - if:
                           - condition: and
                             conditions: !input temporary_2_end_conditions
@@ -1016,12 +1021,15 @@ actions:
                                (is_state(occupancy_helper, 'off') or
                                 (states[occupancy_helper] is not none and
                                  as_timestamp(states[occupancy_helper].last_changed, 0)
-                                   <= arrival_started_at)))
+                                   <= (arrival_started_at | float))))
                              or (occupancy_helper == '' and
                                  (tracked_entities | count > 0) and
                                  (expand(tracked_entities) | selectattr('state', 'eq', 'home') | list | count > 0)
-                                 and (expand(tracked_entities) | selectattr('last_changed', 'gt',
-                                      arrival_started_at_datetime) | list | count == 0)) }}
+                                 and ((expand(tracked_entities)
+                                    | map(attribute='last_changed')
+                                    | map('as_timestamp')
+                                    | select('gt', arrival_started_at | float)
+                                    | list | count) == 0)) }}
                       - if:
                           - condition: and
                             conditions: !input temporary_3_end_conditions
@@ -1048,7 +1056,7 @@ actions:
         sequence:
           - action: input_boolean.turn_on
             target:
-              entity_id: !input occupancy_helper
+              entity_id: "{{ occupancy_helper }}"
 
       - alias: "Automatic vacancy with safety checks"
         conditions:
@@ -1078,4 +1086,4 @@ actions:
         sequence:
           - action: input_boolean.turn_off
             target:
-              entity_id: !input occupancy_helper
+              entity_id: "{{ occupancy_helper }}"
