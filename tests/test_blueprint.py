@@ -209,7 +209,7 @@ class BlueprintTests(unittest.TestCase):
             with self.subTest(state=sleep_state):
                 c = self.evaluate(trackers={"person.a": ("not_home", 40)}, sleep=sleep_state)
                 self.assertFalse(self.true(c["sleep_clear"]))
-                self.assertIn("Schlafmodus", c["diagnostic_line"])
+                self.assertIn("Sleep mode", c["diagnostic_line"])
         c = self.evaluate(trackers={"person.a": ("not_home", 40)}, sleep="off")
         self.assertTrue(self.true(c["sleep_clear"]))
 
@@ -217,7 +217,7 @@ class BlueprintTests(unittest.TestCase):
         self.assertIn("sleep_home", {t.get("id") for t in self.data["triggers"]})
         c = self.evaluate(sleep="on")
         self.assertTrue(self.true(c["anyone_home_now"]))
-        arrival = next(b for b in self.data["actions"][-1]["choose"] if b["alias"] == "Automatische Ankunft")
+        arrival = next(b for b in self.data["actions"][-1]["choose"] if b["alias"] == "Automatic arrival")
         self.assertIn("sleep_home", arrival["conditions"][0]["value_template"])
         away = self.data["actions"][-1]["choose"][-1]
         self.assertTrue(any("sleep_clear" in str(cond) for cond in away["conditions"]))
@@ -228,10 +228,10 @@ class BlueprintTests(unittest.TestCase):
             activity={"binary_sensor.motion": ("unavailable", 10)},
             guest="on",
         )
-        self.assertIn("Gästemodus=on", c["diagnostic_line"])
+        self.assertIn("Guest mode=on", c["diagnostic_line"])
         self.assertIn("person.a=home", c["diagnostic_line"])
         self.assertIn("binary_sensor.motion=unavailable", c["diagnostic_line"])
-        self.assertIn("BELEGT", c["diagnostic_line"])
+        self.assertIn("OCCUPIED", c["diagnostic_line"])
         self.assertIn("255", next(a["variables"]["diagnostic_value"] for a in self.data["actions"] if "diagnostic_value" in a.get("variables", {})))
 
     def test_no_invalid_bare_sequence_actions(self):
@@ -256,7 +256,7 @@ class BlueprintTests(unittest.TestCase):
 
         due = next(
             b for b in self.data["actions"][-1]["choose"]
-            if "fälliger Auftrag" in b["alias"]
+            if "deadline reached" in b["alias"]
         )
         template = self.env.from_string(due["conditions"][0]["value_template"])
         now = dt.datetime(2026, 10, 8, 8, 0, tzinfo=dt.timezone.utc)
@@ -294,7 +294,7 @@ class BlueprintTests(unittest.TestCase):
         self.assertEqual(self.inputs["temporary_enabled"]["default"], False)
         self.assertIn("temporary_tick", {t.get("id") for t in self.data["triggers"]})
         main = self.data["actions"][-1]["choose"]
-        due = next(b for b in main if "fälliger Auftrag" in b["alias"])
+        due = next(b for b in main if "deadline reached" in b["alias"])
         text = str(due)
         self.assertIn("temporary_pending", text)
         self.assertIn("temporary_deadline", text)
@@ -302,7 +302,7 @@ class BlueprintTests(unittest.TestCase):
         self.assertIn("!input temporary_end_conditions", text)
         self.assertIn("!input temporary_end_actions", text)
         self.assertLess(text.find("input_boolean.turn_off"), text.find("!input temporary_end_actions"))
-        arrival = next(b for b in main if b["alias"] == "Belegungsstatus hat auf belegt gewechselt")
+        arrival = next(b for b in main if b["alias"] == "Occupancy changed to occupied")
         arrival_text = str(arrival)
         self.assertIn("input_datetime.set_datetime", arrival_text)
         self.assertIn("input_boolean.turn_on", arrival_text)
@@ -312,6 +312,55 @@ class BlueprintTests(unittest.TestCase):
     def test_custom_trigger_no_builtin_sources(self):
         c = self.evaluate(trigger="custom_away")
         self.assertTrue(self.true(c["absence_evidence_ok"]))
+
+
+    def test_optional_diagnostics_never_block_state_changes(self):
+        display = next(a for a in self.data["actions"]
+                       if isinstance(a, dict) and "then" in a
+                       and "input_text.set_value" in str(a.get("then")))
+        condition = self.env.from_string(display["if"][0]["value_template"])
+        for status in ("unknown", "unavailable"):
+            with self.subTest(status=status):
+                result = condition.render(
+                    diagnostics_enabled=True,
+                    diagnostics_text="input_text.occupancy_reason",
+                    diagnostic_value="OCCUPIED | Guest mode=on",
+                    states=lambda _: status,
+                ).strip().lower()
+                self.assertEqual(result, "false")
+        self.assertTrue(display["then"][0]["continue_on_error"])
+
+    def test_guest_and_blocker_can_restore_occupancy(self):
+        ids = {item.get("id") for item in self.data["triggers"]}
+        self.assertIn("guest_home", ids)
+        self.assertIn("blocker_home", ids)
+        guest = self.evaluate(guest="on")
+        blocked = self.evaluate(blockers={"binary_sensor.bed": ("on", 10)})
+        self.assertTrue(self.true(guest["anyone_home_now"]))
+        self.assertTrue(self.true(blocked["anyone_home_now"]))
+        arrival = next(b for b in self.data["actions"][-1]["choose"]
+                       if b["alias"] == "Automatic arrival")
+        self.assertIn("guest_home", str(arrival))
+        self.assertIn("blocker_home", str(arrival))
+
+    def test_english_blueprint_labels_and_messages(self):
+        strings = [self.data["blueprint"]["name"], self.data["blueprint"]["description"]]
+        for group in self.data["blueprint"]["input"].values():
+            strings.append(group["name"])
+            for spec in group["input"].values():
+                strings.extend([spec.get("name", ""), spec.get("description", "")])
+        forbidden = ("Anwesenheit", "Abwesenheit", "Belegung", "Gäste",
+                     "Schlafmodus", "Türfolge", "Aktionen", "Neustartfest")
+        for value in strings:
+            for word in forbidden:
+                self.assertNotIn(word, value)
+
+    def test_vacancy_guards_remain_mandatory(self):
+        checks = str(self.data["actions"][-1]["choose"][-1]["conditions"])
+        for item in ("guest_mode", "sleep_clear", "blockers_clear",
+                     "known_trackers_safe", "activity_clear",
+                     "absence_evidence_ok", "!input away_conditions"):
+            self.assertIn(item, checks)
 
 
 if __name__ == "__main__":
