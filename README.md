@@ -1,26 +1,22 @@
 # Home Assistant Blueprints
 
-Wiederverwendbare Home-Assistant-Blueprints von [3115a083](https://github.com/3115a083). Jeder Blueprint erhält einen eigenen Ordner mit YAML-Datei und Dokumentation.
+Reusable, documented Home Assistant blueprints maintained by [3115a083](https://github.com/3115a083). Each blueprint has its own folder with the installable YAML and a README.
 
-## Blueprints
+## Available blueprints
 
-| Blueprint | Zweck | Installation |
-|---|---|---|
-| [Area Occupancy Manager](blueprints/automation/occupancy/README.md) | Anwesenheit/Abwesenheit mit Gäste-/Schlafschutz, Diagnose, frei wählbaren Aktionen und neustartfesten Zeitabläufen | [In Home Assistant importieren](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2F3115a083%2Fha-blueprints%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Foccupancy%2Farea_occupancy_manager.yaml) |
+| Blueprint | Description | Install |
+| --- | --- | --- |
+| [Area Occupancy Manager](blueprints/automation/occupancy/README.md) | Track occupancy with multiple signals, guest/sleep protection, diagnostics, configurable actions, and restart-resilient follow-ups. | [Import into Home Assistant](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2F3115a083%2Fha-blueprints%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Foccupancy%2Farea_occupancy_manager.yaml) |
 
 ## Installation
 
-1. Auf **In Home Assistant importieren** klicken oder in Home Assistant **Einstellungen → Automatisierungen & Szenen → Blueprints → Blueprint importieren** öffnen.
-2. Bei manueller Installation diese URL einfügen:
+1. Use the direct import link above, or select **Settings → Automations & scenes → Blueprints → Import blueprint** in Home Assistant.
+2. Enter the YAML URL: `https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/occupancy/area_occupancy_manager.yaml`.
+3. Create the required helper and automation as described in the [occupancy setup guide](blueprints/automation/occupancy/README.md).
 
-   `https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/occupancy/area_occupancy_manager.yaml`
+The occupancy blueprint declares Home Assistant **2024.10.0** as its minimum version and does not require HACS or an additional integration.
 
-3. Vorschau prüfen, importieren und über **Automatisierung erstellen** konfigurieren.
-4. Der Occupancy-Blueprint benötigt pro Bereich einen zuvor angelegten `input_boolean`-Helfer für den Belegungsstatus. Optional kommen ein Schlaf-Umschalter, ein Diagnose-Texthelfer und für neustartfeste Zeitaktionen ein `input_datetime` plus ein weiterer `input_boolean` hinzu.
-
-Die URL zeigt auf eine echte YAML-Datei und lässt sich über den Home-Assistant-Blueprint-Import laden. Mindestversion: **Home Assistant 2024.10.0**.
-
-## Repository-Struktur
+## Repository layout
 
 ```text
 blueprints/
@@ -34,10 +30,8 @@ tests/
   test_blueprint.py
 ```
 
-Neue Automations-Blueprints gehören unter `blueprints/automation/<thema>/`, Script-Blueprints entsprechend unter `blueprints/script/<thema>/`.
+Future automation blueprints belong in `blueprints/automation/<topic>/`. Script blueprints can use `blueprints/script/<topic>/`.
 
-## Qualität und Sicherheit
+## Testing and security
 
-Der CI-Test prüft YAML-Struktur, Blueprint-Eingaben und typische Schutzszenarien. Eine **echte Ausführung auf einer Home-Assistant-Instanz** ist damit nicht ersetzt. Automatische Verriegelung, Scharfschaltung und das Schließen von Garagentoren sollten erst nach einem Praxistest und mit unabhängigen Sicherheitssensoren freigegeben werden.
-
-Weitere Hinweise und konkrete Beispiele stehen in der [Occupancy-Dokumentation](blueprints/automation/occupancy/README.md).
+GitHub Actions performs static YAML and Jinja validation and checks selected safety scenarios. A live Home Assistant runtime test is still required before using critical actions such as arming alarms or closing garage doors. See the detailed [documentation](blueprints/automation/occupancy/README.md).
