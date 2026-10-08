@@ -4,8 +4,8 @@ blueprint:
     Track occupied/vacant status for any home or area using an input_boolean.
     Combine person/device tracking, motion or presence sensors, door sequences,
     custom triggers, and fail-safe guards. Configure any Home Assistant actions
-    for vacancy, arrival, and optional temporary operations.
-    Supports guest mode, sleep mode, diagnostics, and restart-resilient timers.
+    for vacancy, arrival, and multiple independent timed operations.
+    Supports guest mode, sleep mode, diagnostics, and restart-resilient timers per timed action.
 
     IMPORTANT: Motion sensors alone cannot reliably detect sleeping or still
     people. Configure reliable sensors or explicit guest/sleep protection.
@@ -254,12 +254,12 @@ blueprint:
           selector:
             action: {}
     temporary:
-      name: "07 | Temporary arrival actions"
+      name: "07 | Timed arrival action 1 (existing)"
       icon: mdi:timer-outline
       collapsed: true
       input:
         temporary_enabled:
-          name: "Enable temporary arrival actions"
+          name: "Enable timed action 1"
           default: false
           selector:
             boolean: {}
@@ -323,6 +323,129 @@ blueprint:
           selector:
             action: {}
 
+    temporary_2:
+      name: "08 | Timed arrival action 2"
+      icon: mdi:timer-outline
+      collapsed: true
+      input:
+        temporary_2_enabled:
+          name: "Enable timed action 2"
+          description: "Run this independent action when the area becomes occupied."
+          default: false
+          selector:
+            boolean: {}
+        temporary_2_start_conditions:
+          name: "Start conditions for action 2"
+          description: "All conditions must pass. Example: phone is connected to the car, or a door is locked."
+          default: []
+          selector:
+            condition: {}
+        temporary_2_start_actions:
+          name: "Actions to run immediately (2)"
+          description: "Any Home Assistant actions, such as garage open or unlock door."
+          default: []
+          selector:
+            action: {}
+        temporary_2_minutes:
+          name: "Follow-up delay for action 2 (minutes)"
+          default: 30
+          selector:
+            number:
+              min: 1
+              max: 1440
+              step: 1
+              unit_of_measurement: min
+              mode: box
+        temporary_2_deadline:
+          name: "Restart-safe deadline for action 2 (optional)"
+          description: "Select a dedicated input_datetime with both date and time; requires the matching pending helper."
+          default: ""
+          selector:
+            entity:
+              filter:
+                domain: input_datetime
+        temporary_2_pending:
+          name: "Restart-safe pending flag for action 2 (optional)"
+          description: "Select a dedicated input_boolean, initially OFF. Never share helpers between timed actions."
+          default: ""
+          selector:
+            entity:
+              filter:
+                domain: input_boolean
+        temporary_2_end_conditions:
+          name: "Safety conditions before follow-up (2)"
+          description: "All conditions must pass before follow-up; failed checks skip the action."
+          default: []
+          selector:
+            condition: {}
+        temporary_2_end_actions:
+          name: "Actions after the delay (2)"
+          description: "Example: lock the door after 30 minutes; or close the garage after 40 minutes."
+          default: []
+          selector:
+            action: {}
+    temporary_3:
+      name: "09 | Timed arrival action 3"
+      icon: mdi:timer-outline
+      collapsed: true
+      input:
+        temporary_3_enabled:
+          name: "Enable timed action 3"
+          description: "Run this independent action when the area becomes occupied."
+          default: false
+          selector:
+            boolean: {}
+        temporary_3_start_conditions:
+          name: "Start conditions for action 3"
+          description: "All conditions must pass. Example: phone is connected to the car, or a door is locked."
+          default: []
+          selector:
+            condition: {}
+        temporary_3_start_actions:
+          name: "Actions to run immediately (3)"
+          description: "Any Home Assistant actions, such as garage open or unlock door."
+          default: []
+          selector:
+            action: {}
+        temporary_3_minutes:
+          name: "Follow-up delay for action 3 (minutes)"
+          default: 15
+          selector:
+            number:
+              min: 1
+              max: 1440
+              step: 1
+              unit_of_measurement: min
+              mode: box
+        temporary_3_deadline:
+          name: "Restart-safe deadline for action 3 (optional)"
+          description: "Select a dedicated input_datetime with both date and time; requires the matching pending helper."
+          default: ""
+          selector:
+            entity:
+              filter:
+                domain: input_datetime
+        temporary_3_pending:
+          name: "Restart-safe pending flag for action 3 (optional)"
+          description: "Select a dedicated input_boolean, initially OFF. Never share helpers between timed actions."
+          default: ""
+          selector:
+            entity:
+              filter:
+                domain: input_boolean
+        temporary_3_end_conditions:
+          name: "Safety conditions before follow-up (3)"
+          description: "All conditions must pass before follow-up; failed checks skip the action."
+          default: []
+          selector:
+            condition: {}
+        temporary_3_end_actions:
+          name: "Actions after the delay (3)"
+          description: "Example: lock the door after 30 minutes; or close the garage after 40 minutes."
+          default: []
+          selector:
+            action: {}
+
 trigger_variables:
   _trackers: !input tracked_entities
   _activity: !input activity_sensors
@@ -353,6 +476,19 @@ variables:
   temporary_minutes: !input temporary_minutes
   temporary_deadline: !input temporary_deadline
   temporary_pending: !input temporary_pending
+  temporary_2_enabled: !input temporary_2_enabled
+  temporary_2_minutes: !input temporary_2_minutes
+  temporary_2_deadline: !input temporary_2_deadline
+  temporary_2_pending: !input temporary_2_pending
+  temporary_3_enabled: !input temporary_3_enabled
+  temporary_3_minutes: !input temporary_3_minutes
+  temporary_3_deadline: !input temporary_3_deadline
+  temporary_3_pending: !input temporary_3_pending
+  temporary_helpers_unique: >-
+    {% set ids = [temporary_deadline, temporary_pending, temporary_2_deadline,
+                  temporary_2_pending, temporary_3_deadline, temporary_3_pending]
+                | reject('eq', '') | list %}
+    {{ ids | unique | list | count == ids | count }}
 
 # Custom trigger IDs: custom_away or custom_home.
 triggers:
