@@ -59,6 +59,49 @@ class BlueprintTests(unittest.TestCase):
             if name != "occupancy_helper":
                 self.assertIn("default", spec, name)
 
+    def test_input_sections_follow_trigger_action_optional_flow(self):
+        """The automation editor should expose essential steps before advanced options."""
+        groups = self.data["blueprint"]["input"]
+        order = [
+            ("automatic_evidence", "01 | Presence and absence triggers", False),
+            ("entrances", "02 | Optional door and custom triggers", True),
+            ("actions_section", "03 | Actions on occupied / vacant", False),
+            ("temporary", "04 | Optional timed action 1", True),
+            ("temporary_2", "05 | Optional timed action 2", True),
+            ("temporary_3", "06 | Optional timed action 3", True),
+            ("safeguards", "07 | Optional occupancy safeguards", True),
+            ("base", "08 | Optional occupancy status output", True),
+            ("diagnostics", "09 | Optional diagnostics and debug", True),
+        ]
+        self.assertEqual(list(groups), [key for key, _, _ in order])
+        self.assertEqual(list(groups["automatic_evidence"]["input"])[:2],
+                         ["tracked_entities", "tracked_away_minutes"])
+        self.assertEqual(groups["automatic_evidence"]["input"]["tracked_entities"]["default"], [])
+        self.assertEqual(groups["automatic_evidence"]["input"]["tracked_entities"]["selector"]["entity"]["multiple"], True)
+        for key, title, is_optional in order:
+            with self.subTest(group=key):
+                self.assertEqual(groups[key]["name"], title)
+                self.assertIn("description", groups[key])
+                self.assertEqual(groups[key].get("collapsed", False), is_optional)
+                if is_optional:
+                    for input_name, spec in groups[key]["input"].items():
+                        self.assertIn("default", spec, input_name)
+        self.assertIn("person", groups["automatic_evidence"]["description"].lower())
+        self.assertIn("input_boolean", groups["base"]["description"])
+
+    def test_repository_readme_is_a_catalog_and_blueprint_has_own_guide(self):
+        root = BLUEPRINT.parents[3] / "README.md"
+        local_guide = BLUEPRINT.parent / "README.md"
+        self.assertTrue(root.exists())
+        self.assertTrue(local_guide.exists())
+        root_text = root.read_text(encoding="utf-8")
+        guide = local_guide.read_text(encoding="utf-8")
+        self.assertIn("## Blueprint catalog", root_text)
+        self.assertIn("blueprints/automation/occupancy/README.md", root_text)
+        self.assertNotIn("## 01 | Presence and absence triggers", root_text)
+        self.assertIn("## 01 | Presence and absence triggers", guide)
+        self.assertIn("## 09 | Optional diagnostics and debug", guide)
+
     def test_all_blueprint_references_exist(self):
         references = re.findall(r"!input\s+([\w]+)", self.text)
         self.assertTrue(references)
