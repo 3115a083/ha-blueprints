@@ -13,10 +13,11 @@ Ein `input_boolean`-Helfer ist die einzige Quelle des Belegungsstatus: `on` bede
 - **Abwesenheitssignale:** Alle gewählten Personen-/Gerätetracker sind fort, alle gewählten Bewegungs-/Präsenzsensoren bleiben für eine einstellbare Zeit ruhig, Tür 1 gefolgt von Tür 2 oder beliebige eigene Trigger.
 - **Ankunftssignale:** Ein Tracker kehrt nach `home` zurück, Bewegung/Präsenz wird erkannt, ein gewähltes Schloss wird entriegelt, Tür 2 gefolgt von Tür 1 oder ein eigener Trigger.
 - **Kombination:** Mit `ALLE` (Standard) müssen alle konfigurierten Tracker und Aktivitätssensoren Abwesenheit bestätigen. Mit `EINES` genügt ein Abwesenheitsnachweis, **aber** ein bekannter anwesender Tracker sowie aktive oder ausgefallene Aktivitätssensoren blockieren immer. Nicht konfigurierte Signalquellen zählen nicht mit.
-- **Zusätzliche Sperren:** Gastmodus-`input_boolean`, weitere Präsenzsensoren und vollständig frei konfigurierbare Home-Assistant-Bedingungen. Unbekannte/nicht erreichbare Sicherheitssensoren verhindern Abwesenheit.
+- **Zusätzliche Sperren:** Gastmodus, Schlafmodus, weitere Präsenzsensoren und frei konfigurierbare Bedingungen. Unbekannte/nicht erreichbare Sicherheitssensoren verhindern Abwesenheit. Wenn der Schlafmodus aktiviert wird, setzt er den Bereich auf **belegt**.
 - **Aktionen:** Die Action-Editoren akzeptieren beliebige Home-Assistant-Aktionen, Skripte und Bedingungen; keine feste Bindung an Lichter, Alarmanlagen oder Medienplayer.
-- **Zeitaktionen:** Bei Ankunft kann eine bedingte Aktion ausgelöst und nach N Minuten eine Folgeaktion ausgeführt werden. Auch dafür können separate Bedingungen hinterlegt werden.
-- **Neustart/Reload:** Alle fünf Minuten sowie beim HA-Start werden bereits stabile Signalzustände erneut abgeglichen. Aktionen für abgebrochene temporäre Delays werden jedoch **nicht** wiederhergestellt.
+- **Zeitaktionen:** Bei Ankunft kann eine bedingte Aktion ausgelöst und nach N Minuten eine Folgeaktion ausgeführt werden. Mit zwei optionalen Helfern übersteht der Auftrag einen Home-Assistant-Neustart.
+- **Diagnose:** Optionaler `input_text`-Helfer zeigt an, warum Abwesenheit blockiert ist (z. B. Gästemodus, Tracker zu Hause, Sensor nicht verfügbar oder Mindestzeit noch nicht erreicht). Dazu existieren Automations-Traces und optional Systemlogeinträge für abgelehnte Abwesenheitsereignisse.
+- **Neustart/Reload:** Alle fünf Minuten sowie beim HA-Start wird der Belegungszustand abgeglichen. Persistente Folgeaktionen werden zusätzlich einmal pro Minute auf Fälligkeit geprüft. Ohne die zwei Helfer bleibt die bisherige, nicht neustartfeste `delay`-Variante verfügbar.
 
 ## Installation und Einrichtung
 
@@ -25,6 +26,28 @@ Ein `input_boolean`-Helfer ist die einzige Quelle des Belegungsstatus: `on` bede
 3. Blueprint-Automatisierung anlegen und den Umschalter in **01 | Belegungsstatus** auswählen. Es empfiehlt sich, zuerst nur harmlose Aktionen oder Benachrichtigungen einzurichten.
 4. Tracker und/oder Bewegung-/Präsenzsensoren zuordnen. Für ein gesamtes Haus alle regulären Bewohner auswählen und einen separaten Gastmodus-Helfer anlegen.
 5. Zusätzliche Präsenzsperren, Abwesenheits- und Ankunftsaktionen konfigurieren. Mit tatsächlicher Bewegung, An- und Abwesenheit sowie bei nicht verfügbaren Sensoren testen.
+6. Optional die Helfer und Einstellungen für Schlafmodus, Diagnose und persistente Zeitaktionen ergänzen. Die neuen Eingaben haben Standardwerte, bestehende Blueprint-Instanzen funktionieren daher ohne Nachkonfiguration weiter.
+
+### Schlafmodus für bewegungslose oder schlafende Personen
+
+Unter **03 | Schutz vor Fehlentscheidungen** optional einen zusätzlichen `input_boolean` wählen, z. B. `input_boolean.schlafen`. Diesen Helfer durch eine eigene Bettzeit-Automation, einen Bettsensor oder manuell setzen:
+
+- **EIN:** Bereich bleibt automatisch belegt. Einschalten stellt den Belegungsstatus her, auch wenn sonst kein Tracker bzw. Bewegungsmelder eine Person erkennt.
+- **AUS:** Die normalen Abwesenheitsregeln greifen wieder. Es erfolgt **kein** automatischer Leer-Status allein durch das Ausschalten des Schlafmodus. Die Signale müssen weiterhin ausreichen.
+- **unknown/unavailable:** Abwesenheit wird sicherheitshalber gesperrt. Der Status wird aber nicht als neue Ankunft gewertet.
+
+Der Schlafmodus ist eine explizite Sperre, keine automatische Erkennung von Schlaf. Wenn du keinen Schlafmodus einschaltest und ausschließlich PIR-Sensoren verwendest, lässt sich unbewegte Anwesenheit technisch nicht sicher erkennen.
+
+### Diagnosemodus
+
+Unter **04 | Diagnose** den Diagnosemodus aktivieren. Optional zuvor einen **Text-Helfer (`input_text`)** mit maximal **255 Zeichen** anlegen und auswählen, z. B. `input_text.belegung_diagnose`. Den Helfer auf einem Dashboard anzeigen. Der Text aktualisiert sich bei Änderungen relevanter Zustände, beim periodischen Abgleich und bei relevanten Triggern, sofern er sich verändert hat. Die angezeigten Gründe enthalten zum Beispiel:
+
+- `BELEGT | Abwesenheit gesperrt: Gästemodus=on`
+- `BELEGT | Abwesenheit gesperrt: person.gast=home`
+- `BELEGT | Abwesenheit gesperrt: binary_sensor.schlafzimmer=unavailable`
+- `BELEGT | Abwesenheit gesperrt: Inaktivitätsdauer läuft`
+
+In den Automations-Traces erscheinen außerdem die berechneten Variablen (`diagnostic_line`, `absence_evidence_ok`, `sleep_clear` usw.). Optional können abgewiesene Abwesenheitstrigger ins Systemprotokoll geschrieben werden. **Grenze:** Frei definierte `away_conditions` lassen sich nicht automatisch einzeln als Grund aufschlüsseln. Die Diagnose kann also "Abwesenheit möglich" anzeigen, obwohl eine Zusatzbedingung die finale Statusänderung verhindert.
 
 ### Türfolge konfigurieren
 
@@ -55,29 +78,35 @@ Mehrere eigene Trigger mit gleicher ID sind zulässig. Für eine komplexere Tür
 
 In **Aktionen bei belegt** im Aktionseditor einen **Wenn/Dann**-Block hinzufügen. Als Bedingung **Sonne: unter Horizont** oder einen Lux-Sensor mit Grenzwert verwenden; im Dann-Abschnitt `light.turn_on` hinzufügen. Andere Ankunftsaktionen laufen unabhängig davon.
 
-### Bei Ankunft Garage öffnen, nach 40 Minuten schließen
+### Bei Ankunft Garage öffnen, nach 40 Minuten schließen, auch nach Neustart
 
-Unter **06 | Zeitlich begrenzte Ankunftsaktionen**:
+Unter **07 | Zeitlich begrenzte Ankunftsaktionen**:
 
-1. **Aktivieren:** EIN.
-2. **Startbedingungen:** Das zugehörige `binary_sensor`/`device_tracker` meldet die Bluetooth-Verbindung von Handy und Auto; idealerweise zusätzlich bestätigen, dass das Auto gerade heimkehrt.
-3. **Startaktionen:** `cover.open_cover` für das Garagentor.
-4. **Dauer:** `40` Minuten.
-5. **Folgebedingungen:** Mindestens Torstatus und vorhandene Hindernis-/Lichtschrankensensoren prüfen. Bei ungeklärtem Zustand nicht schließen.
-6. **Folgeaktionen:** `cover.close_cover` für das Garagentor.
+1. Zwei Helfer unter **Einstellungen → Geräte & Dienste → Helfer** anlegen: `input_datetime.garage_schliesszeit` **mit Datum UND Uhrzeit**, dazu `input_boolean.garage_zeitaktion_aktiv` (anfänglich **AUS**). Beide in **Neustartfest: Ablaufzeitpunkt** und **Vorgang aktiv** auswählen.
+2. **Temporäre Aktionen aktivieren** auf EIN setzen.
+3. **Startbedingungen:** z. B. Handy ist per Bluetooth mit dem Auto verbunden. Am besten zusätzlich die Heimfahrt mit einem Tracker bestätigen lassen.
+4. **Startaktionen:** `cover.open_cover` für das Garagentor.
+5. **Dauer:** `40` Minuten.
+6. **Folgebedingungen:** Mindestens Torstatus und Hindernis-/Lichtschrankensensoren prüfen. Bei ungeklärtem Zustand nicht schließen.
+7. **Folgeaktionen:** `cover.close_cover` für das Garagentor.
 
-Die Folgeaktion einer **früheren Ankunft** wird übersprungen, falls dazwischen ein neuer Belegungswechsel auf EIN stattfand. Ist der Bereich inzwischen leer, darf die Folgeaktion nach Ablauf weiterhin erfolgen, wenn ihre Sicherheitsbedingungen zutreffen. Aktive Verzögerungen laufen nicht über einen Home-Assistant-Neustart/Automations-Reload hinweg. Für eine neustartfeste Garagentor-Schließung einen eigenen `timer`-/`input_datetime`-basierten Ablauf verwenden. Für sicherheitskritische Motoren ausschließlich Geräte mit eigenständigem Hindernisschutz verwenden.
+**Ablauf:** Bei einer gültigen Ankunft speichert der Blueprint **vor** der Startaktion den Zeitpunkt `jetzt + 40 Minuten` im `input_datetime` und setzt den Vorgang-Helfer EIN. Nach dem Ablauf wird der Auftrag maximal ungefähr eine Minute später verarbeitet, auch wenn Home Assistant inzwischen neu gestartet wurde. Ist HA während der Fälligkeit offline, wird die Aktion nach dem nächsten HA-Start nachgeholt. Bevor die Folgeaktion beginnt, wird der Auftrag AUS geschaltet und werden die konfigurierten Sicherheitsbedingungen erneut geprüft. Sind diese **nicht** erfüllt, wird die Folgeaktion **einmalig übersprungen** und der Auftrag nicht automatisch wiederholt. Eine erneute Ankunft während eines offenen Auftrags setzt den Ablaufzeitpunkt neu.
+
+Beide Helfer gemeinsam und **pro Blueprint-Instanz getrennt** konfigurieren. Ist nur einer angegeben, startet der Blueprint **keine** temporäre Aktion. Lässt du **beide** leer, bleibt die bisherige `delay`-Variante aus Kompatibilitätsgründen verfügbar. Diese ist **nicht** neustartfest. Für eine sicherheitskritische Garage unbedingt unabhängigen Hindernisschutz nutzen. Das Hantieren mit `input_datetime`/`input_boolean` im Dashboard kann aktive Aufträge überschreiben, daher beide Helfer vor ungewollten Eingriffen schützen.
+
+Die Wiederherstellung des Helferzustands setzt voraus, dass die Helfer **ohne feste `initial`-Werte** angelegt wurden. Das `input_datetime` muss Datum und Uhrzeit enthalten. Ein aktiver Auftrag kann durch manuelles Ausschalten des Vorgang-Helfers bewusst abgebrochen werden.
 
 ## Wichtige Sicherheitsregeln
 
 - `unknown`/`unavailable` bei einem gewählten Tracker, Aktivitäts- oder Sperrsensor darf **nicht** als positive Abwesenheit gewertet werden. Deshalb bleibt das System in diesem Fall eher belegt.
 - Gewählte Tracker auf `home` und erkannte Bewegung/Präsenz blockieren **auch bei Kombinationsmodus `EINES`** das automatische Leerschalten.
 - Ein **Gastmodus** ist nötig, wenn Personen außerhalb der regulär getrackten Bewohner im Bereich bleiben können und Sensoren deren Anwesenheit nicht dauerhaft melden.
+- **Schlafmodus** und Gastmodus verhindern automatische Abwesenheit auch dann, wenn alle Bewegungsmelder ruhig sind.
 - Eine **manuelle** Umschaltung des Belegungshelfers ist bewusst ein explizites Override und führt trotz Gastmodus zu Aktionen. Den Helfer nicht ungeschützt auf öffentlichen Dashboards platzieren.
 - Bei verschlossener Tür oder aktivierter Alarmanlage nach Möglichkeit Tür-/Fensterkontakte, Riegelstatus und konkrete Alarmbedingungen **in den Aktionen** prüfen.
-- Blueprint-Automationen bieten keine harte Garantie gegen konkurrierende Statuswechsel bei zeitgleichen Signalen. Schutzaktionen zuerst mit Benachrichtigungen testen.
+- Blueprint-Automationen bieten keine harte Garantie gegen konkurrierende Statuswechsel oder doppelte Aktionsausführung bei genau gleichzeitigen Signalen. Bei einem neustartfesten Termin wird das `pending`-Flag vor der Folgeaktion gelöscht. Für gefährliche Aktoren eine zusätzliche Verriegelung oder ein dediziertes Skript verwenden. Schutzaktionen zuerst mit Benachrichtigungen testen.
 - Das `for` von Triggern übersteht Neustarts nicht; der periodische Abgleich berücksichtigt dafür den Zeitpunkt der letzten Entitätszustandsänderung, soweit Home Assistant ihn bereitstellt.
 
-## Geplante Erweiterungen
+## Mögliche Erweiterungen
 
-Mögliche Folgefeatures: Diagnosemodus mit Gründen für jeden blockierten Wechsel, getrennte Modi *Zuhause/Schlaf/Gast/Urlaub*, längere Türsequenzen und regelbasierte Kombinationen im UI, neustartfeste Zeitaktionen über `timer`, Push-Bestätigung vor Alarmaktivierung, sowie ein eigener Blueprint für gerichtete Tür-/Schleusensequenzen.
+Längere Türsequenzen, detaillierte Diagnosen für benutzerdefinierte Bedingungen, regelbasierte Verknüpfungen im UI, Urlaubmodus, Push-Bestätigung vor Alarmaktivierung sowie ein eigener Blueprint für gerichtete Tür-/Schleusensequenzen.
