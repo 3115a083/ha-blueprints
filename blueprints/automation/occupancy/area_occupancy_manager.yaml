@@ -6,12 +6,14 @@ blueprint:
     frei definierbare Trigger mit Sicherheitsbedingungen (Gäste, zusätzliche
     Präsenzsensoren, Stabilitätszeiten). Aktionen für Ankunft, Abwesenheit
     und zeitlich begrenzte Abläufe sind frei konfigurierbar.
+    Optional: Diagnose im input_text-Helfer, Schlafmodus und neustartfeste
+    Folgeaktionen mit input_datetime + input_boolean.
 
     WICHTIG: Ohne geeignete Anwesenheitssensoren oder aktivierten Gastmodus
     kann eine schlafende oder bewegungslose Person nicht sicher erkannt werden.
     Schlösser, Alarmanlagen und Garagentore nur mit geeigneten zusätzlichen
-    Sicherheitsbedingungen automatisieren. Bei temporären Aktionen sind
-    Verzögerungen über einen Home-Assistant-Neustart nicht persistent.
+    Sicherheitsbedingungen automatisieren. Ohne die optionalen Timer-Helfer
+    bleibt die bisherige Verzögerung nicht neustartfest.
 
     Eigene Trigger müssen die Trigger-ID `custom_away` oder `custom_home`
     erhalten, damit ihre Richtung erkannt wird.
@@ -115,6 +117,17 @@ blueprint:
             entity:
               filter:
                 domain: input_boolean
+        sleep_mode:
+          name: "Schlafmodus (optional)"
+          description: >-
+            EIN bedeutet weiterhin belegt und blockiert automatische Abwesenheit,
+            selbst bei längerer Bewegungslosigkeit. Beim Aktivieren wird belegt gesetzt.
+            unknown/unavailable sperrt vorsichtshalber Abwesenheit.
+          default: ""
+          selector:
+            entity:
+              filter:
+                domain: input_boolean
         blocking_sensors:
           name: "Weitere Anwesenheits-Sperrsensoren (optional)"
           description: >-
@@ -143,8 +156,36 @@ blueprint:
           default: []
           selector:
             condition: {}
+    diagnostics:
+      name: "04 | Diagnose"
+      icon: mdi:clipboard-text-search
+      collapsed: true
+      input:
+        diagnostics_enabled:
+          name: "Diagnosemodus aktivieren"
+          description: "Begründungen in Automations-Traces und optional im Text-Helfer bereitstellen."
+          default: false
+          selector:
+            boolean: {}
+        diagnostics_text:
+          name: "Diagnose-Texthelfer (optional)"
+          description: >-
+            Vorher angelegter input_text-Helfer. Zeigt den aktuellen Grund für
+            Belegung oder blockierte Abwesenheit auf dem Dashboard.
+            Empfohlen: maximale Länge 255 Zeichen.
+          default: ""
+          selector:
+            entity:
+              filter:
+                domain: input_text
+        diagnostics_log:
+          name: "Blockierte Abwesenheitsversuche ins Systemprotokoll schreiben"
+          description: "Nur bei passenden Abwesenheitstriggern, nicht jede Minute."
+          default: false
+          selector:
+            boolean: {}
     entrances:
-      name: "04 | Türen und zusätzliche Trigger"
+      name: "05 | Türen und zusätzliche Trigger"
       icon: mdi:door
       collapsed: true
       input:
@@ -201,7 +242,7 @@ blueprint:
           selector:
             trigger: {}
     actions_section:
-      name: "05 | Aktionen"
+      name: "06 | Aktionen"
       icon: mdi:lightning-bolt
       input:
         away_actions:
@@ -222,7 +263,7 @@ blueprint:
           selector:
             action: {}
     temporary:
-      name: "06 | Zeitlich begrenzte Ankunftsaktionen"
+      name: "07 | Zeitlich begrenzte Ankunftsaktionen"
       icon: mdi:timer-outline
       collapsed: true
       input:
@@ -255,6 +296,26 @@ blueprint:
               step: 1
               unit_of_measurement: min
               mode: box
+        temporary_deadline:
+          name: "Neustartfest: Ablaufzeitpunkt (optional)"
+          description: >-
+            input_datetime-Helfer mit DATUM UND UHRZEIT. Nur zusammen mit
+            "Vorgang aktiv" konfigurieren. Beim Start wird das Ziel gespeichert.
+          default: ""
+          selector:
+            entity:
+              filter:
+                domain: input_datetime
+        temporary_pending:
+          name: "Neustartfest: Vorgang aktiv (optional)"
+          description: >-
+            Separater input_boolean-Helfer. Nur zusammen mit Ablaufzeitpunkt
+            konfigurieren. Initial AUS setzen. Schaltet nach einmaligem Ablauf AUS.
+          default: ""
+          selector:
+            entity:
+              filter:
+                domain: input_boolean
         temporary_end_conditions:
           name: "Sicherheitsbedingungen für Folgeaktion"
           description: >-
@@ -266,7 +327,7 @@ blueprint:
             condition: {}
         temporary_end_actions:
           name: "Aktionen nach Ablauf"
-          description: "Beispiel: Garagentor schließen. Verzögerung ist nicht neustartfest."
+          description: "Beispiel: Garagentor schließen. Mit beiden Timer-Helfern neustartfest (Prüfung spätestens nach ca. einer Minute)."
           default: []
           selector:
             action: {}
@@ -278,6 +339,7 @@ trigger_variables:
   _lock: !input arrival_lock
   _first_door: !input exit_first_door
   _second_door: !input exit_second_door
+  _sleep: !input sleep_mode
 
 variables:
   occupancy_helper: !input occupancy_helper
@@ -285,6 +347,10 @@ variables:
   activity_sensors: !input activity_sensors
   blocking_sensors: !input blocking_sensors
   guest_mode: !input guest_mode
+  sleep_mode: !input sleep_mode
+  diagnostics_enabled: !input diagnostics_enabled
+  diagnostics_text: !input diagnostics_text
+  diagnostics_log: !input diagnostics_log
   tracked_away_minutes: !input tracked_away_minutes
   inactive_minutes: !input inactive_minutes
   evidence_policy: !input evidence_policy
@@ -292,6 +358,9 @@ variables:
   exit_first_door: !input exit_first_door
   exit_second_door: !input exit_second_door
   temporary_enabled: !input temporary_enabled
+  temporary_minutes: !input temporary_minutes
+  temporary_deadline: !input temporary_deadline
+  temporary_pending: !input temporary_pending
 
 triggers:
   # Ein individueller Trigger muss in HA die passende Trigger-ID erhalten.
@@ -332,6 +401,9 @@ triggers:
       {{ _activity | count > 0
          and (expand(_activity) | selectattr('state', 'eq', 'on') | list | count) > 0 }}
   - trigger: template
+    id: sleep_home
+    value_template: "{{ _sleep != '' and is_state(_sleep, 'on') }}"
+  - trigger: template
     id: lock_home
     value_template: "{{ _lock != '' and is_state(_lock, 'unlocked') }}"
   - trigger: template
@@ -356,6 +428,10 @@ triggers:
   - trigger: time_pattern
     id: reconcile
     minutes: "/5"
+  # Verzögerte Aktionen nach einem Neustart spätestens im nächsten Minuten-Takt nachholen.
+  - trigger: time_pattern
+    id: temporary_tick
+    minutes: "*"
 
 # Parallele Ausführungen sind nötig, damit die 40-Minuten-Aktion
 # neue Statuswechsel nicht blockiert oder durch 'restart' abgebrochen wird.
@@ -432,8 +508,10 @@ actions:
           {% endif %}
         {% endfor %}
         {{ ns.clear }}
+      sleep_clear: "{{ sleep_mode == '' or is_state(sleep_mode, 'off') }}"
       anyone_home_now: >-
-        {{ (tracked_entities | count > 0
+        {{ (sleep_mode != '' and is_state(sleep_mode, 'on'))
+            or (tracked_entities | count > 0
              and (expand(tracked_entities) | selectattr('state', 'eq', 'home') | list | count) > 0)
            or (activity_sensors | count > 0
              and (expand(activity_sensors) | selectattr('state', 'eq', 'on') | list | count) > 0) }}
@@ -449,7 +527,113 @@ actions:
              or trigger.id in ['exit_first', 'custom_away'] }}
         {% endif %}
 
+  # Diagnosevariablen erscheinen immer in den Traces; Schreiben/Logging sind optional.
+  - variables:
+      diagnostic_line: >-
+        {% set ns = namespace(reasons=[]) %}
+        {% if guest_mode != '' and not is_state(guest_mode, 'off') %}
+          {% set ns.reasons = ns.reasons + ['Gästemodus=' ~ states(guest_mode)] %}
+        {% endif %}
+        {% if sleep_mode != '' and not is_state(sleep_mode, 'off') %}
+          {% set ns.reasons = ns.reasons + ['Schlafmodus=' ~ states(sleep_mode)] %}
+        {% endif %}
+        {% for entity in blocking_sensors %}
+          {% if not is_state(entity, 'off') %}
+            {% set ns.reasons = ns.reasons + [entity ~ '=' ~ states(entity)] %}
+          {% endif %}
+        {% endfor %}
+        {% for entity in tracked_entities %}
+          {% if states(entity) in ['home', 'unknown', 'unavailable'] %}
+            {% set ns.reasons = ns.reasons + [entity ~ '=' ~ states(entity)] %}
+          {% endif %}
+        {% endfor %}
+        {% for entity in activity_sensors %}
+          {% if not is_state(entity, 'off') %}
+            {% set ns.reasons = ns.reasons + [entity ~ '=' ~ states(entity)] %}
+          {% endif %}
+        {% endfor %}
+        {% if tracked_entities | count > 0 and not all_trackers_away_stable | bool and known_trackers_safe | bool %}
+          {% set ns.reasons = ns.reasons + ['Tracker-Mindestdauer läuft'] %}
+        {% endif %}
+        {% if activity_sensors | count > 0 and not all_activity_quiet_stable | bool and activity_clear | bool %}
+          {% set ns.reasons = ns.reasons + ['Inaktivitätsdauer läuft'] %}
+        {% endif %}
+        {% if not absence_evidence_ok | bool and ns.reasons | count == 0 %}
+          {% set ns.reasons = ns.reasons + ['Abwesenheitsnachweis fehlt'] %}
+        {% endif %}
+        {% if is_state(occupancy_helper, 'off') %}
+          {{ 'LEER | ' ~ (ns.reasons | join('; ') if ns.reasons else 'kein erkannter Blocker') }}
+        {% elif ns.reasons %}
+          {{ 'BELEGT | Abwesenheit gesperrt: ' ~ (ns.reasons | join('; ')) }}
+        {% else %}
+          {{ 'BELEGT | Abwesenheit möglich, warte auf Auslöser/Zusatzbedingungen' }}
+        {% endif %}
+  - variables:
+      diagnostic_value: >-
+        {{ diagnostic_line | trim | replace('\n', ' ') |
+           truncate(([state_attr(diagnostics_text, 'max') | int(100), 255] | min)
+                    if diagnostics_text != '' else 255, true, '...') }}
+  - if:
+      - condition: template
+        value_template: >-
+          {{ diagnostics_enabled and diagnostics_text != ''
+             and states(diagnostics_text) != diagnostic_value | trim }}
+    then:
+      - action: input_text.set_value
+        target:
+          entity_id: "{{ diagnostics_text }}"
+        data:
+          value: "{{ diagnostic_value | trim }}"
+  - if:
+      - condition: template
+        value_template: >-
+          {{ diagnostics_enabled and diagnostics_log
+             and trigger.id in ['tracker_away', 'activity_away', 'exit_first', 'custom_away']
+             and (not (sleep_clear | bool) or not (known_trackers_safe | bool)
+                  or not (activity_clear | bool) or not (blockers_clear | bool)
+                  or not (absence_evidence_ok | bool)
+                  or (guest_mode != '' and not is_state(guest_mode, 'off'))) }}
+    then:
+      - action: system_log.write
+        data:
+          level: info
+          message: "Area Occupancy Manager: {{ diagnostic_line | trim }} (Trigger: {{ trigger.id }})"
+
   - choose:
+      - alias: "Neustartfeste Folgeaktion: fälliger Auftrag"
+        conditions:
+          - condition: template
+            value_template: >-
+              {{ trigger.id == 'temporary_tick' and temporary_enabled
+                 and temporary_deadline != '' and temporary_pending != ''
+                 and is_state(temporary_pending, 'on')
+                 and as_timestamp(states(temporary_deadline), 0) > 0
+                 and as_timestamp(states(temporary_deadline), 0) <= as_timestamp(now()) }}
+        sequence:
+          # Direkt vor Ausführung erneut prüfen; danach Auftrag zuerst deaktivieren.
+          - condition: template
+            value_template: >-
+              {{ is_state(temporary_pending, 'on')
+                 and as_timestamp(states(temporary_deadline), 0) > 0
+                 and as_timestamp(states(temporary_deadline), 0) <= as_timestamp(now()) }}
+          - action: input_boolean.turn_off
+            target:
+              entity_id: "{{ temporary_pending }}"
+          - if:
+              - condition: and
+                conditions: !input temporary_end_conditions
+            then:
+              - sequence: !input temporary_end_actions
+            else:
+              - if:
+                  - condition: template
+                    value_template: "{{ diagnostics_enabled and diagnostics_log }}"
+                then:
+                  - action: system_log.write
+                    data:
+                      level: warning
+                      message: "Area Occupancy Manager: Folgeaktion wegen Sicherheitsbedingungen ausgelassen."
+
       - alias: "Belegungsstatus hat auf leer gewechselt"
         conditions:
           - condition: template
@@ -465,28 +649,48 @@ actions:
               - sequence: !input home_actions
               - sequence:
                   - condition: template
-                    value_template: "{{ temporary_enabled }}"
+                    value_template: >-
+                      {{ temporary_enabled and (
+                            (temporary_deadline == '' and temporary_pending == '')
+                            or (temporary_deadline != '' and temporary_pending != '')) }}
                   - condition: and
                     conditions: !input temporary_start_conditions
-                  - sequence: !input temporary_start_actions
-                  - delay:
-                      minutes: !input temporary_minutes
-                  # Keine ältere Ankunft darf eine spätere temporäre Aktion vorzeitig beenden.
-                  # Wenn der Bereich mittlerweile leer ist, darf das Aufräumen dennoch laufen.
-                  - condition: template
-                    value_template: >-
-                      {{ is_state(occupancy_helper, 'off')
-                         or as_timestamp(states[occupancy_helper].last_changed, 0)
-                            == as_timestamp(trigger.to_state.last_changed, 0) }}
-                  - condition: and
-                    conditions: !input temporary_end_conditions
-                  - sequence: !input temporary_end_actions
+                  - choose:
+                      - alias: "Neustartfeste Zeitaktion"
+                        conditions:
+                          - condition: template
+                            value_template: "{{ temporary_deadline != '' and temporary_pending != '' }}"
+                        sequence:
+                          # Vor dem Öffnen speichern, damit auch ein unerwarteter Absturz
+                          # zwischen Startaktion und Zeitplanung den Auftrag nicht verliert.
+                          - action: input_datetime.set_datetime
+                            target:
+                              entity_id: "{{ temporary_deadline }}"
+                            data:
+                              timestamp: "{{ (as_timestamp(now()) + (temporary_minutes | int * 60)) | int }}"
+                          - action: input_boolean.turn_on
+                            target:
+                              entity_id: "{{ temporary_pending }}"
+                          - sequence: !input temporary_start_actions
+                    default:
+                      # Kompatibilität mit bestehenden Installationen ohne Timer-Helfer.
+                      - sequence: !input temporary_start_actions
+                      - delay:
+                          minutes: !input temporary_minutes
+                      - condition: template
+                        value_template: >-
+                          {{ is_state(occupancy_helper, 'off')
+                             or as_timestamp(states[occupancy_helper].last_changed, 0)
+                                == as_timestamp(trigger.to_state.last_changed, 0) }}
+                      - condition: and
+                        conditions: !input temporary_end_conditions
+                      - sequence: !input temporary_end_actions
 
       - alias: "Automatische Ankunft"
         conditions:
           - condition: template
             value_template: >-
-              {{ trigger.id in ['tracker_home', 'activity_home', 'lock_home', 'entry_first', 'custom_home']
+              {{ trigger.id in ['tracker_home', 'activity_home', 'lock_home', 'entry_first', 'custom_home', 'sleep_home']
                  or (trigger.id == 'reconcile' and anyone_home_now | bool) }}
           - condition: state
             entity_id: !input occupancy_helper
@@ -510,6 +714,8 @@ actions:
             state: "on"
           - condition: template
             value_template: "{{ guest_mode == '' or is_state(guest_mode, 'off') }}"
+          - condition: template
+            value_template: "{{ sleep_clear | bool }}"
           - condition: template
             value_template: "{{ blockers_clear | bool }}"
           - condition: template
