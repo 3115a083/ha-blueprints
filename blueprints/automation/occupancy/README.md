@@ -7,7 +7,17 @@ A configurable Home Assistant automation blueprint for determining whether a hom
 - **Minimum declared version:** Home Assistant 2024.10.0
 - No HACS or custom component required.
 
-## Detection and safety
+## Quick start
+
+1. [Import the blueprint](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2F3115a083%2Fha-blueprints%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Foccupancy%2Farea_occupancy_manager.yaml), or paste [the YAML URL](https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/occupancy/area_occupancy_manager.yaml) under **Settings -> Automations & scenes -> Blueprints -> Import blueprint**.
+2. In **01 | Presence and absence triggers**, select at least one `person` entity (recommended standard), or a device tracker. A tracked person leaving `home` is the normal absence signal; returning `home` signals occupancy. Choose motion/presence sensors only if needed.
+3. In **02 | Optional door and custom triggers**, configure extra triggers only if you need them.
+4. In **03 | Actions on occupied / vacant**, choose your occupied and vacant actions. This is the main setup.
+5. Expand **04-09** only for optional timed routines, safeguards, a published occupancy switch, or diagnostics. For simple tracker-based actions, **no Boolean helper is required**.
+
+**Recommended for whole-home occupancy:** Enable the optional output switch under **08 | Optional occupancy status output** and let the blueprint set it. Other automations can then depend on a single occupied/vacant entity. For direct tracker-only workflows, leave the switch empty.
+
+## 01 | Presence and absence triggers
 
 | Source | Vacancy evidence | Occupancy evidence |
 | --- | --- | --- |
@@ -26,53 +36,13 @@ A selected tracker in a different zone, such as work, counts as away. A selected
 
 A PIR motion sensor cannot reliably detect still or sleeping people. For guests, choose an explicit guest-presence switch or a reliable presence detector such as mmWave/bed occupancy. No automation can infer undetected people with certainty.
 
-## Occupancy sources vs. published state
-
-**An occupancy helper is no longer mandatory.** Home Assistant `person` entities already expose `home`, `not_home`, and named zone states. A person at `home` is present; other known zones mean away. The blueprint never requires you to flip a Boolean manually when somebody enters or leaves.
-
-| Mode | Configuration | How transitions work | When to use |
-| --- | --- | --- | --- |
-| **Direct person / device tracking** | Select one or more people/device trackers. Leave the occupancy switch empty. | Arrival actions run when the first tracked entity becomes `home`. Vacancy actions run once all selected trackers are away for the configured delay **and all safety guards pass**. | Simple person-based presence, without creating a helper. |
-| **Automatically published occupancy** | Select trackers and/or other presence sources, and an `input_boolean` under **01 | Occupancy source and published state**. | Sensors and rules **set the switch automatically** to ON (occupied) or OFF (vacant). Home/vacancy actions fire on its actual transition. | Homes with guests, sleep mode, motion detection, custom triggers, door sequences, shared state, or other automations that need one stable status. |
-| **Boolean-only/manual override** | Select a switch, leave trackers empty if desired. | Manually changing the switch runs the configured actions; automatic updates need qualifying sensors/triggers. | Intentionally manual or externally managed state. |
-
-When **any tracker is still at `home`**, automatic vacancy is blocked, even in the ANY evidence policy. Multiple people can be selected, so a house stays occupied until the last selected person leaves (subject to guest/motion guards).
-
-A blueprint cannot create an entity on its own. If you want an independent `home_occupied` state for other automations to reference, create an `input_boolean` once and **let this blueprint write it**. In the direct mode no such shared computed state is created; automations may refer to the original `person` states instead.
-
-**Direct-mode limitation:** Other sensor triggers, door sequences, and arbitrary custom triggers cannot reliably establish a reusable state without a helper. In direct mode, only tracker transitions run occupancy/vacancy actions. Guest/sleep/protection sensors and extra conditions are still applied as safety gates. A blocked departure is not queued for later, so if a guest leaves after the tracker went away, use a published switch mode for automatic re-evaluation. Likewise, start and end conditions that do not pass at the tracker transition can suppress that event without retriggering it. For complex occupancy, use the published switch.
-
-## Installation
-
-1. [Import the blueprint](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2F3115a083%2Fha-blueprints%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Foccupancy%2Farea_occupancy_manager.yaml), or open **Settings → Automations & scenes → Blueprints → Import blueprint** and paste `https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/occupancy/area_occupancy_manager.yaml`.
-2. Create an automation from the blueprint. In **01 | Occupancy source and published state**, decide whether to select a published occupancy switch.
-3. **Direct mode:** Leave the switch empty; select at least one `person` or `device_tracker` in **02 | Automatic detection**. No occupancy Boolean is required.
-4. **Published mode:** Create a Home Assistant Toggle helper (`input_boolean`, e.g. `input_boolean.home_occupied`) once. Select it in section 01 and set its initial value to the actual area state. **The automation updates it from your trackers/sensors; you never have to toggle it for ordinary departures.**
-5. Configure other sensors, safeguards, conditions, and actions. Test with safe notifications before enabling door locks, garage motors, or alarms.
-
-In published mode, changing the switch manually is still an **explicit override** and fires the corresponding actions. Restrict access to dashboards exposing this helper.
-
-## Diagnostics
-
-Optionally enable diagnostics in section **04 | Diagnostics**. Automation traces contain evaluated signals and decisions. You can also create and select an `input_text` helper (up to 255 characters) to show a status line in a dashboard, such as `OCCUPIED | Vacancy blocked: Guest mode=on` or `VACANT | No active blockers`.
-
-Optional logging writes blocked vacancy attempts to the system log. Missing or unavailable diagnostic text helpers are skipped and do not stop occupancy processing. User-provided extra conditions are checked after the standard sensor guards and are not individually explained by the diagnostic line.
-
-## Guest and sleep modes
-
-A guest-presence helper and a sleep-mode helper are optional `input_boolean` switches. Turning either one ON restores occupied status and blocks automatic vacancy. Unknown and unavailable states also block vacancy conservatively.
-
-Additional ON-state presence-protection sensors (for example, bed occupancy) also restore occupied status. Only select sensors where ON truly means detected presence.
-
-When these protections turn off, a still-valid away or inactivity source can result in vacancy during the next five-minute reconciliation. One-shot door or custom triggers are not retained indefinitely and need to fire again if an earlier attempt was blocked.
-
-## Doors and custom triggers
+## 02 | Optional door and custom triggers
 
 Select two binary door contacts. Opening **door 1 followed by door 2** within the configured interval counts as a possible exit, while the reverse sequence counts as entry. Contacts that remain open or ambiguous traffic patterns will not provide dependable direction detection.
 
 Custom trigger editors accept any supported Home Assistant trigger. Set its **trigger ID** to `custom_away` or `custom_home` as appropriate. In ALL mode, configured tracker and activity evidence must still confirm any custom vacancy trigger. Always add extra conditions for security-sensitive scenarios.
 
-## Actions
+## 03 | Actions on occupied / vacant
 
 Use the built-in action editor for any Home Assistant actions or scripts. Vacancy actions might turn off lights/media, arm an alarm, and lock doors. Occupancy actions might disarm an alarm, enable lighting, or start audio.
 
@@ -80,9 +50,9 @@ For example, to turn on lights only after dark, add an **If/Then** block with a 
 
 With a published switch, actions fire on actual occupancy-helper transitions. Without a switch, direct tracker transitions fire actions when the selected guards pass.
 
-## Multiple independent timed arrival actions
+## 04-06 | Optional independent timed actions
 
-The blueprint includes **three independent timed action profiles** in sections 07, 08, and 09. All can start from the **same occupancy transition**, each with its own:
+The blueprint includes **three independent timed action profiles** in sections **04, 05, and 06**. All can start from the **same occupancy transition**, each with its own:
 
 - **Enable switch**, start conditions, and immediately executed Home Assistant actions.
 - **Delay** (1 to 1440 minutes), independent from the other profiles.
@@ -121,10 +91,41 @@ Saved deadlines are checked roughly once per minute, including after Home Assist
 
 For all garage/lock automations, provide independent safety sensors and end-condition checks. Home Assistant automations are not a substitute for a garage motor's built-in obstruction safety or for lock security policies.
 
-## Restart behavior, limitations, and tests
+## 07 | Optional occupancy safeguards
+
+A guest-presence helper and a sleep-mode helper are optional `input_boolean` switches. Turning either one ON restores occupied status and blocks automatic vacancy. Unknown and unavailable states also block vacancy conservatively.
+
+Additional ON-state presence-protection sensors (for example, bed occupancy) also restore occupied status. Only select sensors where ON truly means detected presence.
+
+When these protections turn off, a still-valid away or inactivity source can result in vacancy during the next five-minute reconciliation. One-shot door or custom triggers are not retained indefinitely and need to fire again if an earlier attempt was blocked.
+
+## 08 | Optional occupancy status output
+
+**An occupancy helper is no longer mandatory.** Home Assistant `person` entities already expose `home`, `not_home`, and named zone states. A person at `home` is present; other known zones mean away. The blueprint never requires you to flip a Boolean manually when somebody enters or leaves.
+
+| Mode | Configuration | How transitions work | When to use |
+| --- | --- | --- | --- |
+| **Direct person / device tracking** | Select one or more people/device trackers. Leave the occupancy switch empty. | Arrival actions run when the first tracked entity becomes `home`. Vacancy actions run once all selected trackers are away for the configured delay **and all safety guards pass**. | Simple person-based presence, without creating a helper. |
+| **Automatically published occupancy** | Select trackers and/or other presence sources, and an `input_boolean` under **08 | Optional occupancy status output**. | Sensors and rules **set the switch automatically** to ON (occupied) or OFF (vacant). Home/vacancy actions fire on its actual transition. | Homes with guests, sleep mode, motion detection, custom triggers, door sequences, shared state, or other automations that need one stable status. |
+| **Boolean-only/manual override** | Select a switch, leave trackers empty if desired. | Manually changing the switch runs the configured actions; automatic updates need qualifying sensors/triggers. | Intentionally manual or externally managed state. |
+
+When **any tracker is still at `home`**, automatic vacancy is blocked, even in the ANY evidence policy. Multiple people can be selected, so a house stays occupied until the last selected person leaves (subject to guest/motion guards).
+
+A blueprint cannot create an entity on its own. If you want an independent `home_occupied` state for other automations to reference, create an `input_boolean` once and **let this blueprint write it**. In the direct mode no such shared computed state is created; automations may refer to the original `person` states instead.
+
+**Direct-mode limitation:** Other sensor triggers, door sequences, and arbitrary custom triggers cannot reliably establish a reusable state without a helper. In direct mode, only tracker transitions run occupancy/vacancy actions. Guest/sleep/protection sensors and extra conditions are still applied as safety gates. A blocked departure is not queued for later, so if a guest leaves after the tracker went away, use a published switch mode for automatic re-evaluation. Likewise, start and end conditions that do not pass at the tracker transition can suppress that event without retriggering it. For complex occupancy, use the published switch.
+
+## 09 | Optional diagnostics and debug
+
+Optionally enable diagnostics in section **09 | Optional diagnostics and debug**. Automation traces contain evaluated signals and decisions. You can also create and select an `input_text` helper (up to 255 characters) to show a status line in a dashboard, such as `OCCUPIED | Vacancy blocked: Guest mode=on` or `VACANT | No active blockers`.
+
+Optional logging writes blocked vacancy attempts to the system log. Missing or unavailable diagnostic text helpers are skipped and do not stop occupancy processing. User-provided extra conditions are checked after the standard sensor guards and are not individually explained by the diagnostic line.
+
+## Reliability, safety and tests
 
 The blueprint reconciles current signals after Home Assistant starts and every five minutes. State-change timestamps are used for conservative stability checks. A fresh sensor state after a restart can restart the minimum waiting period. Template-trigger `for` timers themselves do not persist across a restart.
 
 Concurrent triggers may overlap due to the parallel automation mode. Place safety-critical checks in the final actions and devices. Status and dashboard text are informative, not a safety certification.
 
 The repository includes [static regression tests](../../../tests/test_blueprint.py) and GitHub Actions validation for YAML, Jinja, input references, and important guard scenarios. **A real Home Assistant installation test has not been performed here.**
+
