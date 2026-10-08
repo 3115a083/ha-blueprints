@@ -53,7 +53,8 @@ class BlueprintTests(unittest.TestCase):
         self.assertEqual(self.data["blueprint"]["domain"], "automation")
         self.assertEqual(self.data["blueprint"]["homeassistant"]["min_version"], "2024.10.0")
         self.assertEqual(self.data["mode"], "parallel")
-        self.assertNotIn("default", self.inputs["occupancy_helper"])
+        self.assertEqual(self.inputs["occupancy_helper"]["default"], "")
+        self.assertIn("input_boolean", str(self.inputs["occupancy_helper"]["selector"]))
         for name, spec in self.inputs.items():
             if name != "occupancy_helper":
                 self.assertIn("default", spec, name)
@@ -355,6 +356,70 @@ class BlueprintTests(unittest.TestCase):
             self.assertLess(str(sequence).find("input_boolean.turn_off"),
                             str(sequence).find("end_actions"))
             self.assertIn("temporary_helpers_unique", str(sequence))
+
+    def test_optional_occupancy_output_does_not_require_manual_toggle(self):
+        """Input boolean is an optional published output; state triggers tolerate an empty input."""
+        helper = self.inputs["occupancy_helper"]
+        self.assertEqual(helper["default"], "")
+        self.assertIn("OUTPUT", helper["description"])
+        triggers = {t.get("id"): t for t in self.data["triggers"] if t.get("id")}
+        for trigger_id, state in (("became_home", "on"), ("became_away", "off")):
+            with self.subTest(trigger=trigger_id):
+                spec = triggers[trigger_id]
+                self.assertEqual(spec["trigger"], "template")
+                self.assertIn("_occupancy_helper != ''", spec["value_template"])
+                self.assertIn(f"'{state}'", spec["value_template"])
+        self.assertEqual(self.data["trigger_variables"]["_occupancy_helper"], "!input occupancy_helper")
+
+    def test_direct_mode_tracker_transitions_run_actions_with_guards(self):
+        """Without a published switch, tracker transitions are sufficient, but guards still apply."""
+        choose = self.data["actions"][-1]["choose"]
+        vacant = next(b for b in choose if b["alias"] == "Occupancy changed to vacant")
+        occupied = next(b for b in choose if b["alias"] == "Occupancy changed to occupied")
+        self.assertEqual(vacant["sequence"], "!input away_actions")
+        self.assertIn("tracker_away", str(vacant["conditions"]))
+        self.assertIn("tracker_home", str(occupied["conditions"]))
+        self.assertIn("!input away_conditions", str(vacant["conditions"]))
+        self.assertIn("!input home_conditions", str(occupied["conditions"]))
+        self.assertIn("guest_mode", str(vacant["conditions"]))
+        self.assertIn("sleep_clear", str(vacant["conditions"]))
+        direct = vacant["conditions"][0]["conditions"][1]["conditions"][0]["value_template"]
+        tpl = self.env.from_string(direct)
+        c = self.evaluate(
+            trackers={"person.a": ("not_home", 15)},
+            activity={"binary_sensor.motion": ("off", 30)},
+        )
+        c["occupancy_helper"] = ""
+        self.assertEqual(tpl.render(**c).strip().lower(), "true")
+        c["trigger"] = {"id": "tracker_home"}
+        self.assertEqual(tpl.render(**c).strip().lower(), "false")
+        c["trigger"] = {"id": "tracker_away"}
+        c["guest_mode"] = "input_boolean.guests"
+        c["states"].entities["input_boolean.guests"].state = "on"
+        self.assertEqual(tpl.render(**c).strip().lower(), "false")
+
+    def test_output_mode_requires_switch_before_writing(self):
+        """No service target may be an empty literal entity_id with the output omitted."""
+        choose = self.data["actions"][-1]["choose"]
+        for name in ("Automatic arrival", "Automatic vacancy with safety checks"):
+            branch = next(b for b in choose if b["alias"] == name)
+            self.assertEqual(branch["conditions"][0]["value_template"],
+                             "{{ occupancy_helper != '' }}")
+            action = branch["sequence"][0]
+            self.assertEqual(action["target"]["entity_id"], "{{ occupancy_helper }}")
+
+    def test_direct_mode_diagnostics_use_derived_presence(self):
+        """Dashboard status in tracker-only mode cannot depend on a missing input_boolean."""
+        blocks = [a["variables"] for a in self.data["actions"] if "variables" in a]
+        derived = next(x["derived_vacant"] for x in blocks if "derived_vacant" in x)
+        diagnostics = next(x["diagnostic_line"] for x in blocks if "diagnostic_line" in x)
+        self.assertIn("all_trackers_away_stable", derived)
+        self.assertIn("occupancy_helper == ''", derived)
+        self.assertIn("derived_vacant", diagnostics)
+        c = self.evaluate(trackers={"person.a": ("not_home", 25)})
+        c["occupancy_helper"] = ""
+        result = self.env.from_string(derived).render(**c).strip().lower()
+        self.assertEqual(result, "true")
 
     def test_custom_trigger_no_builtin_sources(self):
         c = self.evaluate(trigger="custom_away")
