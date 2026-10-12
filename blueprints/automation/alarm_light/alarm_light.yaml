@@ -13,7 +13,7 @@ blueprint:
     an active fade; scheduled future alarms are evaluated again. The light
     runs only when a scheduled alarm event occurs. Default scheduling checks
     a lightweight minute-based template; optional native time scheduling
-    supports precise event-driven wake-up without clock polling.
+    disables that trigger and schedules an exact offset without clock polling.
   domain: automation
   author: "3115a083 (inspired by r3mcos3)"
   source_url: https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/alarm_light/alarm_light.yaml
@@ -227,6 +227,7 @@ triggers:
   # rescheduled if the alarm sensor changes.
   - trigger: time
     id: sunrise_precise
+    enabled: !input precise_start_enabled
     at:
       entity_id: !input alarm_sensor
       offset: !input precise_start_offset
@@ -236,6 +237,7 @@ triggers:
   # Native precise scheduling disables this minute-dependent expression.
   - trigger: template
     id: sunrise_start
+    enabled: "{{ not _precise_start_enabled }}"
     value_template: >-
       {% if not _precise_start_enabled %}
         {% set scheduled = as_timestamp(states(_alarm_sensor), 0) - (_lead_minutes | int(0) * 60) %}
