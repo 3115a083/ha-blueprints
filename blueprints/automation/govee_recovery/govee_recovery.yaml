@@ -95,10 +95,11 @@ blueprint:
           name: "⚠️ Allow one targeted power cycle"
           description: >-
             OFF by default. After trying to restart Govee2MQTT, power-cycle
-            only still-offline lights with an ON relay. Requires an enabled
-            app restart, a valid slug and a persistent cooldown helper.
-            Ping is diagnostic unless "Require failed Ping" is enabled.
-            Lamps with no relay are never power-cycled.
+            only still-offline lights with an ON relay used by ONE lamp.
+            Requires an enabled app restart, a valid slug and a persistent
+            cooldown helper. Ping is optional unless explicitly required.
+            Lamps with no relay or a relay shared by multiple listed lamps
+            are never power-cycled.
           default: false
           selector:
             boolean: {}
@@ -470,8 +471,15 @@ actions:
           {% for lamp in lamp_entries %}
             {% set relay = lamp.get('relay', '') | default('', true) %}
             {% set ping = lamp.get('ping', '') | default('', true) %}
+            {% set match = namespace(count=0) %}
+            {% for other in lamp_entries %}
+              {% if relay != '' and other.get('relay', '') | default('', true) == relay %}
+                {% set match.count = match.count + 1 %}
+              {% endif %}
+            {% endfor %}
             {% if states(lamp.light) in ['unavailable', 'unknown']
                   and relay != '' and is_state(relay, 'on')
+                  and match.count == 1
                   and (not require_ping_off or (ping != '' and is_state(ping, 'off'))) %}
               {% set ns.items = ns.items + [lamp] %}
             {% endif %}
@@ -487,16 +495,30 @@ actions:
         {% endfor %}
         {{ ns.names | join(', ') if ns.names else 'none' }}
       hard_reset_skip_reason: >-
-        {% if not power_cycle_enabled %}
-          disabled
-        {% elif not restart_requested | bool %}
-          add-on restart not configured or cooldown active
-        {% elif not persistent_ready | bool %}
-          date-and-time cooldown helper required
-        {% elif relay_off_count | int > 0 %}
-          a power relay was OFF; restore ON instead
+        {% if notification_language == 'de' %}
+          {% if not power_cycle_enabled %}
+            deaktiviert
+          {% elif not restart_requested | bool %}
+            Add-on-Neustart nicht eingerichtet oder Sperrzeit aktiv
+          {% elif not persistent_ready | bool %}
+            Datums-/Uhrzeit-Helfer für die Sperrzeit fehlt
+          {% elif relay_off_count | int > 0 %}
+            Relais war AUS; zuerst nur wieder einschalten
+          {% else %}
+            keine geeignete Lampe mit eigenem eingeschalteten Relais oder bereits verbunden
+          {% endif %}
         {% else %}
-          no eligible offline light with an ON relay or lights recovered
+          {% if not power_cycle_enabled %}
+            disabled
+          {% elif not restart_requested | bool %}
+            add-on restart not configured or cooldown active
+          {% elif not persistent_ready | bool %}
+            date-and-time cooldown helper required
+          {% elif relay_off_count | int > 0 %}
+            a power relay was OFF; restore ON instead
+          {% else %}
+            no eligible lamp with its own ON relay, or already recovered
+          {% endif %}
         {% endif %}
 
   - alias: "Step 3 - hard-reset remaining lamps one at a time"
