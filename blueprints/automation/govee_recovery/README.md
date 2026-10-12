@@ -48,7 +48,7 @@ Connected lamps with state \`off\` are considered available; **off** does not me
 
 </details>
 
-**Hard resets are disabled by default** and require all of the following: Govee2MQTT app restart enabled, a nonempty app slug, a valid persistent cooldown helper, a currently unavailable lamp, and its own available **ON** relay. Devices without a relay cannot be hard-reset. Power cycling does not require a Ping sensor by default, because some Govee devices may not respond to ICMP even when healthy.
+**Hard resets are disabled by default** and require all of the following: Govee2MQTT app restart enabled, a nonempty app slug, a valid persistent cooldown helper, a currently unavailable lamp, and its own available **ON** relay. **If multiple configured lamps share the same relay, that relay will never be deliberately power-cycled**; otherwise one reset could interrupt a second lamp that is working normally. Devices without a relay cannot be hard-reset. Power cycling does not require a Ping sensor by default, because some Govee devices may not respond to ICMP even when healthy.
 
 If you wish to restrict hard resets to devices that fail Ping, enable **Require failed Ping before hard reset** and configure that lamp's Ping sensor. This will skip devices with no Ping sensor, Ping ON, or unknown Ping state.
 
@@ -98,7 +98,7 @@ Example, with German selected:
 >
 > **Ergebnis:** Mindestens eine Lampe ist weiterhin nicht erreichbar. Bitte Govee2MQTT-Protokoll und WLAN prüfen.
 
-The text records that a command was **requested**, not that the service definitely succeeded. For failed or slow commands, inspect the automation trace and Govee2MQTT logs. The old failure notification is dismissed when all configured lamps become available again. Optional \`notify\` entities can also receive the report.
+The text records that a command was **requested** or a hard reset was **planned**, not that the service definitely succeeded. A lamp may reconnect before its scheduled hard reset, in which case its power is not interrupted. For failed or slow commands, inspect the automation trace and Govee2MQTT logs. The old failure notification is dismissed when all configured lamps become available again. Optional \`notify\` entities can also receive the report.
 
 ## Limitations and troubleshooting
 
