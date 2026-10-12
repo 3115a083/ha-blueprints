@@ -9,6 +9,7 @@ A collection of reusable, configurable **Home Assistant blueprints** maintained 
 | **Area Occupancy Manager** | Detect occupied/vacant areas using people, devices, and optional sensors. Run configurable actions, with guest/sleep protections and independent timed routines. | [Setup and examples](blueprints/automation/occupancy/README.md) | [Import blueprint](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2F3115a083%2Fha-blueprints%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Foccupancy%2Farea_occupancy_manager.yaml) |
 | **🌅 Sunrise Alarm / Light Wake-Up** | Start lights a configurable time before a phone alarm. Linear, ramp-up or instant brightening, with optional start, completion and alarm-time actions. | [Setup and examples](blueprints/automation/alarm_light/README.md) | [Import blueprint](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2F3115a083%2Fha-blueprints%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Falarm_light%2Falarm_light.yaml) |
 | **🔧 Govee Light Recovery** | Diagnose Govee2MQTT light unavailability and ESPHome relay power issues for any number of lamps, each with an optional relay and Ping sensor; guarded restoration, optional app restart and notifications. | [Setup and safety](blueprints/automation/govee_recovery/README.md) | [Import blueprint](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2F3115a083%2Fha-blueprints%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fgovee_recovery%2Fgovee_recovery.yaml) |
+| **🎵 Music Assistant / NSPanel Presets** | Start favorite radios/playlists, cycle speakers and transfer playback from NSPanel buttons without changing Blackymas firmware. | [Setup and examples](blueprints/automation/music_assistant_nspanel/README.md) | [Import blueprint](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2F3115a083%2Fha-blueprints%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fmusic_assistant_nspanel%2Fmusic_assistant_nspanel.yaml) |
 
 ## How to install a blueprint
 
@@ -33,12 +34,16 @@ blueprints/
     govee_recovery/
       govee_recovery.yaml
       README.md
+    music_assistant_nspanel/
+      music_assistant_nspanel.yaml
+      README.md
 .github/workflows/
   validate-blueprints.yml
 tests/
   test_blueprint.py
   test_alarm_light.py
   test_govee_recovery.py
+  test_music_assistant_nspanel.py
 ```
 
 New automation blueprints belong in `blueprints/automation/<topic>/`; script blueprints can use `blueprints/script/<topic>/`.
