@@ -52,6 +52,11 @@ class BlueprintTests(unittest.TestCase):
     def test_required_blueprint_structure(self):
         self.assertEqual(self.data["blueprint"]["domain"], "automation")
         self.assertEqual(self.data["blueprint"]["homeassistant"]["min_version"], "2024.10.0")
+        self.assertIn("source_url", self.data["blueprint"])
+        for key in ("triggers", "actions", "variables"):
+            self.assertIn(key, self.data)
+        for legacy_key in ("trigger", "condition", "action"):
+            self.assertNotIn(legacy_key, self.data)
         self.assertEqual(self.data["mode"], "parallel")
         self.assertEqual(self.inputs["occupancy_helper"]["default"], "")
         self.assertIn("input_boolean", str(self.inputs["occupancy_helper"]["selector"]))
