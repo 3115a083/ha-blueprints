@@ -13,16 +13,18 @@ A customizable sunrise-style light alarm for Home Assistant. It reads an existin
 3. In **💡 02 | Light & brightness**, select the target lights, brightness curve, start/target brightness, and how many minutes the fade takes.
 4. Optionally open **🎵 03 | Additional actions** to configure start, finish and alarm-time actions.
 5. Optionally open **🛡️ 04 | Optional conditions** to adjust darkness checking or add any Home Assistant conditions.
+6. For a more exact start without minute-based checks, open **⏱️ 05 | Optional precise scheduling**, enable native exact-time start, and enter a negative offset such as `-00:30:00`. This overrides the normal lead-minutes setting while enabled.
 
 **Default:** The lights start **30 minutes** before the alarm, brighten **linearly** over **30 minutes** from **1%** to **85%**, run **every day**, and only start when the selected person is **home** and the sun is **below the horizon**.
 
-**Efficient scheduling:** The sunrise automation is not executed every few seconds. A template is evaluated at minute boundaries and when the alarm sensor changes; it starts the automation only when the scheduled time window is reached. The alarm-time action uses a separate native timestamp trigger.
+**Efficient scheduling:** The default sunrise automation does not execute every few seconds: a template is checked at minute boundaries and starts the automation only when the scheduled window is reached. **Native precise scheduling** instead uses Home Assistant's event-driven time trigger on the alarm sensor with a negative offset. That allows exact scheduled timing without regularly checking the current time. The alarm-time actions already use a separate native timestamp trigger.
 
 ## Timing and brightness options
 
 | Option | Behavior |
 | --- | --- |
-| **Start before alarm** | 0 to 180 minutes before the timestamp, in one-minute increments; independent of fade duration; actual start is checked at minute resolution |
+| **Start before alarm (standard mode)** | 0 to 180 minutes before the timestamp, in one-minute increments; independent of fade duration; start checked at minute resolution |
+| **Precise native start (optional)** | Enter a valid negative `-HH:MM:SS` offset. Example: `-00:30:00` schedules exactly 30 minutes before the sensor time. This overrides the standard lead setting and avoids clock polling. |
 | **Linear** | Increases brightness evenly over the selected fade duration |
 | **Ramp-up / Ease-in** | Increases slowly at first and increasingly quickly toward the target; uses a quadratic curve |
 | **Instant** | Turns on directly at target brightness and does not wait for the fade duration |
@@ -57,6 +59,30 @@ Suppose brightness rises from **1%** to **81%** over 40 minutes:
 
 The figures are illustrative; commands are quantized to whole brightness percentages and scheduled update intervals.
 
+## ⏱️ Native precise scheduling: accuracy without extra polling
+
+If you want more accurate wake-up timing, **do not increase polling frequency in the morning**. Home Assistant supports an **entity-based native time trigger** with an offset. Its scheduler registers a timestamp-based future event, and recalculates the schedule when the alarm sensor changes.
+
+To enable it, expand **05 | Optional precise scheduling** and set:
+
+- **Enable native exact-time start:** ON.
+- **Exact offset before the alarm:** Enter a valid negative time duration, for example `-00:30:00` (30 minutes), `-00:05:30` (5 minutes 30 seconds), or `00:00:00` (at the alarm time).
+
+This mode uses the offset field *instead of* the numeric **Start lights this many minutes before the alarm** setting. If you later adjust the offset, save/reload the automation so Home Assistant registers the changed schedule. **Existing installations default to standard scheduling** until you enable this optional mode.
+
+| | Standard minutes mode | Native precise mode |
+| --- | --- | --- |
+| Start-time configuration | 0–180 minutes (number input) | Signed time offset, e.g. `-00:30:00` |
+| Time monitoring | Lightweight template evaluated every minute | Native scheduled event, **no repeating clock checks** |
+| Automation executions before sunrise | None | None |
+| Expected precision | Up to roughly 1 minute | Home Assistant scheduler resolution (typically seconds; not a hard real-time guarantee) |
+| Changing phone alarm | Re-evaluates the template | Reschedules the native event |
+| Restart while sunrise is running | Stops existing fade | Stops existing fade |
+
+Home Assistant needs a **valid offset syntax** for this mode because it is a native trigger configuration, not a text expression evaluated in the actions. An invalid offset can prevent the automation from loading, so verify the format after editing.
+
+The light's brightness update interval is independent of the alarm start trigger. Gradual fades intentionally send commands at the configured interval. Increasing that interval, such as from 15 to 60 seconds, reduces brightness commands but may make the steps more visible.
+
 ## 🎵 Additional actions
 
 Each slot accepts the standard Home Assistant **action selector**, including services, scripts, scenes, choose/if blocks, and conditions:
@@ -79,7 +105,7 @@ Choose the specific entities and automation actions directly in Home Assistant. 
 
 ## Safety, scheduling, and known limitations
 
-- **Timing precision and efficiency:** The automation uses an event-driven template trigger, not a 15-second periodic trigger. Home Assistant checks `now()`-based templates at minute boundaries and when the alarm timestamp sensor changes. The sunrise starts within approximately **60 seconds** of its intended time. A missed start during downtime is not executed retroactively; this avoids unexpected late light commands.
+- **Timing precision and efficiency:** Standard mode uses a template trigger updated at minute boundaries, not a 15-second periodic trigger, so start precision is approximately one minute. Native precise mode schedules the timestamp plus its negative offset directly instead. Missed starts during downtime are not executed retroactively.
 - **Rescheduling:** A changed alarm timestamp prevents the remaining steps and completion actions of an already running gradual fade. A new valid future alarm will schedule its own start.
 - **Restarts:** Home Assistant restarts or automation reloads cancel any fade currently running. Later alarm starts are evaluated normally. This blueprint does **not** save and restore in-progress brightness curves.
 - **Presence:** The selected person must be at **home** for the sunrise to begin. During a gradual fade, leaving home stops subsequent brightness commands. At the alarm timestamp, alarm-time actions require the person to be home.
