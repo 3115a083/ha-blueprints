@@ -16,11 +16,13 @@ A customizable sunrise-style light alarm for Home Assistant. It reads an existin
 
 **Default:** The lights start **30 minutes** before the alarm, brighten **linearly** over **30 minutes** from **1%** to **85%**, run **every day**, and only start when the selected person is **home** and the sun is **below the horizon**.
 
+**Efficient scheduling:** The sunrise automation is not executed every few seconds. A template is evaluated at minute boundaries and when the alarm sensor changes; it starts the automation only when the scheduled time window is reached. The alarm-time action uses a separate native timestamp trigger.
+
 ## Timing and brightness options
 
 | Option | Behavior |
 | --- | --- |
-| **Start before alarm** | 0 to 180 minutes before the timestamp, in one-minute increments; independent of fade duration |
+| **Start before alarm** | 0 to 180 minutes before the timestamp, in one-minute increments; independent of fade duration; actual start is checked at minute resolution |
 | **Linear** | Increases brightness evenly over the selected fade duration |
 | **Ramp-up / Ease-in** | Increases slowly at first and increasingly quickly toward the target; uses a quadratic curve |
 | **Instant** | Turns on directly at target brightness and does not wait for the fade duration |
@@ -77,7 +79,7 @@ Choose the specific entities and automation actions directly in Home Assistant. 
 
 ## Safety, scheduling, and known limitations
 
-- **Timing precision:** A repeating scheduler checks for the configured start time every 15 seconds. The start usually occurs within 15 seconds of the chosen minute, not at subsecond precision. Scheduled starts missed while Home Assistant was stopped are not retroactively executed.
+- **Timing precision and efficiency:** The automation uses an event-driven template trigger, not a 15-second periodic trigger. Home Assistant checks `now()`-based templates at minute boundaries and when the alarm timestamp sensor changes. The sunrise starts within approximately **60 seconds** of its intended time. A missed start during downtime is not executed retroactively; this avoids unexpected late light commands.
 - **Rescheduling:** A changed alarm timestamp prevents the remaining steps and completion actions of an already running gradual fade. A new valid future alarm will schedule its own start.
 - **Restarts:** Home Assistant restarts or automation reloads cancel any fade currently running. Later alarm starts are evaluated normally. This blueprint does **not** save and restore in-progress brightness curves.
 - **Presence:** The selected person must be at **home** for the sunrise to begin. During a gradual fade, leaving home stops subsequent brightness commands. At the alarm timestamp, alarm-time actions require the person to be home.
