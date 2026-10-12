@@ -1,115 +1,119 @@
-# 🔧 Govee Light Recovery | ESPHome Relay & MQTT
+# 🔧 Govee Light Recovery | Optional ESPHome Relay & MQTT
 
-A Home Assistant automation blueprint for **up to two Govee lights** controlled through **Govee2MQTT** and powered by **ESPHome Sonoff relays**. It checks unavailable lamp entities, restores accidentally switched-off relays, optionally tries cautious recovery steps, and notifies the user if the problem persists.
+A Home Assistant automation blueprint that monitors **any number of Govee2MQTT lights**. Add a separate entry for each lamp; an ESPHome power relay and a Ping reachability sensor are both **optional per lamp**.
 
-[Import the blueprint into Home Assistant](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2F3115a083%2Fha-blueprints%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fgovee_recovery%2Fgovee_recovery.yaml) · [Blueprint YAML](govee_recovery.yaml) · [Blueprint catalog](../../../README.md)
+When a lamp becomes unavailable, the blueprint can restore a switched-off relay (if present), optionally attempt a tightly guarded power cycle, restart Govee2MQTT once for the entire set, and report the result.
 
-**Requirements:** Home Assistant 2024.10 or newer, Govee lights already exposed as Home Assistant light entities, and their normally powered ESPHome relay switches. Optional app restarting needs Home Assistant OS or Supervised, administrative access, and a configured Govee2MQTT app slug.
+[**Import into Home Assistant**](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2F3115a083%2Fha-blueprints%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fgovee_recovery%2Fgovee_recovery.yaml) · [Blueprint YAML](govee_recovery.yaml) · [All blueprints](../../../README.md)
 
-## Improve reliability before enabling automatic recovery
+**Requirements:** Home Assistant 2024.10 or newer and Govee2MQTT lamp entities in the \`light\` domain. **Relays are not required**. Restarting Govee2MQTT requires Home Assistant OS or Supervised, the correct app slug, and Supervisor access.
 
-### ESPHome relays and updates
+**Migrating from an earlier version:** The old fixed \`light_1\`, \`relay_1\`, \`light_2\`, \`relay_2\` and \`ping_1\`/\`ping_2\` inputs have been replaced by the single repeatable \`lamp_entries\` input. After updating the blueprint, **edit your existing automation and reselect its lamps**. Old two-device inputs are not migrated automatically.
 
-If your Sonoff uses an **ESP8266**, first review its ESPHome firmware configuration. ESPHome documents that early_pin_init set to false can prevent relay toggling during firmware updates/restarts. restore_mode ALWAYS_ON initializes the switch logically ON, but **does not guarantee uninterrupted power during boot, flashing, or actual power loss**.
+## 💡 01 | Add as many lights as needed
 
-Example fragment only. Verify your hardware board, GPIO, electrical logic/inversion and existing ESPHome configuration before using it:
+Choose **Govee lamps (add as many as needed)** and click **Add** for each light. Each row offers:
 
-    esp8266:
-      board: esp01_1m          # Example only; replace with actual board
-      early_pin_init: false
+- **Govee light — required:** Select its \`light.\` entity.
+- **Power relay — optional:** Select the \`switch.\` that physically powers that lamp, only if it exists and is normally meant to stay ON.
+- **Ping sensor — optional:** Select a \`binary_sensor.\` that reports whether that lamp answers ICMP Ping. Needed only if you want the optional relay power-cycle step.
 
-    switch:
-      - platform: gpio
-        id: ceiling_light_power
-        name: "Ceiling light power"
-        pin: GPIO12            # EXAMPLE ONLY, not a universal relay pin
-        restore_mode: ALWAYS_ON
+The Home Assistant input is a repeatable object selector, so it has **no built-in two-light or three-light limit**. Its form presents device rows rather than requiring a manually constructed mapping. <https://www.home-assistant.io/docs/blueprint/selectors/#object-selector>
 
-The most reliable setup for a networked smart ceiling lamp is generally a permanent power supply and a detached wall-switch input that sends control events without disconnecting the lamp. Any mains wiring change must comply with local electrical regulations and be performed by a qualified electrician.
+### Example setups
 
-ESPHome documentation: [ESP8266 early_pin_init](https://esphome.io/components/esp8266/) and [switch restore_mode](https://esphome.io/components/switch/).
+| Lamp | Relay | Ping | Available repair methods |
+| --- | --- | --- | --- |
+| Living room ceiling | Sonoff ESPHome switch | Ping sensor | Restore relay, optional guarded power cycle, optional bridge restart |
+| Bedroom ceiling | Not configured | Not configured | Optional bridge restart and failure notification |
+| Hallway ceiling | Not configured | Ping sensor | Optional bridge restart and failure notification |
 
-### Local Govee control
+An equivalent underlying list looks like this (you normally configure it in the UI):
 
-**Govee2MQTT already supports LAN-first control** when the particular Govee model and requested functionality support the LAN API. Some Govee models or features depend instead on cloud/IoT/BLE transports. Check the exact model before assuming an entirely offline setup is possible.
+\`\`\`yaml
+lamp_entries:
+  - light: light.govee_living_room
+    relay: switch.sonoff_living_room
+    ping: binary_sensor.govee_living_room_ping
+  - light: light.govee_bedroom
+  - light: light.govee_hallway
+    ping: binary_sensor.govee_hallway_ping
+\`\`\`
 
-For supported models, enable LAN Control separately in the Govee Home app, reserve a stable IP address for each lamp, and add those addresses to the Govee2MQTT **scan** configuration if multicast discovery is unreliable. The **broadcast_all** option may also help some setups. The LAN protocol uses UDP 4001 and 4003 on the lamp, UDP 4002 on the bridge host, and multicast group 239.255.255.250 for discovery. Ensure the Wi-Fi access point, VLANs and firewall do not block these flows.
+**No relay selected?** Nothing is switched at the mains: relay restoration and power cycling are automatically skipped for that lamp. It can still be checked and included in an optional shared Govee2MQTT restart. A selected Ping sensor alone never authorizes a power cycle without a matching relay.
 
-See [Govee2MQTT configuration](https://github.com/wez/govee2mqtt/blob/main/docs/CONFIG.md) and [LAN requirements](https://github.com/wez/govee2mqtt/blob/main/docs/LAN.md).
+## 🛠️ 02 | Recovery steps
 
-## Configure the recovery blueprint
+A lamp is considered offline when its entity is \`unknown\` or \`unavailable\` for at least the configured period (default **2 minutes**). The normal \`off\` state is **not** an error.
 
-### 💡 01 | Lights and ESPHome relays
-
-Choose **Govee light 1** and the Sonoff/ESPHome **relay 1** feeding it. Optionally select **light 2** and **relay 2** as a complete second pair. Do not leave only one of the two fields configured. Both relay entities are assumed to be normally ON.
-
-Light state **off** means that the lamp is connected but not illuminated; it is not treated as an error. Only **unavailable** or **unknown** indicates a detected connectivity problem. This automation does not change Govee on/off, brightness or colors.
-
-### 🛠️ 02 | Recovery steps
-
-The blueprint waits a configurable time, default two minutes, after a lamp becomes unavailable. A Sonoff relay that stays OFF for one minute also triggers recovery. After Home Assistant starts, it waits three minutes before checking to avoid startup false alarms.
-
-| Step | Default | Behavior |
+| Recovery step | Default | Conditions and effect |
 | --- | --- | --- |
-| Restore switched-off power relay | **ON** | Turn the affected relay ON, then wait for reconnection. This step never switches power OFF. |
-| Deliberate single-lamp power cycle | **OFF** | Only if exactly one lamp was unavailable, its relay is known ON, its dedicated Ping sensor is OFF, and a persistent cooldown timestamp was successfully updated. Turns that relay OFF briefly, then ON once. |
-| Govee2MQTT app restart | **OFF** | If a light is still unavailable while its relay is ON, restart the selected Govee2MQTT app once and allow reconnection time. |
-| Report failure | **ON** | Write a persistent Home Assistant notification with observed lamp, relay and Ping states. |
+| Turn an OFF power relay ON | **Enabled** | Runs only on entries with a configured relay that actually reports OFF. No power is deliberately cut. |
+| Deliberate relay power cycle | **Disabled** | Requires one initially unavailable lamp, a configured relay reporting ON, a dedicated Ping sensor reporting OFF, no relay fault in this attempt, and a persisted cooldown. Turns only that one relay OFF briefly and back ON. |
+| Restart Govee2MQTT | **Disabled** | If a light remains unavailable and its relay is ON **or no relay is configured**, restart the shared bridge once, not once per lamp. Requires a persisted cooldown. |
+| Notify about failure | **Enabled** | Show a persistent notification listing the status, relay (or “no relay”) and Ping for **every** configured light. Optional extra phone notification. |
 
-**Safety:** Never enable an automatic mains power cycle for safety-critical lighting, during ESPHome OTA/firmware updates, or if a brief power loss is unsafe. When both lamps disappear together, automated relay power cycling is suppressed to avoid disrupting a likely shared MQTT/bridge/network outage.
+When two or more lights fail together, **power cycling is suppressed**. This helps avoid disrupting multiple healthy devices during a shared bridge or network outage.
 
-### 🔄 03 | Optional Govee2MQTT app restart
+Relay restoration remains possible during the cooldown because switching an unexpectedly OFF relay ON is less disruptive than restarting it. Disruptive steps are rate-limited by one shared cooldown timestamp.
 
-Enable app restart only after verifying the slug in **Settings → Apps → Govee2MQTT**. Enter the slug, not the title. The blueprint uses the official Supervisor action:
+### Recovery schedule
 
-    action: hassio.app_restart
-    data:
-      app: YOUR_GOVEE2MQTT_APP_SLUG
+The automation checks after an offline transition, when a configured relay changes to OFF, after Home Assistant starts (3-minute grace period), and every 30 minutes if a persistent cooldown helper exists. A recovery run stops when all configured lights and relays are healthy.
 
-This restarts Govee2MQTT, not the MQTT broker, Home Assistant, or the host. It is available only on Home Assistant OS or Supervised and requires an appropriate administrator account.
+An aggregated state trigger may not fire again when another lamp becomes unavailable while one remains offline. The periodic retry with a cooldown helper provides a later retry; you can also run the automation manually if troubleshooting.
 
-### 📡 04 | Reachability and retry limits
+## 🔄 03 | Optional Govee2MQTT restart
 
-Optional **Ping (ICMP)** binary sensors can test each lamp's reserved IP address. Configure the [Ping integration](https://www.home-assistant.io/integrations/ping), then select the sensors here. **ON** indicates a successful Ping; **OFF** may also occur if a device or firewall simply blocks ICMP, so confirm real behavior before enabling power cycling.
+Enable app restart and enter the exact Govee2MQTT add-on/app **slug** shown in Home Assistant's app details. The automation calls \`hassio.app_restart\`, which is available only where the Supervisor is installed.
 
-A single optional Home Assistant **input_datetime with both date and time** records the last recovery attempt for both lamps. Example name: input_datetime.govee_last_recovery. Initialize it to a past time older than your chosen cooldown. The default cooldown is **60 minutes**.
+This works for **lights with no power relay** too. The bridge is restarted **at most once per recovery attempt**, irrespective of the number of lamps. It does not restart Home Assistant, the host or the MQTT broker.
 
-The helper is required for automatic power cycling and periodic retries. With no helper, the blueprint can react to new outages and restore switched-off relays, but periodic retries and deliberate power cycling are disabled. Even during cooldown, a relay found OFF can be safely restored ON; disruptive operations are still blocked.
+## 📡 04 | Retry protection
 
-### 🔔 05 | Notifications
+Create one Home Assistant \`input_datetime\` helper with both **date and time**, for example \`input_datetime.govee_last_recovery\`. Initialize it to a timestamp older than the default **60-minute cooldown** before the first attempt.
 
-A failed recovery creates a persistent Home Assistant notification with a diagnostic snapshot of both lamps, power relays and Ping sensors. A new successful repair clears the previous failure notification. Optionally choose an available **notify entity** for an additional push/message destination. Success notifications are disabled by default.
+The helper prevents repeated disruptive recovery attempts even after Home Assistant restarts. A valid, recently saved timestamp is required for a deliberate power cycle or bridge restart. Without it, the blueprint can still restore relay power, detect failures and notify, but **cannot** power-cycle, restart the bridge or run periodic retries.
 
-## Recovery sequence
+For device-specific Ping information, use Home Assistant's [Ping (ICMP) integration](https://www.home-assistant.io/integrations/ping). Reserve stable IP addresses. A Ping failure can also be caused by firewalls or devices that ignore ICMP and is not definitive proof that the lamp is disconnected.
 
-    Lamp unavailable for 2 minutes OR power relay OFF for 1 minute
-                            |
-                 Check setup and cooldown
-                            |
-                  Relay OFF? Turn it ON
-                            |
-               Wait for light reconnection
-                            |
-            One lamp still unavailable + Ping OFF?
-                            |
-              Optional single power cycle
-                            |
-                  Lamp still unavailable?
-                            |
-              Optional one Govee2MQTT restart
-                            |
-                Re-check current statuses
-                     /              \
-                 Recovered         Failed
-                    |                |
-             Clear warning     Notify with details
+## 🔔 05 | Notifications
 
-The blueprint also checks at Home Assistant startup; periodic checks every 30 minutes are available only when the persistent cooldown helper has been selected. The actual minimum time between full attempts is the configured cooldown.
+A failed attempt creates a Home Assistant persistent notification with the initial and final state of every selected lamp, relay and Ping entity. A successful recovery dismisses the previous warning. If a \`notify\` entity is provided, the notification may also be sent to a phone or other recipient.
 
-## Limits and troubleshooting
+Because device, WLAN, MQTT and bridge failures can look alike, diagnostic snapshots identify **symptoms**, not guaranteed root causes. Available (\`on\`/\`off\`) lights that silently ignore commands require an independent health check; availability alone cannot identify that fault.
 
-A Home Assistant light entity alone cannot conclusively differentiate among power loss, Wi-Fi failure, LAN discovery, MQTT connectivity, bridge state and Govee cloud fallback. **The notification is a diagnostic clue, not a proven root-cause analysis.** Inspect Govee2MQTT logs and router device status to investigate the cause.
+## Improve reliability at the source
 
-If an entity remains available and shows on/off but commands no longer work, a simple availability-based automation will not detect the silent failure. Device-specific acknowledgements or a reliable independent health sensor would be necessary.
+### ESPHome relay behavior (if you use a power relay)
 
-Before enabling power cycles or app restarts, test each stage with controlled interruptions. Verify the correct relay is paired with its light. The blueprint includes static regression tests, but has not been tested on your exact Sonoff and Govee models or on a live Home Assistant instance.
+For **ESP8266 Sonoff** boards, consider \`early_pin_init: false\` to reduce boot-time relay glitches. A GPIO relay with \`restore_mode: ALWAYS_ON\` restores ON after boot. Neither guarantees physically uninterrupted power throughout an OTA update or restart.
+
+\`\`\`yaml
+esp8266:
+  board: esp01_1m           # Example only; use the correct model/board
+  early_pin_init: false
+
+switch:
+  - platform: gpio
+    id: ceiling_power
+    name: "Ceiling lamp power"
+    pin: GPIO12             # EXAMPLE: check real pin and inversion
+    restore_mode: ALWAYS_ON
+\`\`\`
+
+Prefer uninterrupted supply and a detached wall switch where possible. Changes to mains wiring must be performed in accordance with local electrical safety rules by qualified personnel.
+
+Resources: [ESPHome ESP8266](https://esphome.io/components/esp8266/) · [ESPHome switches](https://esphome.io/components/switch/).
+
+### Govee LAN and MQTT reliability
+
+Govee2MQTT can use Govee's local LAN protocol **on models that support it**. Enable LAN control in the Govee app, reserve device IP addresses, allow the required UDP ports, and provide explicit IPs to Govee2MQTT's \`scan\` option when multicast discovery fails. Check its logs when the lamp remains unavailable even though power and Wi-Fi are present.
+
+See [Govee2MQTT](https://github.com/wez/govee2mqtt) and its [LAN documentation](https://github.com/wez/govee2mqtt/blob/main/docs/LAN.md).
+
+## Safety and testing
+
+Begin with relay restoration alone. Only enable power cycling after validating each matching relay and Ping sensor; never enable deliberate cuts for safety-critical lights or during ESPHome firmware flashing. Restarting the bridge may briefly affect **all** lamps controlled by that Govee2MQTT instance.
+
+The repository includes [static regression tests](../../../tests/test_govee_recovery.py). Real-world Home Assistant and hardware testing is still required; this automation cannot prove which network component originally failed.
