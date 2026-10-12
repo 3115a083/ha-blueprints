@@ -270,10 +270,21 @@ actions:
       pair_2_valid: "{{ (light_2 == '' and relay_2 == '') or (light_2 != '' and relay_2 != '') }}"
       lamp_1_missing: "{{ states(light_1) in ['unavailable', 'unknown'] }}"
       lamp_2_missing: "{{ light_2 != '' and states(light_2) in ['unavailable', 'unknown'] }}"
+      initial_relay_1_off: "{{ is_state(relay_1, 'off') }}"
+      initial_relay_2_off: "{{ relay_2 != '' and is_state(relay_2, 'off') }}"
       last_attempt: >-
         {{ as_timestamp(states(cooldown_helper), 0) if cooldown_helper != '' else 0 }}
-  - condition: template
-    value_template: "{{ pair_2_valid | bool }}"
+  - if:
+      - condition: template
+        value_template: "{{ not pair_2_valid | bool }}"
+    then:
+      - action: persistent_notification.create
+        continue_on_error: true
+        data:
+          title: "Govee recovery configuration incomplete"
+          notification_id: govee_recovery_setup
+          message: "Light 2 and relay 2 must either both be selected or both remain empty."
+      - stop: "Configure both the second light and its relay."
   # Avoid periodic executions when no persisted cooldown is configured.
   - condition: template
     value_template: "{{ trigger.id != 'periodic' or cooldown_helper != '' }}"
@@ -327,10 +338,7 @@ actions:
           entity_id: "{{ relay_2 }}"
   - if:
       - condition: template
-        value_template: >-
-          {{ restore_power and (
-             'off' in [states(relay_1), states(relay_2) if relay_2 != '' else 'on']
-             or trigger.id in ['relay_1_off', 'relay_2_off']) }}
+        value_template: "{{ restore_power and (initial_relay_1_off | bool or initial_relay_2_off | bool) }}"
     then:
       - wait_template: >-
           {{ states(light_1) not in ['unavailable', 'unknown']
@@ -339,12 +347,18 @@ actions:
           seconds: !input relay_wait_seconds
         continue_on_timeout: true
 
+  - variables:
+      cooldown_saved: >-
+        {{ cooldown_helper != '' and
+           as_timestamp(states(cooldown_helper), 0) > 0 and
+           as_timestamp(states(cooldown_helper), 0) >=
+           as_timestamp(now()) - 120 }}
   # Step 2: an opt-in power cycle, only for a *single* unavailable light
   # whose dedicated ping sensor reports OFF. Never cycle both at once.
   - if:
       - condition: template
         value_template: >-
-          {{ power_cycle_enabled and cooldown_helper != ''
+          {{ power_cycle_enabled and cooldown_saved | bool
              and not (both_missing_initially | bool)
              and states(light_1) in ['unavailable', 'unknown']
              and is_state(relay_1, 'on')
@@ -367,7 +381,7 @@ actions:
   - if:
       - condition: template
         value_template: >-
-          {{ power_cycle_enabled and cooldown_helper != ''
+          {{ power_cycle_enabled and cooldown_saved | bool
              and not (both_missing_initially | bool)
              and light_2 != '' and states(light_2) in ['unavailable', 'unknown']
              and is_state(relay_2, 'on')
