@@ -87,16 +87,17 @@ Example, with German selected:
 >
 > **Auslöser:** Keine Verbindung: Deckenlampe Wohnzimmer
 >
-> **Status der Lampen:**
-> - **Deckenlampe Wohnzimmer:** Keine Verbindung; Relais AN; Ping ohne Antwort
-> - **Deckenlampe Schlafzimmer:** Erreichbar; Relais AN
+> **Ergebnis:** 1/2 Lampen erreichbar.
 >
-> **Wiederherstellungsversuche:**
-> - Govee2MQTT: Neustart angefordert
-> - Stromversorgung: kein ausgeschaltetes Relais erkannt
-> - Hard-Reset: Deckenlampe Wohnzimmer
+> **Betroffene Lampen:**
+> - **Deckenlampe Wohnzimmer:** nicht erreichbar · Relais EIN · Ping ohne Antwort. WLAN/Stromversorgung prüfen (Ping allein ist nicht eindeutig).
 >
-> **Ergebnis:** Mindestens eine Lampe ist weiterhin nicht erreichbar. Bitte Govee2MQTT-Protokoll und WLAN prüfen.
+> **Wiederherstellungsversuche (Reihenfolge):**
+> 1. Govee2MQTT: Neustart angefordert; Erfolg bitte im Automations-Trace prüfen
+> 2. Relais: keine ausgeschalteten Relais
+> 3. Hard-Reset: für folgende Lampen vorgesehen (nicht unbedingt ausgeführt): Deckenlampe Wohnzimmer
+>
+> **Nächster Schritt:** Add-on-Kennung, Automations-Trace und Govee2MQTT-Protokoll prüfen.
 
 The text records that a command was **requested** or a hard reset was **planned**, not that the service definitely succeeded. A lamp may reconnect before its scheduled hard reset, in which case its power is not interrupted. For failed or slow commands, inspect the automation trace and Govee2MQTT logs. The old failure notification is dismissed when all configured lamps become available again. Optional \`notify\` entities can also receive the report.
 
