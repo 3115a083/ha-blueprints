@@ -7,6 +7,7 @@ A collection of reusable, configurable **Home Assistant blueprints** maintained 
 | Blueprint | Description | Documentation | Install |
 | --- | --- | --- | --- |
 | **Area Occupancy Manager** | Detect occupied/vacant areas using people, devices, and optional sensors. Run configurable actions, with guest/sleep protections and independent timed routines. | [Setup and examples](blueprints/automation/occupancy/README.md) | [Import blueprint](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2F3115a083%2Fha-blueprints%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Foccupancy%2Farea_occupancy_manager.yaml) |
+| **🌅 Sunrise Alarm / Light Wake-Up** | Start lights a configurable time before a phone alarm. Linear, ramp-up or instant brightening, with optional start, completion and alarm-time actions. | [Setup and examples](blueprints/automation/alarm_light/README.md) | [Import blueprint](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2F3115a083%2Fha-blueprints%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Falarm_light%2Falarm_light.yaml) |
 
 ## How to install a blueprint
 
@@ -25,10 +26,14 @@ blueprints/
     occupancy/
       area_occupancy_manager.yaml
       README.md
+    alarm_light/
+      alarm_light.yaml
+      README.md
 .github/workflows/
   validate-blueprints.yml
 tests/
   test_blueprint.py
+  test_alarm_light.py
 ```
 
 New automation blueprints belong in `blueprints/automation/<topic>/`; script blueprints can use `blueprints/script/<topic>/`.
