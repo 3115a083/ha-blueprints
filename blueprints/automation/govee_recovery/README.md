@@ -85,8 +85,6 @@ Example, with German selected:
 
 > **Govee-Verbindungsprüfung**
 >
-> **Auslöser:** Keine Verbindung: Deckenlampe Wohnzimmer
->
 > **Ergebnis:** 1/2 Lampen erreichbar.
 >
 > **Betroffene Lampen:**
@@ -99,7 +97,7 @@ Example, with German selected:
 >
 > **Nächster Schritt:** Add-on-Kennung, Automations-Trace und Govee2MQTT-Protokoll prüfen.
 
-The text records that a command was **requested** or a hard reset was **planned**, not that the service definitely succeeded. A lamp may reconnect before its scheduled hard reset, in which case its power is not interrupted. For failed or slow commands, inspect the automation trace and Govee2MQTT logs. The old failure notification is dismissed when all configured lamps become available again. Optional \`notify\` entities can also receive the report.
+If a recovery is blocked by the cooldown, the failure remains visible; however, repeated 10-minute periodic checks do not repeatedly push the same warning to your phone. The text records that a command was **requested** or a hard reset was **planned**, not that the service definitely succeeded. A lamp may reconnect before its scheduled hard reset, in which case its power is not interrupted. For failed or slow commands, inspect the automation trace and Govee2MQTT logs. The old failure notification is dismissed when all configured lamps become available again. Optional \`notify\` entities can also receive the report.
 
 ## Limitations and troubleshooting
 
@@ -113,7 +111,7 @@ For Govee LAN-capable models, enable LAN control, reserve stable lamp IPs, revie
 
 1. Update/re-import the Govee recovery blueprint from GitHub, then open and **save** the existing automation.
 2. Ensure the old fixed light slots have been migrated to the repeatable **Govee lamps** list.
-3. Enable **Govee2MQTT app restart** and verify the exact **app slug**. It is disabled by default.
+3. Verify the exact **Govee2MQTT app slug** in section 03. The restart toggle now defaults to **ON**, but no restart occurs unless the slug is configured. Previously saved automation inputs may still contain an explicit OFF value.
 4. Set the desired language in **05 | Notifications**.
 5. Initially leave deliberate relay hard resets disabled. Confirm the bridge restarts and reconnects the lamps first.
 6. If appropriate, add a date+time cooldown helper and enable power cycling only after checking your relay wiring and safety.
