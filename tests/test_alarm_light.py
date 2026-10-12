@@ -80,6 +80,7 @@ class AlarmLightTests(unittest.TestCase):
             "alarm_sensor_id": "sensor.alarm",
             "wake_person": "person.user",
             "lead_minutes": lead,
+            "precise_start_enabled": False,
             "weekday_selection": weekday_selection,
             "require_dark": require_dark,
             "brightness_mode": mode,
@@ -113,8 +114,9 @@ class AlarmLightTests(unittest.TestCase):
             self.assertIn(key, self.data)
         for old_key in ("trigger", "condition", "action"):
             self.assertNotIn(old_key, self.data)
-        self.assertEqual(len(self.data["triggers"]), 2)
-        self.assertEqual({t["id"] for t in self.data["triggers"]}, {"sunrise_start", "alarm_time"})
+        self.assertEqual(len(self.data["triggers"]), 3)
+        self.assertEqual({t["id"] for t in self.data["triggers"]},
+                         {"sunrise_start", "sunrise_precise", "alarm_time"})
         self.assertEqual(
             next(t for t in self.data["triggers"] if t["id"] == "alarm_time")["at"],
             "!input alarm_sensor",
@@ -124,18 +126,21 @@ class AlarmLightTests(unittest.TestCase):
         references = set(re.findall(r"!input\s+(\w+)", self.source))
         self.assertFalse(references - set(self.inputs))
         groups = self.data["blueprint"]["input"]
-        self.assertEqual(list(groups), ["alarm", "light", "extra_actions", "safety"])
+        self.assertEqual(list(groups), ["alarm", "light", "extra_actions", "safety", "precision"])
         self.assertTrue(groups["extra_actions"]["collapsed"])
         self.assertTrue(groups["safety"]["collapsed"])
+        self.assertTrue(groups["precision"]["collapsed"])
         self.assertFalse(groups["alarm"].get("collapsed", False))
         self.assertFalse(groups["light"].get("collapsed", False))
-        for group in ("extra_actions", "safety"):
+        for group in ("extra_actions", "safety", "precision"):
             for key, spec in groups[group]["input"].items():
                 self.assertIn("default", spec, key)
         self.assertIn("entity", self.inputs["alarm_sensor"]["selector"])
         self.assertIn("target", self.inputs["lights_target"]["selector"])
         self.assertIn("action", self.inputs["alarm_time_actions"]["selector"])
         self.assertEqual(self.inputs["weekday_selection"]["default"], "all")
+        self.assertFalse(self.inputs["precise_start_enabled"]["default"])
+        self.assertEqual(self.inputs["precise_start_offset"]["default"], "-00:30:00")
 
     def test_every_jinja_template_parses(self):
         def visit(item):
@@ -160,11 +165,13 @@ class AlarmLightTests(unittest.TestCase):
         self.assertIn("_lead_minutes", sunrise["value_template"])
         self.assertEqual(self.data["trigger_variables"]["_alarm_sensor"], "!input alarm_sensor")
         self.assertEqual(self.data["trigger_variables"]["_lead_minutes"], "!input lead_minutes")
+        self.assertEqual(self.data["trigger_variables"]["_precise_start_enabled"], "!input precise_start_enabled")
 
         def evaluated(current, alarm="2026-10-12T07:00:00+00:00", lead=30):
             scope = self.context(current=current, alarm=alarm, lead=lead)
             scope["_alarm_sensor"] = "sensor.alarm"
             scope["_lead_minutes"] = lead
+            scope["_precise_start_enabled"] = False
             return self.truthy(self.render(sunrise["value_template"], scope))
 
         self.assertFalse(evaluated("2026-10-12T06:29:59+00:00"))
@@ -173,6 +180,36 @@ class AlarmLightTests(unittest.TestCase):
         self.assertFalse(evaluated("2026-10-12T06:31:00+00:00"))
         self.assertTrue(evaluated("2026-10-12T06:40:01+00:00", lead=20))
         self.assertFalse(evaluated("2026-10-12T06:30:01+00:00", alarm="unavailable"))
+
+    def test_native_precise_offset_scheduled_event_without_clock_scan(self):
+        """Native time trigger observes the timestamp sensor and exact configured offset."""
+        sunrise = next(t for t in self.data["triggers"] if t["id"] == "sunrise_precise")
+        self.assertEqual(sunrise["trigger"], "time")
+        self.assertEqual(sunrise["at"]["entity_id"], "!input alarm_sensor")
+        self.assertEqual(sunrise["at"]["offset"], "!input precise_start_offset")
+        self.assertFalse(any(t["trigger"] == "time_pattern" for t in self.data["triggers"]))
+
+        choose = self.data["actions"][-1]["choose"][0]
+        condition = choose["conditions"][0]["value_template"]
+        ctx = self.context(current="2026-10-12T06:30:00+00:00")
+        ctx["trigger"] = {"id": "sunrise_precise"}
+        ctx["precise_start_enabled"] = True
+        self.assertTrue(self.truthy(self.render(condition, ctx)))
+        ctx["precise_start_enabled"] = False
+        self.assertFalse(self.truthy(self.render(condition, ctx)))
+
+    def test_precise_mode_disables_minute_template_path(self):
+        """When precise scheduling is on, the fallback never evaluates the clock."""
+        fallback = next(t for t in self.data["triggers"] if t["id"] == "sunrise_start")
+        ctx = self.context()
+        ctx["_alarm_sensor"] = "sensor.alarm"
+        ctx["_lead_minutes"] = 30
+        ctx["_precise_start_enabled"] = True
+        ctx["now"] = lambda: self.fail("Precise mode should not read now()")
+        self.assertFalse(self.truthy(self.render(fallback["value_template"], ctx)))
+        ctx["_precise_start_enabled"] = False
+        ctx["now"] = lambda: dt.datetime.fromisoformat("2026-10-12T06:30:01+00:00")
+        self.assertTrue(self.truthy(self.render(fallback["value_template"], ctx)))
 
     def test_before_alarm_window_and_darkness(self):
         branch = self.data["actions"][-1]["choose"][0]
