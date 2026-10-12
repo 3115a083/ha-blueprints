@@ -281,7 +281,8 @@ class GoveeRecoveryTests(unittest.TestCase):
             ))
             self.assertIn(heading, report)
             self.assertIn("Living Room", report)
-            self.assertIn("Bedroom", report)
+            self.assertNotIn("**Bedroom**", report)
+            self.assertIn("1/2", report)
             self.assertIn(missing_text, report)
             self.assertNotIn("initial_snapshot=", report)
             self.assertIn("Ping", report)
@@ -350,13 +351,15 @@ class GoveeRecoveryTests(unittest.TestCase):
         self.assertIn("final_offline_count", str(failure["conditions"]))
         self.assertIn("notification_language", str(failure["sequence"]))
 
-    def test_active_cooldown_creates_explanatory_notification(self):
-        step = self.action("Explain an active cooldown instead of silently skipping recovery")
-        self.assertIn("cooldown_ready", step["if"][0]["value_template"])
-        self.assertEqual(step["then"][0]["action"], "persistent_notification.create")
-        self.assertEqual(step["then"][0]["data"]["notification_id"], "govee_recovery_failed")
-        self.assertIn("timestamp_custom", step["then"][0]["data"]["message"])
-        self.assertEqual(step["then"][-1]["stop"], "Waiting for the next safe retry")
+    def test_cooldown_does_not_silence_persistent_failure_report(self):
+        """Even if retry is blocked, the persistent report remains visible."""
+        warning = self.action("Notify on remaining faults; clear old warnings after recovery")
+        failure = warning["choose"][0]["sequence"]
+        self.assertEqual(failure[0]["action"], "persistent_notification.create")
+        self.assertEqual(failure[0]["data"]["notification_id"], "govee_recovery_failed")
+        self.assertIn("cooldown_ready", str(failure[1]))
+        self.assertIn("trigger.id != 'periodic'", str(failure[1]))
+        self.assertFalse(any(x.get("stop") == "Waiting for the next safe retry" for x in self.actions()))
 
     def test_skip_reasons_and_candidate_names_available_for_report(self):
         candidates = self.action("Find still-offline lamps eligible for a hard reset")
@@ -367,7 +370,7 @@ class GoveeRecoveryTests(unittest.TestCase):
         self.assertIn("reset_candidate_names", notes["variables"])
         self.assertIn("hard_reset_skip_reason", notes["variables"])
         self.assertIn("not power_cycle_enabled", notes["variables"]["hard_reset_skip_reason"])
-        self.assertIn("planned for", self.formula("recovery_message"))
+        self.assertIn("Eligible targets", self.formula("recovery_message"))
         self.assertIn("vorgesehen", self.formula("recovery_message"))
 
     def test_documentation_and_catalog(self):
