@@ -3,12 +3,14 @@ blueprint:
   description: >-
     Watch any number of Govee2MQTT lights. Add as many light entries as needed;
     each may optionally include an ESPHome power relay and a Ping sensor.
-    Restore a relay that unexpectedly turns OFF, optionally try a carefully
-    guarded single-device power cycle, and optionally restart Govee2MQTT once
-    per recovery attempt. Report unrecovered lights through Home Assistant.
+    First request one Govee2MQTT app restart, then recheck all lights. If a
+    lamp remains offline, restore an OFF power relay, and optionally attempt
+    a targeted OFF/ON hardware reset as the last resort. Clear, per-lamp
+    notifications explain what was observed and what was actually requested.
 
     Safe defaults: power cycling and bridge restarting are OFF. A persistent
-    input_datetime cooldown helper is required before disruptive recovery.
+    input_datetime cooldown helper is recommended for persistent throttling,
+    and is required for automatic relay power cycling.
     This blueprint does not change a light's desired on/off, colors or effects.
     A lamp that appears available but ignores commands cannot be diagnosed
     from entity availability alone.
@@ -58,9 +60,9 @@ blueprint:
                       filter:
                         domain: binary_sensor
     recovery:
-      name: "🛠️ 02 | Recovery steps"
+      name: "🔄 02 | Recovery sequence"
       icon: mdi:wrench-clock
-      description: "Restore a relay found OFF; enable more disruptive steps only after testing."
+      description: "An enabled Govee2MQTT restart always runs first; relay restoration and optional hard reset follow only if needed."
       input:
         offline_minutes:
           name: "Confirm a light offline for (minutes)"
@@ -92,16 +94,33 @@ blueprint:
         power_cycle_enabled:
           name: "⚠️ Allow one targeted power cycle"
           description: >-
-            OFF by default. Only when exactly one light was offline at the
-            start, its relay is ON, its Ping sensor is OFF, no relay needed
-            restoration in this run, and the persistent cooldown was saved.
-            Lamps with no selected relay can NEVER be power-cycled.
+            OFF by default. After trying to restart Govee2MQTT, power-cycle
+            only still-offline lights with an ON relay. Requires an enabled
+            app restart, a valid slug and a persistent cooldown helper.
+            Ping is diagnostic unless "Require failed Ping" is enabled.
+            Lamps with no relay are never power-cycled.
+          default: false
+          selector:
+            boolean: {}
+        max_power_cycles:
+          name: "Maximum lamps to hard reset per attempt"
+          description: "Safety limit for a single recovery run. Each lamp is power-cycled at most once and rechecked before trying the next."
+          default: 2
+          selector:
+            number:
+              min: 1
+              max: 10
+              step: 1
+              mode: box
+        require_ping_off:
+          name: "Require failed Ping before hard reset"
+          description: "OFF by default. Enable only if your lamps respond reliably to ICMP; then only a configured Ping sensor with state OFF allows a hard reset."
           default: false
           selector:
             boolean: {}
         cycle_off_seconds:
           name: "Duration of power interruption (seconds)"
-          default: 5
+          default: 3
           selector:
             number:
               min: 3
@@ -120,14 +139,14 @@ blueprint:
               unit_of_measurement: s
               mode: box
     bridge:
-      name: "🔄 03 | Optional Govee2MQTT restart"
+      name: "🔄 03 | Govee2MQTT restart (first)"
       icon: mdi:restart
-      description: "Last resort for lights still unavailable after device checks. At most one restart for the entire lamp list."
+      description: "The first recovery step for an unavailable light. Restart the shared Govee2MQTT app once, then wait before considering a relay hard reset."
       collapsed: true
       input:
         app_restart_enabled:
           name: "Allow restarting the Govee2MQTT app"
-          description: "OFF by default. Requires Home Assistant OS or Supervised and a persistent cooldown helper."
+          description: "OFF by default. Enable this to restart the Govee2MQTT app first when lights become unavailable. Requires Home Assistant OS/Supervised and a valid app slug. A cooldown helper is strongly recommended."
           default: false
           selector:
             boolean: {}
@@ -148,17 +167,17 @@ blueprint:
               unit_of_measurement: s
               mode: box
     diagnostics:
-      name: "📡 04 | Retry protection"
+      name: "🛡️ 04 | Retry protection"
       icon: mdi:shield-check
-      description: "One global cooldown controls disruptive actions across all selected lights."
+      description: "Optional persistent cooldown. Without this helper, app restarts can happen on new outage events, but automatic relay power cuts remain blocked."
       collapsed: true
       input:
         cooldown_helper:
           name: "Persistent last recovery time (optional)"
           description: >-
-            Select an input_datetime with both DATE and TIME; initialize
-            it to an older timestamp. Required for deliberate power cycling,
-            Govee2MQTT restarts and periodic retries.
+            Select an input_datetime with both DATE and TIME; initialize it
+            to a timestamp in the past. Required for relay hard resets and
+            periodic retry, recommended for app restart throttling.
           default: ""
           selector:
             entity:
@@ -193,6 +212,17 @@ blueprint:
           default: false
           selector:
             boolean: {}
+        notification_language:
+          name: "Notification language"
+          description: "Language for the clear per-lamp status report."
+          default: en
+          selector:
+            select:
+              options:
+                - label: "English"
+                  value: en
+                - label: "Deutsch"
+                  value: de
 
 trigger_variables:
   _lamp_entries: !input lamp_entries
@@ -202,6 +232,8 @@ variables:
   restore_power: !input restore_power
   relay_wait_seconds: !input relay_wait_seconds
   power_cycle_enabled: !input power_cycle_enabled
+  max_power_cycles: !input max_power_cycles
+  require_ping_off: !input require_ping_off
   cycle_off_seconds: !input cycle_off_seconds
   cycle_wait_seconds: !input cycle_wait_seconds
   app_restart_enabled: !input app_restart_enabled
@@ -211,9 +243,10 @@ variables:
   cooldown_minutes: !input cooldown_minutes
   notify_entity: !input notify_entity
   notify_on_success: !input notify_on_success
+  notification_language: !input notification_language
+
 
 triggers:
-  # The template observes all selected light entities, independent of count.
   - trigger: template
     id: some_light_offline
     value_template: >-
@@ -231,7 +264,7 @@ triggers:
     value_template: >-
       {% set ns = namespace(off=false) %}
       {% for lamp in _lamp_entries %}
-        {% set relay = (lamp.get('relay', '') | default('', true)) %}
+        {% set relay = lamp.get('relay', '') | default('', true) %}
         {% if relay != '' and is_state(relay, 'off') %}
           {% set ns.off = true %}
         {% endif %}
@@ -242,114 +275,143 @@ triggers:
   - trigger: homeassistant
     id: startup
     event: start
+  # Periodic reconciliation catches later failures while another lamp is
+  # already unavailable (the aggregate template may stay continuously true).
   - trigger: time_pattern
     id: periodic
-    minutes: "/30"
+    minutes: "/10"
 
 mode: single
 max_exceeded: silent
 
 actions:
-  - if:
+  - alias: "Allow Home Assistant to finish starting"
+    if:
       - condition: template
         value_template: "{{ trigger.id == 'startup' }}"
     then:
       - delay:
           minutes: 3
 
-  # Count the original outages and power faults before changing anything.
-  - variables:
-      initial_offline_count: >-
-        {% set ns = namespace(n=0) %}
+  - alias: "Check all selected lights and relay power states"
+    variables:
+      offline_count: >-
+        {% set ns = namespace(count=0) %}
         {% for lamp in lamp_entries %}
           {% if states(lamp.light) in ['unavailable', 'unknown'] %}
-            {% set ns.n = ns.n + 1 %}
+            {% set ns.count = ns.count + 1 %}
           {% endif %}
         {% endfor %}
-        {{ ns.n }}
-      initial_relay_fault: >-
-        {% set ns = namespace(fault=false) %}
+        {{ ns.count }}
+      relay_off_count: >-
+        {% set ns = namespace(count=0) %}
         {% for lamp in lamp_entries %}
-          {% set relay = (lamp.get('relay', '') | default('', true)) %}
+          {% set relay = lamp.get('relay', '') | default('', true) %}
           {% if relay != '' and is_state(relay, 'off') %}
-            {% set ns.fault = true %}
+            {% set ns.count = ns.count + 1 %}
           {% endif %}
         {% endfor %}
-        {{ ns.fault }}
+        {{ ns.count }}
       last_attempt: >-
         {{ as_timestamp(states(cooldown_helper), 0) if cooldown_helper != '' else 0 }}
-  - if:
+  - alias: "Report an empty device configuration"
+    if:
       - condition: template
         value_template: "{{ lamp_entries | count == 0 }}"
     then:
       - action: persistent_notification.create
-        continue_on_error: true
         data:
-          title: "Govee recovery setup incomplete"
+          title: "Govee recovery - configuration needed"
           notification_id: govee_recovery_setup
-          message: "Select at least one Govee light in the lamp list."
-      - stop: "No Govee lights selected."
+          message: "Add at least one Govee light to the blueprint before enabling this automation."
+      - stop: "No Govee lights selected"
 
-  - variables:
-      cooldown_ok: >-
-        {{ cooldown_helper != '' and (
-             as_timestamp(now()) - (last_attempt | float(0))) >=
-             (cooldown_minutes | int * 60) }}
-  # Do not execute a periodic run without persistence, and do not act if healthy.
-  - condition: template
+  - alias: "Do nothing while every lamp and relay is healthy"
+    condition: template
+    value_template: >-
+      {{ (offline_count | int > 0) or
+         (restore_power and relay_off_count | int > 0) }}
+  - alias: "Do not run periodic retries without persistent cooldown"
+    condition: template
     value_template: "{{ trigger.id != 'periodic' or cooldown_helper != '' }}"
-  - condition: template
-    value_template: >-
-      {{ initial_offline_count | int > 0
-         or (restore_power and initial_relay_fault | bool) }}
-  # A definite OFF relay can always be restored even during the cooldown.
-  - condition: template
-    value_template: >-
-      {{ cooldown_ok | bool or
-         (restore_power and initial_relay_fault | bool) or
-         cooldown_helper == '' }}
 
-  - variables:
-      initial_snapshot: >-
-        {% set ns = namespace(rows=[]) %}
+  - alias: "Check cooldown; never block restoring a relay that is OFF"
+    variables:
+      cooldown_ready: >-
+        {{ cooldown_helper == '' or
+           (as_timestamp(now()) - (last_attempt | float(0))) >=
+           (cooldown_minutes | int * 60) }}
+      persistent_ready: >-
+        {{ cooldown_helper != ''
+           and (as_timestamp(now()) - (last_attempt | float(0))) >=
+           (cooldown_minutes | int * 60) }}
+      restart_requested: >-
+        {{ offline_count | int > 0 and app_restart_enabled
+           and (app_slug | trim != '') and cooldown_ready | bool }}
+  - alias: "Skip cooldown-only retries; still restore an OFF power relay"
+    condition: template
+    value_template: >-
+      {{ cooldown_ready | bool or (restore_power and relay_off_count | int > 0) }}
+
+  - alias: "Record the starting condition for the notification"
+    variables:
+      starting_offline: >-
+        {% set ns = namespace(names=[]) %}
         {% for lamp in lamp_entries %}
-          {% set relay = (lamp.get('relay', '') | default('', true)) %}
-          {% set ping = (lamp.get('ping', '') | default('', true)) %}
-          {% set line = lamp.light ~ '=' ~ states(lamp.light)
-             ~ ', power=' ~ (states(relay) if relay != '' else 'no relay')
-             ~ ', ping=' ~ (states(ping) if ping != '' else 'not configured') %}
-          {% set ns.rows = ns.rows + [line] %}
+          {% if states(lamp.light) in ['unavailable', 'unknown'] %}
+            {% set ns.names = ns.names + [state_attr(lamp.light, 'friendly_name') or lamp.light] %}
+          {% endif %}
         {% endfor %}
-        {{ ns.rows | join('; ') }}
+        {{ ns.names | join(', ') if ns.names else 'none' }}
 
-  # Lock out recurring disruptive operations across restarts.
-  - if:
+  # Persist the cooldown BEFORE any disruptive action. If the helper cannot
+  # be updated, abort rather than cutting mains power without a lockout.
+  - alias: "Save the persistent retry timestamp"
+    if:
       - condition: template
-        value_template: "{{ cooldown_ok | bool }}"
+        value_template: >-
+          {{ persistent_ready | bool and
+             (restart_requested | bool or power_cycle_enabled) }}
     then:
       - action: input_datetime.set_datetime
-        continue_on_error: true
         target:
           entity_id: "{{ cooldown_helper }}"
         data:
           timestamp: "{{ as_timestamp(now()) | int }}"
-  - variables:
-      cooldown_saved: >-
-        {{ cooldown_ok | bool and cooldown_helper != ''
-           and as_timestamp(states(cooldown_helper), 0) > 0
-           and as_timestamp(states(cooldown_helper), 0) >=
-               as_timestamp(now()) - 120 }}
 
-  # Step 1: all configured relays found OFF are turned ON, never OFF.
-  - if:
+  # FIRST: restart the shared bridge for affected lights.
+  - alias: "Step 1 - restart Govee2MQTT first"
+    if:
       - condition: template
-        value_template: "{{ restore_power and initial_relay_fault | bool }}"
+        value_template: "{{ restart_requested | bool }}"
+    then:
+      - action: hassio.app_restart
+        continue_on_error: true
+        data:
+          app: "{{ app_slug | trim }}"
+      - wait_template: >-
+          {% set ns = namespace(missing=false) %}
+          {% for lamp in lamp_entries %}
+            {% if states(lamp.light) in ['unavailable', 'unknown'] %}
+              {% set ns.missing = true %}
+            {% endif %}
+          {% endfor %}
+          {{ not ns.missing }}
+        timeout:
+          seconds: !input app_wait_seconds
+        continue_on_timeout: true
+
+  # SECOND: if a power relay is actually OFF, restore it to ON (no power cut).
+  - alias: "Step 2 - restore OFF relays that still need power"
+    if:
+      - condition: template
+        value_template: "{{ restore_power and relay_off_count | int > 0 }}"
     then:
       - repeat:
           for_each: !input lamp_entries
           sequence:
             - variables:
-                current_relay: "{{ (repeat.item.get('relay', '') | default('', true)) }}"
+                current_relay: "{{ repeat.item.get('relay', '') | default('', true) }}"
             - if:
                 - condition: template
                   value_template: "{{ current_relay != '' and is_state(current_relay, 'off') }}"
@@ -359,137 +421,148 @@ actions:
                   target:
                     entity_id: "{{ current_relay }}"
       - wait_template: >-
-          {% set ns = namespace(offline=false) %}
+          {% set ns = namespace(missing=false) %}
           {% for lamp in lamp_entries %}
             {% if states(lamp.light) in ['unavailable', 'unknown'] %}
-              {% set ns.offline = true %}
+              {% set ns.missing = true %}
             {% endif %}
           {% endfor %}
-          {{ not ns.offline }}
+          {{ not ns.missing }}
         timeout:
           seconds: !input relay_wait_seconds
         continue_on_timeout: true
 
-  # Step 2: only one offline lamp can be power-cycled per attempt;
-  # this is never attempted for an entry that has no relay or Ping sensor.
-  - if:
-      - condition: template
-        value_template: >-
-          {{ power_cycle_enabled and cooldown_saved | bool
-             and initial_offline_count | int == 1
-             and not initial_relay_fault | bool }}
-    then:
-      - repeat:
-          for_each: !input lamp_entries
-          sequence:
-            - variables:
-                current_light: "{{ repeat.item.light }}"
-                current_relay: "{{ (repeat.item.get('relay', '') | default('', true)) }}"
-                current_ping: "{{ (repeat.item.get('ping', '') | default('', true)) }}"
-            - if:
-                - condition: template
-                  value_template: >-
-                    {{ states(current_light) in ['unavailable', 'unknown']
-                       and current_relay != '' and is_state(current_relay, 'on')
-                       and current_ping != '' and is_state(current_ping, 'off') }}
-              then:
-                - action: switch.turn_off
-                  continue_on_error: true
-                  target:
-                    entity_id: "{{ current_relay }}"
-                - delay:
-                    seconds: !input cycle_off_seconds
-                - action: switch.turn_on
-                  continue_on_error: true
-                  target:
-                    entity_id: "{{ current_relay }}"
-                - wait_template: "{{ states(current_light) not in ['unavailable', 'unknown'] }}"
-                  timeout:
-                    seconds: !input cycle_wait_seconds
-                  continue_on_timeout: true
-
-  # Step 3: one Govee2MQTT app restart, not one restart per lamp.
-  # Can run with no relays at all; skip lamps with a definitely OFF relay.
-  - if:
-      - condition: template
-        value_template: >-
-          {% set ns = namespace(missing=false) %}
-          {% for lamp in lamp_entries %}
-            {% set relay = (lamp.get('relay', '') | default('', true)) %}
-            {% if states(lamp.light) in ['unavailable', 'unknown']
-                  and (relay == '' or is_state(relay, 'on')) %}
-              {% set ns.missing = true %}
-            {% endif %}
-          {% endfor %}
-          {{ app_restart_enabled and cooldown_saved | bool
-             and app_slug | trim != '' and ns.missing }}
-    then:
-      - action: hassio.app_restart
-        continue_on_error: true
-        data:
-          app: "{{ app_slug | trim }}"
-      - wait_template: >-
-          {% set ns = namespace(offline=false) %}
-          {% for lamp in lamp_entries %}
-            {% if states(lamp.light) in ['unavailable', 'unknown'] %}
-              {% set ns.offline = true %}
-            {% endif %}
-          {% endfor %}
-          {{ not ns.offline }}
-        timeout:
-          seconds: !input app_wait_seconds
-        continue_on_timeout: true
-
-  # Report all remaining failures in one notification.
+  # THIRD: select only STILL unavailable lamps with their own ON relays.
+  # No Ping sensor is required by default: Ping is not a reliable proxy for
+  # Govee LAN/MQTT. A separate opt-in can enforce failed Ping.
+  - alias: "Find still-offline lamps eligible for a hard reset"
+    variables:
+      hard_reset_allowed: >-
+        {{ power_cycle_enabled and restart_requested | bool
+           and persistent_ready | bool
+           and relay_off_count | int == 0 }}
   - variables:
-      final_missing: >-
-        {% set ns = namespace(missing=false) %}
+      reset_candidates: >-
+        {% set ns = namespace(items=[]) %}
+        {% if hard_reset_allowed | bool %}
+          {% for lamp in lamp_entries %}
+            {% set relay = lamp.get('relay', '') | default('', true) %}
+            {% set ping = lamp.get('ping', '') | default('', true) %}
+            {% if states(lamp.light) in ['unavailable', 'unknown']
+                  and relay != '' and is_state(relay, 'on')
+                  and (not require_ping_off or (ping != '' and is_state(ping, 'off'))) %}
+              {% set ns.items = ns.items + [lamp] %}
+            {% endif %}
+          {% endfor %}
+        {% endif %}
+        {{ ns.items[:max_power_cycles | int] }}
+      reset_candidate_names: >-
+        {% set ns = namespace(names=[]) %}
+        {% for lamp in reset_candidates %}
+          {% set ns.names = ns.names + [state_attr(lamp.light, 'friendly_name') or lamp.light] %}
+        {% endfor %}
+        {{ ns.names | join(', ') if ns.names else 'none' }}
+
+  - alias: "Step 3 - hard-reset remaining lamps one at a time"
+    repeat:
+      for_each: "{{ reset_candidates }}"
+      sequence:
+        - variables:
+            current_light: "{{ repeat.item.light }}"
+            current_relay: "{{ repeat.item.get('relay', '') | default('', true) }}"
+        - if:
+            - condition: template
+              value_template: >-
+                {{ states(current_light) in ['unavailable', 'unknown']
+                   and current_relay != '' and is_state(current_relay, 'on') }}
+          then:
+            - action: switch.turn_off
+              continue_on_error: true
+              target:
+                entity_id: "{{ current_relay }}"
+            - delay:
+                seconds: !input cycle_off_seconds
+            # Always attempt to switch power ON again even when OFF fails.
+            - action: switch.turn_on
+              continue_on_error: true
+              target:
+                entity_id: "{{ current_relay }}"
+            - wait_template: "{{ states(current_light) not in ['unavailable', 'unknown'] }}"
+              timeout:
+                seconds: !input cycle_wait_seconds
+              continue_on_timeout: true
+
+  - alias: "Collect readable final results"
+    variables:
+      final_offline_count: >-
+        {% set ns = namespace(n=0) %}
         {% for lamp in lamp_entries %}
           {% if states(lamp.light) in ['unavailable', 'unknown'] %}
-            {% set ns.missing = true %}
+            {% set ns.n = ns.n + 1 %}
           {% endif %}
         {% endfor %}
-        {{ ns.missing }}
-      final_bad_relay: >-
+        {{ ns.n }}
+      final_relay_problem: >-
         {% set ns = namespace(bad=false) %}
         {% for lamp in lamp_entries %}
-          {% set relay = (lamp.get('relay', '') | default('', true)) %}
+          {% set relay = lamp.get('relay', '') | default('', true) %}
           {% if relay != '' and not is_state(relay, 'on') %}
             {% set ns.bad = true %}
           {% endif %}
         {% endfor %}
         {{ ns.bad }}
-      final_snapshot: >-
-        {% set ns = namespace(rows=[]) %}
+  - alias: "Build human-readable notification"
+    variables:
+      recovery_message: |-
+        {% if notification_language == 'de' %}
+        **Govee-Verbindungsprüfung**
+
+        **Auslöser:** {{ 'Keine Verbindung: ' ~ starting_offline if offline_count | int > 0 else 'Ein Relais war ausgeschaltet' }}
+
+        **Status der Lampen:**
         {% for lamp in lamp_entries %}
-          {% set relay = (lamp.get('relay', '') | default('', true)) %}
-          {% set ping = (lamp.get('ping', '') | default('', true)) %}
-          {% set line = lamp.light ~ '=' ~ states(lamp.light)
-             ~ ', power=' ~ (states(relay) if relay != '' else 'no relay')
-             ~ ', ping=' ~ (states(ping) if ping != '' else 'not configured') %}
-          {% set ns.rows = ns.rows + [line] %}
+        {% set relay = lamp.get('relay', '') | default('', true) %}
+        {% set ping = lamp.get('ping', '') | default('', true) %}
+        - **{{ state_attr(lamp.light, 'friendly_name') or lamp.light }}**: {{ 'Keine Verbindung' if states(lamp.light) in ['unavailable', 'unknown'] else 'Erreichbar' }}{% if relay != '' %}; Relais {{ 'AN' if is_state(relay, 'on') else ('AUS' if is_state(relay, 'off') else 'nicht erreichbar') }}{% endif %}{% if ping != '' %}; Ping {{ 'OK' if is_state(ping, 'on') else ('ohne Antwort' if is_state(ping, 'off') else 'unbekannt') }}{% endif %}
+
         {% endfor %}
-        {{ ns.rows | join('; ') }}
-  - variables:
-      recovery_message: >-
-        Govee recovery report for {{ lamp_entries | count }} lamp(s).
-        Before: {{ initial_snapshot | trim }}.
-        After: {{ final_snapshot | trim }}.
-        Relay restoration={{ restore_power }};
-        power cycling={{ power_cycle_enabled and cooldown_saved | bool }};
-        Govee2MQTT restart={{ app_restart_enabled and cooldown_saved | bool }}.
-        Inspect Govee2MQTT/MQTT logs, Wi-Fi, LAN API and power hardware
-        if an entity remains unavailable.
-  - choose:
-      - alias: "🔔 Recovery failed"
+        **Wiederherstellungsversuche:**
+        - Govee2MQTT: {{ 'Neustart angefordert' if restart_requested | bool else ('deaktiviert/nicht eingerichtet oder wegen Sperrzeit ausgelassen') }}
+        - Stromversorgung: {{ 'Relais einschalten angefordert' if restore_power and relay_off_count | int > 0 else 'kein ausgeschaltetes Relais erkannt' }}
+        - Hard-Reset: {{ reset_candidate_names if reset_candidates | count > 0 else 'nicht ausgeführt (nicht erlaubt, kein Relais oder nicht mehr nötig)' }}
+
+        **Ergebnis:** {{ 'Mindestens eine Lampe ist weiterhin nicht erreichbar. Bitte Govee2MQTT-Protokoll und WLAN prüfen.' if final_offline_count | int > 0 else ('Bitte Stromversorgung/Relais prüfen.' if final_relay_problem | bool else 'Alle Lampen wieder erreichbar.') }}
+        {% else %}
+        **Govee connection check**
+
+        **Reason:** {{ 'Offline: ' ~ starting_offline if offline_count | int > 0 else 'A power relay was OFF' }}
+
+        **Lamp status:**
+        {% for lamp in lamp_entries %}
+        {% set relay = lamp.get('relay', '') | default('', true) %}
+        {% set ping = lamp.get('ping', '') | default('', true) %}
+        - **{{ state_attr(lamp.light, 'friendly_name') or lamp.light }}**: {{ 'Offline' if states(lamp.light) in ['unavailable', 'unknown'] else 'Available' }}{% if relay != '' %}; relay {{ 'ON' if is_state(relay, 'on') else ('OFF' if is_state(relay, 'off') else 'unavailable') }}{% endif %}{% if ping != '' %}; Ping {{ 'OK' if is_state(ping, 'on') else ('no reply' if is_state(ping, 'off') else 'unknown') }}{% endif %}
+
+        {% endfor %}
+        **Recovery attempts:**
+        - Govee2MQTT: {{ 'Restart requested' if restart_requested | bool else 'Skipped (disabled, missing slug or cooldown)' }}
+        - Relay: {{ 'Restore power requested' if restore_power and relay_off_count | int > 0 else 'No OFF relay found' }}
+        - Hard reset: {{ reset_candidate_names if reset_candidates | count > 0 else 'Not attempted (disabled, no eligible relay or not needed)' }}
+
+        **Result:** {{ 'At least one lamp is still offline. Check the Govee2MQTT logs and Wi-Fi.' if final_offline_count | int > 0 else ('Check relay power and wiring.' if final_relay_problem | bool else 'All lamps are available again.') }}
+        {% endif %}
+
+  - alias: "Notify on remaining faults; clear old warnings after recovery"
+    choose:
+      - alias: "Recovery failed"
         conditions:
           - condition: template
-            value_template: "{{ final_missing | bool or final_bad_relay | bool }}"
+            value_template: "{{ final_offline_count | int > 0 or final_relay_problem | bool }}"
         sequence:
           - action: persistent_notification.create
             continue_on_error: true
             data:
-              title: "⚠️ Govee light recovery failed"
+              title: "{{ 'Govee: Verbindung weiterhin gestört' if notification_language == 'de' else 'Govee: Lights still offline' }}"
               notification_id: govee_recovery_failed
               message: "{{ recovery_message }}"
           - if:
@@ -501,12 +574,12 @@ actions:
                 target:
                   entity_id: "{{ notify_entity }}"
                 data:
-                  title: "Govee light recovery failed"
+                  title: "{{ 'Govee: Verbindung weiterhin gestört' if notification_language == 'de' else 'Govee: Lights still offline' }}"
                   message: "{{ recovery_message }}"
-      - alias: "✅ All selected lights available"
+      - alias: "Recovery succeeded"
         conditions:
           - condition: template
-            value_template: "{{ not final_missing | bool and not final_bad_relay | bool }}"
+            value_template: "{{ final_offline_count | int == 0 and not final_relay_problem | bool }}"
         sequence:
           - action: persistent_notification.dismiss
             continue_on_error: true
@@ -521,5 +594,5 @@ actions:
                 target:
                   entity_id: "{{ notify_entity }}"
                 data:
-                  title: "Govee light recovery succeeded"
+                  title: "{{ 'Govee: Wieder verbunden' if notification_language == 'de' else 'Govee: Connected again' }}"
                   message: "{{ recovery_message }}"
