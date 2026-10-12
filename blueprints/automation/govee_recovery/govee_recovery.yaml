@@ -348,10 +348,34 @@ actions:
       restart_requested: >-
         {{ offline_count | int > 0 and app_restart_enabled
            and (app_slug | trim != '') and cooldown_ready | bool }}
-  - alias: "Skip cooldown-only retries; still restore an OFF power relay"
-    condition: template
-    value_template: >-
-      {{ cooldown_ready | bool or (restore_power and relay_off_count | int > 0) }}
+  - alias: "Explain an active cooldown instead of silently skipping recovery"
+    if:
+      - condition: template
+        value_template: >-
+          {{ not cooldown_ready | bool
+             and not (restore_power and relay_off_count | int > 0) }}
+    then:
+      - action: persistent_notification.create
+        continue_on_error: true
+        data:
+          title: "{{ 'Govee: Warte auf nächsten Versuch' if notification_language == 'de' else 'Govee: Waiting before retry' }}"
+          notification_id: govee_recovery_failed
+          message: >-
+            {% if notification_language == 'de' %}
+            Mindestens eine Govee-Lampe ist weiterhin nicht erreichbar.
+            Die Wiederherstellung wurde wegen der konfigurierten Sperrzeit
+            ({{ cooldown_minutes }} Minuten) nicht erneut gestartet.
+            Nächster Versuch ab
+            {{ (last_attempt | float(0) + cooldown_minutes | int * 60)
+               | timestamp_custom('%d.%m.%Y %H:%M', true) }}.
+            {% else %}
+            At least one Govee lamp is still unavailable.
+            Recovery has not been repeated because the {{ cooldown_minutes }}-minute
+            cooldown is active. Next allowed attempt:
+            {{ (last_attempt | float(0) + cooldown_minutes | int * 60)
+               | timestamp_custom('%Y-%m-%d %H:%M', true) }}.
+            {% endif %}
+      - stop: "Waiting for the next safe retry"
 
   - alias: "Record the starting condition for the notification"
     variables:
@@ -369,9 +393,7 @@ actions:
   - alias: "Save the persistent retry timestamp"
     if:
       - condition: template
-        value_template: >-
-          {{ persistent_ready | bool and
-             (restart_requested | bool or power_cycle_enabled) }}
+        value_template: "{{ persistent_ready | bool and restart_requested | bool }}"
     then:
       - action: input_datetime.set_datetime
         target:
@@ -456,12 +478,26 @@ actions:
           {% endfor %}
         {% endif %}
         {{ ns.items[:max_power_cycles | int] }}
+  - alias: "Summarize the planned hard resets and skipped reasons"
+    variables:
       reset_candidate_names: >-
         {% set ns = namespace(names=[]) %}
         {% for lamp in reset_candidates %}
           {% set ns.names = ns.names + [state_attr(lamp.light, 'friendly_name') or lamp.light] %}
         {% endfor %}
         {{ ns.names | join(', ') if ns.names else 'none' }}
+      hard_reset_skip_reason: >-
+        {% if not power_cycle_enabled %}
+          disabled
+        {% elif not restart_requested | bool %}
+          add-on restart not configured or cooldown active
+        {% elif not persistent_ready | bool %}
+          date-and-time cooldown helper required
+        {% elif relay_off_count | int > 0 %}
+          a power relay was OFF; restore ON instead
+        {% else %}
+          no eligible offline light with an ON relay or lights recovered
+        {% endif %}
 
   - alias: "Step 3 - hard-reset remaining lamps one at a time"
     repeat:
@@ -527,9 +563,9 @@ actions:
 
         {% endfor %}
         **Wiederherstellungsversuche:**
-        - Govee2MQTT: {{ 'Neustart angefordert' if restart_requested | bool else ('deaktiviert/nicht eingerichtet oder wegen Sperrzeit ausgelassen') }}
+        - Govee2MQTT: {{ 'Neustart angefordert' if restart_requested | bool else ('deaktiviert' if not app_restart_enabled else ('Add-on-Kennung fehlt' if app_slug | trim == '' else 'Sperrzeit noch aktiv')) }}
         - Stromversorgung: {{ 'Relais einschalten angefordert' if restore_power and relay_off_count | int > 0 else 'kein ausgeschaltetes Relais erkannt' }}
-        - Hard-Reset: {{ reset_candidate_names if reset_candidates | count > 0 else 'nicht ausgeführt (nicht erlaubt, kein Relais oder nicht mehr nötig)' }}
+        - Hard-Reset: {{ ('für ' ~ reset_candidate_names ~ ' vorgesehen') if reset_candidates | count > 0 else ('ausgelassen: ' ~ hard_reset_skip_reason | trim) }}
 
         **Ergebnis:** {{ 'Mindestens eine Lampe ist weiterhin nicht erreichbar. Bitte Govee2MQTT-Protokoll und WLAN prüfen.' if final_offline_count | int > 0 else ('Bitte Stromversorgung/Relais prüfen.' if final_relay_problem | bool else 'Alle Lampen wieder erreichbar.') }}
         {% else %}
@@ -545,9 +581,9 @@ actions:
 
         {% endfor %}
         **Recovery attempts:**
-        - Govee2MQTT: {{ 'Restart requested' if restart_requested | bool else 'Skipped (disabled, missing slug or cooldown)' }}
+        - Govee2MQTT: {{ 'Restart requested' if restart_requested | bool else ('disabled' if not app_restart_enabled else ('add-on slug missing' if app_slug | trim == '' else 'cooldown still active')) }}
         - Relay: {{ 'Restore power requested' if restore_power and relay_off_count | int > 0 else 'No OFF relay found' }}
-        - Hard reset: {{ reset_candidate_names if reset_candidates | count > 0 else 'Not attempted (disabled, no eligible relay or not needed)' }}
+        - Hard reset: {{ ('planned for ' ~ reset_candidate_names) if reset_candidates | count > 0 else ('skipped: ' ~ hard_reset_skip_reason | trim) }}
 
         **Result:** {{ 'At least one lamp is still offline. Check the Govee2MQTT logs and Wi-Fi.' if final_offline_count | int > 0 else ('Check relay power and wiring.' if final_relay_problem | bool else 'All lamps are available again.') }}
         {% endif %}
