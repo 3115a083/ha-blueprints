@@ -189,7 +189,7 @@ class AlarmLightTests(unittest.TestCase):
 
     def test_linear_and_ease_in_curves(self):
         branch = self.data["actions"][-1]["choose"][0]
-        light_branch = branch["sequence"][1]["parallel"][1]["sequence"]
+        light_branch = branch["sequence"][2]["parallel"][1]["sequence"]
         repeat = light_branch[0]["default"][1]["repeat"]
         step_template = repeat["sequence"][1]["data"]["brightness_pct"]
         results = {}
