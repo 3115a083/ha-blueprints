@@ -35,7 +35,6 @@ blueprint:
             object:
               multiple: true
               label_field: light
-              description_field: relay
               fields:
                 light:
                   label: "Govee light"
@@ -232,7 +231,7 @@ triggers:
     value_template: >-
       {% set ns = namespace(off=false) %}
       {% for lamp in _lamp_entries %}
-        {% set relay = lamp.get('relay', '') %}
+        {% set relay = (lamp.get('relay', '') | default('', true)) %}
         {% if relay != '' and is_state(relay, 'off') %}
           {% set ns.off = true %}
         {% endif %}
@@ -271,7 +270,7 @@ actions:
       initial_relay_fault: >-
         {% set ns = namespace(fault=false) %}
         {% for lamp in lamp_entries %}
-          {% set relay = lamp.get('relay', '') %}
+          {% set relay = (lamp.get('relay', '') | default('', true)) %}
           {% if relay != '' and is_state(relay, 'off') %}
             {% set ns.fault = true %}
           {% endif %}
@@ -314,8 +313,8 @@ actions:
       initial_snapshot: >-
         {% set ns = namespace(rows=[]) %}
         {% for lamp in lamp_entries %}
-          {% set relay = lamp.get('relay', '') %}
-          {% set ping = lamp.get('ping', '') %}
+          {% set relay = (lamp.get('relay', '') | default('', true)) %}
+          {% set ping = (lamp.get('ping', '') | default('', true)) %}
           {% set line = lamp.light ~ '=' ~ states(lamp.light)
              ~ ', power=' ~ (states(relay) if relay != '' else 'no relay')
              ~ ', ping=' ~ (states(ping) if ping != '' else 'not configured') %}
@@ -350,7 +349,7 @@ actions:
           for_each: !input lamp_entries
           sequence:
             - variables:
-                current_relay: "{{ repeat.item.get('relay', '') }}"
+                current_relay: "{{ (repeat.item.get('relay', '') | default('', true)) }}"
             - if:
                 - condition: template
                   value_template: "{{ current_relay != '' and is_state(current_relay, 'off') }}"
@@ -385,8 +384,8 @@ actions:
           sequence:
             - variables:
                 current_light: "{{ repeat.item.light }}"
-                current_relay: "{{ repeat.item.get('relay', '') }}"
-                current_ping: "{{ repeat.item.get('ping', '') }}"
+                current_relay: "{{ (repeat.item.get('relay', '') | default('', true)) }}"
+                current_ping: "{{ (repeat.item.get('ping', '') | default('', true)) }}"
             - if:
                 - condition: template
                   value_template: >-
@@ -416,7 +415,7 @@ actions:
         value_template: >-
           {% set ns = namespace(missing=false) %}
           {% for lamp in lamp_entries %}
-            {% set relay = lamp.get('relay', '') %}
+            {% set relay = (lamp.get('relay', '') | default('', true)) %}
             {% if states(lamp.light) in ['unavailable', 'unknown']
                   and (relay == '' or is_state(relay, 'on')) %}
               {% set ns.missing = true %}
@@ -454,7 +453,7 @@ actions:
       final_bad_relay: >-
         {% set ns = namespace(bad=false) %}
         {% for lamp in lamp_entries %}
-          {% set relay = lamp.get('relay', '') %}
+          {% set relay = (lamp.get('relay', '') | default('', true)) %}
           {% if relay != '' and not is_state(relay, 'on') %}
             {% set ns.bad = true %}
           {% endif %}
@@ -463,8 +462,8 @@ actions:
       final_snapshot: >-
         {% set ns = namespace(rows=[]) %}
         {% for lamp in lamp_entries %}
-          {% set relay = lamp.get('relay', '') %}
-          {% set ping = lamp.get('ping', '') %}
+          {% set relay = (lamp.get('relay', '') | default('', true)) %}
+          {% set ping = (lamp.get('ping', '') | default('', true)) %}
           {% set line = lamp.light ~ '=' ~ states(lamp.light)
              ~ ', power=' ~ (states(relay) if relay != '' else 'no relay')
              ~ ', ping=' ~ (states(ping) if ping != '' else 'not configured') %}
