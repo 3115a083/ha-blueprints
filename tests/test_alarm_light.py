@@ -149,6 +149,31 @@ class AlarmLightTests(unittest.TestCase):
                     visit(value)
         visit(self.data)
 
+    def test_event_driven_sunrise_trigger_instead_of_polling(self):
+        """Time-dependent template fires on false -> true, not every 15 seconds."""
+        sunrise = next(t for t in self.data["triggers"] if t["id"] == "sunrise_start")
+        self.assertEqual(sunrise["trigger"], "template")
+        self.assertNotIn("seconds", sunrise)
+        self.assertFalse(any(t["trigger"] == "time_pattern" for t in self.data["triggers"]))
+        self.assertIn("now()", sunrise["value_template"])
+        self.assertIn("states(_alarm_sensor)", sunrise["value_template"])
+        self.assertIn("_lead_minutes", sunrise["value_template"])
+        self.assertEqual(self.data["trigger_variables"]["_alarm_sensor"], "!input alarm_sensor")
+        self.assertEqual(self.data["trigger_variables"]["_lead_minutes"], "!input lead_minutes")
+
+        def evaluated(current, alarm="2026-10-12T07:00:00+00:00", lead=30):
+            scope = self.context(current=current, alarm=alarm, lead=lead)
+            scope["_alarm_sensor"] = "sensor.alarm"
+            scope["_lead_minutes"] = lead
+            return self.truthy(self.render(sunrise["value_template"], scope))
+
+        self.assertFalse(evaluated("2026-10-12T06:29:59+00:00"))
+        self.assertTrue(evaluated("2026-10-12T06:30:00+00:00"))
+        self.assertTrue(evaluated("2026-10-12T06:30:59+00:00"))
+        self.assertFalse(evaluated("2026-10-12T06:31:00+00:00"))
+        self.assertTrue(evaluated("2026-10-12T06:40:01+00:00", lead=20))
+        self.assertFalse(evaluated("2026-10-12T06:30:01+00:00", alarm="unavailable"))
+
     def test_before_alarm_window_and_darkness(self):
         branch = self.data["actions"][-1]["choose"][0]
         template = branch["conditions"][0]["value_template"]
@@ -156,8 +181,11 @@ class AlarmLightTests(unittest.TestCase):
         self.assertFalse(self.truthy(self.render(
             template, self.context(current="2026-10-12T06:29:59+00:00")
         )))
+        self.assertTrue(self.truthy(self.render(
+            template, self.context(current="2026-10-12T06:30:59+00:00")
+        )))
         self.assertFalse(self.truthy(self.render(
-            template, self.context(current="2026-10-12T06:30:15+00:00")
+            template, self.context(current="2026-10-12T06:31:00+00:00")
         )))
         self.assertFalse(self.truthy(self.render(template, self.context(home=False))))
         self.assertFalse(self.truthy(self.render(template, self.context(sun="above_horizon"))))
