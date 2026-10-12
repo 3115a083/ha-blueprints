@@ -282,6 +282,26 @@ class GoveeRecoveryTests(unittest.TestCase):
         self.assertIn("final_offline_count", str(failure["conditions"]))
         self.assertIn("notification_language", str(failure["sequence"]))
 
+    def test_active_cooldown_creates_explanatory_notification(self):
+        step = self.action("Explain an active cooldown instead of silently skipping recovery")
+        self.assertIn("cooldown_ready", step["if"][0]["value_template"])
+        self.assertEqual(step["then"][0]["action"], "persistent_notification.create")
+        self.assertEqual(step["then"][0]["data"]["notification_id"], "govee_recovery_failed")
+        self.assertIn("timestamp_custom", step["then"][0]["data"]["message"])
+        self.assertEqual(step["then"][-1]["stop"], "Waiting for the next safe retry")
+
+    def test_skip_reasons_and_candidate_names_available_for_report(self):
+        candidates = self.action("Find still-offline lamps eligible for a hard reset")
+        notes = self.action("Summarize the planned hard resets and skipped reasons")
+        cycle = self.action("Step 3 - hard-reset remaining lamps one at a time")
+        self.assertLess(self.actions().index(candidates), self.actions().index(notes))
+        self.assertLess(self.actions().index(notes), self.actions().index(cycle))
+        self.assertIn("reset_candidate_names", notes["variables"])
+        self.assertIn("hard_reset_skip_reason", notes["variables"])
+        self.assertIn("not power_cycle_enabled", notes["variables"]["hard_reset_skip_reason"])
+        self.assertIn("planned for", self.formula("recovery_message"))
+        self.assertIn("vorgesehen", self.formula("recovery_message"))
+
     def test_documentation_and_catalog(self):
         readme = (BLUEPRINT.parent / "README.md").read_text(encoding="utf-8")
         catalog = (ROOT / "README.md").read_text(encoding="utf-8")
