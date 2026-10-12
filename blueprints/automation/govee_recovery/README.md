@@ -6,7 +6,7 @@ When a lamp becomes unavailable, the blueprint can restore a switched-off relay 
 
 [**Import into Home Assistant**](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2F3115a083%2Fha-blueprints%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fgovee_recovery%2Fgovee_recovery.yaml) · [Blueprint YAML](govee_recovery.yaml) · [All blueprints](../../../README.md)
 
-**Requirements:** Home Assistant 2024.10 or newer and Govee2MQTT lamp entities in the \`light\` domain. **Relays are not required**. Restarting Govee2MQTT requires Home Assistant OS or Supervised, the correct app slug, and Supervisor access.
+**Requirements:** Home Assistant **2025.7 or newer** (repeatable object selectors were introduced in 2025.7) and Govee2MQTT lamp entities in the \`light\` domain. **Relays are not required**. Restarting Govee2MQTT requires Home Assistant OS or Supervised, the correct app slug, and Supervisor access.
 
 **Migrating from an earlier version:** The old fixed \`light_1\`, \`relay_1\`, \`light_2\`, \`relay_2\` and \`ping_1\`/\`ping_2\` inputs have been replaced by the single repeatable \`lamp_entries\` input. After updating the blueprint, **edit your existing automation and reselect its lamps**. Old two-device inputs are not migrated automatically.
 
