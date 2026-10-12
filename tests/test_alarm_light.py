@@ -158,6 +158,7 @@ class AlarmLightTests(unittest.TestCase):
         """Time-dependent template fires on false -> true, not every 15 seconds."""
         sunrise = next(t for t in self.data["triggers"] if t["id"] == "sunrise_start")
         self.assertEqual(sunrise["trigger"], "template")
+        self.assertEqual(sunrise["enabled"], "{{ not _precise_start_enabled }}")
         self.assertNotIn("seconds", sunrise)
         self.assertFalse(any(t["trigger"] == "time_pattern" for t in self.data["triggers"]))
         self.assertIn("now()", sunrise["value_template"])
@@ -185,6 +186,7 @@ class AlarmLightTests(unittest.TestCase):
         """Native time trigger observes the timestamp sensor and exact configured offset."""
         sunrise = next(t for t in self.data["triggers"] if t["id"] == "sunrise_precise")
         self.assertEqual(sunrise["trigger"], "time")
+        self.assertEqual(sunrise["enabled"], "!input precise_start_enabled")
         self.assertEqual(sunrise["at"]["entity_id"], "!input alarm_sensor")
         self.assertEqual(sunrise["at"]["offset"], "!input precise_start_offset")
         self.assertFalse(any(t["trigger"] == "time_pattern" for t in self.data["triggers"]))
