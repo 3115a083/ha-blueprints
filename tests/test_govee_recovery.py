@@ -62,7 +62,7 @@ class GoveeRecoveryTests(unittest.TestCase):
 
     def test_modern_blueprint_schema(self):
         self.assertEqual(self.data["blueprint"]["domain"], "automation")
-        self.assertEqual(self.data["blueprint"]["homeassistant"]["min_version"], "2024.10.0")
+        self.assertEqual(self.data["blueprint"]["homeassistant"]["min_version"], "2025.7.0")
         self.assertEqual(self.data["mode"], "single")
         self.assertIn("source_url", self.data["blueprint"])
         self.assertIn("triggers", self.data)
