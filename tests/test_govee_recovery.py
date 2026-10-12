@@ -274,7 +274,7 @@ class GoveeRecoveryTests(unittest.TestCase):
         )
         for lang, heading, missing_text in (
             ("en", "Govee connection check", "offline"),
-            ("de", "Govee-Verbindungsprüfung", "Keine Verbindung"),
+            ("de", "Govee-Verbindungsprüfung", "nicht erreichbar"),
         ):
             report = str(self.render(
                 tmpl, entries, states, notification_language=lang, **vars
