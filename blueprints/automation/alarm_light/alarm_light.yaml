@@ -11,8 +11,9 @@ blueprint:
     scheduling, curves and extra actions are independently extended.
     A changed alarm cancels any ongoing gradual fade. HA restarts interrupt
     an active fade; scheduled future alarms are evaluated again. The light
-    starts within about one minute of the selected lead time; no 15-second
-    polling or repeated automation runs are needed.
+    runs only when a scheduled alarm event occurs. Default scheduling checks
+    a lightweight minute-based template; optional native time scheduling
+    supports precise event-driven wake-up without clock polling.
   domain: automation
   author: "3115a083 (inspired by r3mcos3)"
   source_url: https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/alarm_light/alarm_light.yaml
@@ -41,7 +42,7 @@ blueprint:
                 domain: person
         lead_minutes:
           name: "⏱️ Start lights this many minutes before the alarm"
-          description: "Free choice from 0 to 180 minutes. Example: alarm at 07:00, lead 30 -> start at 06:30. A timestamp-aware trigger checks the start time once per minute."
+          description: "Free choice from 0 to 180 minutes. Example: 07:00 alarm and 30 minute lead starts at 06:30. This applies to standard scheduling; the optional precision mode uses its own exact offset."
           default: 30
           selector:
             number:
@@ -174,6 +175,24 @@ blueprint:
           default: []
           selector:
             condition: {}
+    precision:
+      name: "⏱️ 05 | Optional precise scheduling"
+      icon: mdi:clock-check-outline
+      description: "Use a native alarm-timestamp time trigger with a precise negative offset. No repeating time checks. Leave disabled to keep the standard minutes-based schedule."
+      collapsed: true
+      input:
+        precise_start_enabled:
+          name: "Enable native exact-time start"
+          description: "Uses the native time trigger with the offset below, instead of the standard minute-based lead. A changed alarm timestamp automatically reschedules the trigger."
+          default: false
+          selector:
+            boolean: {}
+        precise_start_offset:
+          name: "Exact offset before the alarm (-HH:MM:SS)"
+          description: "Enter a negative time duration: -00:30:00 starts 30 minutes early, -00:05:30 starts 5 minutes 30 seconds early, 00:00:00 starts at alarm time. Overrides the standard lead-minutes field while enabled. Invalid durations prevent automation setup."
+          default: "-00:30:00"
+          selector:
+            text: {}
 
 mode: parallel
 max: 5
@@ -190,26 +209,41 @@ variables:
   target_brightness: !input target_brightness
   ramp_minutes: !input ramp_minutes
   update_seconds: !input update_seconds
+  precise_start_enabled: !input precise_start_enabled
 
 # Resolve blueprint inputs for the template trigger without polling the automation.
 trigger_variables:
   _alarm_sensor: !input alarm_sensor
   _lead_minutes: !input lead_minutes
+  _precise_start_enabled: !input precise_start_enabled
 
 triggers:
   # The native time trigger executes alarm-time actions at the alarm timestamp.
   - trigger: time
     id: alarm_time
     at: !input alarm_sensor
+  # Native timestamp-sensor offset schedules the exact wake-up start.
+  # Unlike a recurring scan, this is scheduled once and automatically
+  # rescheduled if the alarm sensor changes.
+  - trigger: time
+    id: sunrise_precise
+    at:
+      entity_id: !input alarm_sensor
+      offset: !input precise_start_offset
   # Home Assistant re-evaluates now()-based templates once per minute,
   # and also updates this template when the timestamp sensor changes.
   # Unlike time_pattern, this only fires when the result turns true.
+  # Native precise scheduling disables this minute-dependent expression.
   - trigger: template
     id: sunrise_start
     value_template: >-
-      {% set scheduled = as_timestamp(states(_alarm_sensor), 0) - (_lead_minutes | int(0) * 60) %}
-      {% set elapsed = as_timestamp(now()) - scheduled %}
-      {{ scheduled > 0 and 0 <= elapsed < 60 }}
+      {% if not _precise_start_enabled %}
+        {% set scheduled = as_timestamp(states(_alarm_sensor), 0) - (_lead_minutes | int(0) * 60) %}
+        {% set elapsed = as_timestamp(now()) - scheduled %}
+        {{ scheduled > 0 and 0 <= elapsed < 60 }}
+      {% else %}
+        false
+      {% endif %}
 
 actions:
   - variables:
@@ -231,10 +265,14 @@ actions:
         conditions:
           - condition: template
             value_template: >-
-              {{ trigger.id == 'sunrise_start'
-                 and alarm_timestamp | float(0) > 0
-                 and scheduled_start | float(0) <= as_timestamp(now())
-                 and (as_timestamp(now()) - (scheduled_start | float(0))) < 60
+              {{ alarm_timestamp | float(0) > 0
+                 and (
+                   (trigger.id == 'sunrise_precise' and precise_start_enabled)
+                   or (trigger.id == 'sunrise_start'
+                       and not precise_start_enabled
+                       and scheduled_start | float(0) <= as_timestamp(now())
+                       and (as_timestamp(now()) - (scheduled_start | float(0))) < 60)
+                 )
                  and person_is_home | bool
                  and active_weekday | bool
                  and (not require_dark or is_state('sun.sun', 'below_horizon')) }}
