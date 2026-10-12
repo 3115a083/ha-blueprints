@@ -1,0 +1,296 @@
+blueprint:
+  name: "🌅 Sunrise Alarm | Custom Light Wake-Up"
+  description: >-
+    Gradually brighten lights before the next alarm reported by a timestamp
+    sensor. Choose the lead time, fade duration, brightness levels and curve
+    (linear, ease-in ramp-up or instant). Optional actions can run when the
+    light starts, when the fade finishes and at the actual alarm time.
+    Home/darkness/day conditions and additional safeguards are configurable.
+
+    Based on the idea of r3mcos3's Alarm Light blueprint; implementation,
+    scheduling, curves and extra actions are independently extended.
+    A changed alarm cancels any ongoing gradual fade. HA restarts interrupt
+    an active fade; scheduled future alarms are evaluated again.
+  domain: automation
+  author: "3115a083 (inspired by r3mcos3)"
+  source_url: https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/alarm_light/alarm_light.yaml
+  homeassistant:
+    min_version: "2024.10.0"
+  input:
+    alarm:
+      name: "⏰ 01 | Alarm & start time"
+      icon: mdi:alarm
+      description: "Select a timestamp alarm sensor, the person waking up, and how long before the alarm the lights should begin."
+      input:
+        alarm_sensor:
+          name: "⏰ Next alarm timestamp"
+          description: "A sensor with device class timestamp, such as a phone's next-alarm sensor. Must contain the next alarm date and time."
+          selector:
+            entity:
+              filter:
+                - domain: sensor
+                  device_class: timestamp
+        person_entity:
+          name: "👤 Person to wake"
+          description: "Only start the sunrise and the optional alarm-time actions when this person is at home."
+          selector:
+            entity:
+              filter:
+                domain: person
+        lead_minutes:
+          name: "⏱️ Start lights this many minutes before the alarm"
+          description: "Free choice from 0 to 180 minutes. Example: alarm at 07:00, lead 30 -> start at 06:30. A 15-second scheduler checks the start time."
+          default: 30
+          selector:
+            number:
+              min: 0
+              max: 180
+              step: 1
+              unit_of_measurement: min
+              mode: box
+        weekday_selection:
+          name: "📅 Active alarm days"
+          description: "The day of the alarm itself is evaluated, including when the sunrise starts the previous evening."
+          default: all
+          selector:
+            select:
+              options:
+                - label: "Every day"
+                  value: all
+                - label: "Weekdays (Monday-Friday)"
+                  value: weekdays
+                - label: "Weekends (Saturday-Sunday)"
+                  value: weekends
+    light:
+      name: "💡 02 | Light & brightness"
+      icon: mdi:weather-sunset-up
+      description: "Choose the lights, a brightness curve and the duration of the gradual transition."
+      input:
+        lights_target:
+          name: "💡 Lights to brighten"
+          description: "Select one or more lights, devices or areas. For gradual modes, the lights must support brightness control."
+          selector:
+            target:
+              entity:
+                domain: light
+        brightness_mode:
+          name: "📈 How brightness increases"
+          description: "Linear = constant increase. Ease-in = slow start, faster toward the end (quadratic ramp-up). Instant = jump straight to target brightness."
+          default: linear
+          selector:
+            select:
+              options:
+                - label: "Linear (even increase)"
+                  value: linear
+                - label: "Ramp-up (ease-in, slow then faster)"
+                  value: ease_in
+                - label: "Instant (target brightness immediately)"
+                  value: instant
+        initial_brightness:
+          name: "Starting brightness (%)"
+          description: "Beginning brightness for gradual modes, clamped to the target if higher."
+          default: 1
+          selector:
+            number:
+              min: 1
+              max: 100
+              step: 1
+              unit_of_measurement: "%"
+              mode: slider
+        target_brightness:
+          name: "Target brightness (%)"
+          description: "Final brightness in all three modes."
+          default: 85
+          selector:
+            number:
+              min: 1
+              max: 100
+              step: 1
+              unit_of_measurement: "%"
+              mode: slider
+        ramp_minutes:
+          name: "🌅 Brightening duration (minutes)"
+          description: "How long the linear/ease-in fade takes. Independent from the lead time: it may finish before, at, or after the alarm. Ignored in instant mode."
+          default: 30
+          selector:
+            number:
+              min: 1
+              max: 180
+              step: 1
+              unit_of_measurement: min
+              mode: box
+        update_seconds:
+          name: "Fade update interval (seconds)"
+          description: "How often to send a new brightness level. Lights that do not support transitions may brighten in visible steps. At most 240 updates are used."
+          default: 30
+          selector:
+            number:
+              min: 15
+              max: 120
+              step: 15
+              unit_of_measurement: s
+              mode: box
+    extra_actions:
+      name: "🎵 03 | Additional actions"
+      icon: mdi:lightning-bolt
+      description: "Optional Home Assistant actions, scenes and scripts. All three lists are independent."
+      collapsed: true
+      input:
+        sunrise_start_actions:
+          name: "Actions when the sunrise starts"
+          description: "Run alongside the first light command. Example: start gentle music or turn on a fan."
+          default: []
+          selector:
+            action: {}
+        sunrise_complete_actions:
+          name: "Actions after brightening finishes"
+          description: "Run after the full fade, or immediately after instant-on. Skipped if the alarm changes or the person leaves during the fade."
+          default: []
+          selector:
+            action: {}
+        alarm_time_actions:
+          name: "Actions at the actual alarm time"
+          description: "Triggered by the alarm timestamp, even when the light ramp is still running. Home/day/extra conditions apply, but darkness is not required."
+          default: []
+          selector:
+            action: {}
+    safety:
+      name: "🛡️ 04 | Optional conditions"
+      icon: mdi:shield-check
+      description: "Optional checks to prevent lighting at the wrong moment."
+      collapsed: true
+      input:
+        require_dark:
+          name: "Only start lights while the sun is below the horizon"
+          description: "Enabled by default, as in the original alarm-light blueprint. Only affects the light-start sequence, not alarm-time actions."
+          default: true
+          selector:
+            boolean: {}
+        extra_conditions:
+          name: "Additional conditions for both triggers"
+          description: "All conditions must pass. Examples: vacation mode disabled, a wake-up toggle enabled, or another person sleeping."
+          default: []
+          selector:
+            condition: {}
+
+mode: parallel
+max: 5
+max_exceeded: silent
+
+variables:
+  alarm_sensor_id: !input alarm_sensor
+  wake_person: !input person_entity
+  lead_minutes: !input lead_minutes
+  weekday_selection: !input weekday_selection
+  require_dark: !input require_dark
+  brightness_mode: !input brightness_mode
+  initial_brightness: !input initial_brightness
+  target_brightness: !input target_brightness
+  ramp_minutes: !input ramp_minutes
+  update_seconds: !input update_seconds
+
+triggers:
+  # An absolute time trigger handles additional actions at the alarm precisely.
+  - trigger: time
+    id: alarm_time
+    at: !input alarm_sensor
+  # A short periodic check permits any whole-minute lead, without enumerating offsets.
+  # The window is shorter than the interval, so the sunrise normally starts once.
+  - trigger: time_pattern
+    id: sunrise_start
+    seconds: "/15"
+
+actions:
+  - variables:
+      alarm_timestamp: "{{ as_timestamp(states(alarm_sensor_id), 0) }}"
+  - variables:
+      alarm_weekday: >-
+        {{ as_local(as_datetime(states(alarm_sensor_id))).weekday()
+           if alarm_timestamp | float(0) > 0 else -1 }}
+      scheduled_start: "{{ (alarm_timestamp | float(0)) - ((lead_minutes | int) * 60) }}"
+      person_is_home: "{{ is_state(wake_person, 'home') }}"
+  - variables:
+      active_weekday: >-
+        {{ alarm_weekday | int >= 0 and (
+             weekday_selection == 'all'
+             or (weekday_selection == 'weekdays' and alarm_weekday | int < 5)
+             or (weekday_selection == 'weekends' and alarm_weekday | int >= 5)) }}
+  - choose:
+      - alias: "🌅 Begin sunrise before the alarm"
+        conditions:
+          - condition: template
+            value_template: >-
+              {{ trigger.id == 'sunrise_start'
+                 and alarm_timestamp | float(0) > 0
+                 and scheduled_start | float(0) <= as_timestamp(now())
+                 and (as_timestamp(now()) - (scheduled_start | float(0))) < 15
+                 and person_is_home | bool
+                 and active_weekday | bool
+                 and (not require_dark or is_state('sun.sun', 'below_horizon')) }}
+          - condition: and
+            conditions: !input extra_conditions
+        sequence:
+          - variables:
+              anchor_alarm_timestamp: "{{ alarm_timestamp | float(0) }}"
+              safe_start: "{{ [initial_brightness | int, target_brightness | int] | min }}"
+              total_steps: >-
+                {{ [240, (((ramp_minutes | int) * 60 + (update_seconds | int) - 1)
+                     // (update_seconds | int))] | min }}
+          - variables:
+              interval_seconds: "{{ ((ramp_minutes | int) * 60 / (total_steps | float(1))) | round(0) | int }}"
+          - parallel:
+              - sequence: !input sunrise_start_actions
+              - sequence:
+                  - choose:
+                      - alias: "⚡ Immediate target brightness"
+                        conditions:
+                          - condition: template
+                            value_template: "{{ brightness_mode == 'instant' }}"
+                        sequence:
+                          - action: light.turn_on
+                            target: !input lights_target
+                            data:
+                              brightness_pct: "{{ target_brightness | int }}"
+                    default:
+                      - alias: "Start at low brightness"
+                        action: light.turn_on
+                        target: !input lights_target
+                        data:
+                          brightness_pct: "{{ safe_start | int }}"
+                      - repeat:
+                          count: "{{ total_steps | int }}"
+                          sequence:
+                            - condition: template
+                              value_template: >-
+                                {{ (as_timestamp(states(alarm_sensor_id), 0) -
+                                    (anchor_alarm_timestamp | float(0))) | abs < 1
+                                   and is_state(wake_person, 'home') }}
+                            - action: light.turn_on
+                              target: !input lights_target
+                              data:
+                                brightness_pct: >-
+                                  {% set fraction = repeat.index / (total_steps | float(1)) %}
+                                  {% set progress = fraction * fraction if brightness_mode == 'ease_in' else fraction %}
+                                  {% set level = (safe_start | int) + ((target_brightness | int) - (safe_start | int)) * progress %}
+                                  {{ level | round(0) | int }}
+                                transition: "{{ interval_seconds | int }}"
+                            - delay:
+                                seconds: "{{ interval_seconds | int }}"
+                  - if:
+                      - condition: template
+                        value_template: >-
+                          {{ (as_timestamp(states(alarm_sensor_id), 0) -
+                              (anchor_alarm_timestamp | float(0))) | abs < 1
+                             and is_state(wake_person, 'home') }}
+                    then: !input sunrise_complete_actions
+      - alias: "⏰ Run optional actions at alarm time"
+        conditions:
+          - condition: template
+            value_template: >-
+              {{ trigger.id == 'alarm_time'
+                 and alarm_timestamp | float(0) > 0
+                 and person_is_home | bool
+                 and active_weekday | bool }}
+          - condition: and
+            conditions: !input extra_conditions
+        sequence: !input alarm_time_actions
