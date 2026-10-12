@@ -8,8 +8,9 @@ blueprint:
     a targeted OFF/ON hardware reset as the last resort. Clear, per-lamp
     notifications explain what was observed and what was actually requested.
 
-    Safe defaults: power cycling and bridge restarting are OFF. A persistent
-    input_datetime cooldown helper is recommended for persistent throttling,
+    Safe defaults: power cycling is OFF. Bridge restarting requires an exact
+    add-on slug. A persistent input_datetime cooldown helper is recommended
+    for persistent throttling,
     and is required for automatic relay power cycling.
     This blueprint does not change a light's desired on/off, colors or effects.
     A lamp that appears available but ignores commands cannot be diagnosed
@@ -147,8 +148,8 @@ blueprint:
       input:
         app_restart_enabled:
           name: "Allow restarting the Govee2MQTT app"
-          description: "OFF by default. Enable this to restart the Govee2MQTT app first when lights become unavailable. Requires Home Assistant OS/Supervised and a valid app slug. A cooldown helper is strongly recommended."
-          default: false
+          description: "Enabled by default, but requires an exact add-on slug to take effect. Restart Govee2MQTT FIRST for an unavailable light. Requires Home Assistant OS/Supervised. Configure a cooldown helper to prevent frequent restarts."
+          default: true
           selector:
             boolean: {}
         app_slug:
@@ -349,35 +350,8 @@ actions:
       restart_requested: >-
         {{ offline_count | int > 0 and app_restart_enabled
            and (app_slug | trim != '') and cooldown_ready | bool }}
-  - alias: "Explain an active cooldown instead of silently skipping recovery"
-    if:
-      - condition: template
-        value_template: >-
-          {{ not cooldown_ready | bool
-             and not (restore_power and relay_off_count | int > 0) }}
-    then:
-      - action: persistent_notification.create
-        continue_on_error: true
-        data:
-          title: "{{ 'Govee: Warte auf nächsten Versuch' if notification_language == 'de' else 'Govee: Waiting before retry' }}"
-          notification_id: govee_recovery_failed
-          message: >-
-            {% if notification_language == 'de' %}
-            Mindestens eine Govee-Lampe ist weiterhin nicht erreichbar.
-            Die Wiederherstellung wurde wegen der konfigurierten Sperrzeit
-            ({{ cooldown_minutes }} Minuten) nicht erneut gestartet.
-            Nächster Versuch ab
-            {{ (last_attempt | float(0) + cooldown_minutes | int * 60)
-               | timestamp_custom('%d.%m.%Y %H:%M', true) }}.
-            {% else %}
-            At least one Govee lamp is still unavailable.
-            Recovery has not been repeated because the {{ cooldown_minutes }}-minute
-            cooldown is active. Next allowed attempt:
-            {{ (last_attempt | float(0) + cooldown_minutes | int * 60)
-               | timestamp_custom('%Y-%m-%d %H:%M', true) }}.
-            {% endif %}
-      - stop: "Waiting for the next safe retry"
-
+  # Keep diagnostic and notification logic running during cooldown.
+  # The cooldown controls only disruptive operations, never alert visibility.
   - alias: "Record the starting condition for the notification"
     variables:
       starting_offline: >-
@@ -571,44 +545,110 @@ actions:
         {{ ns.bad }}
   - alias: "Build human-readable notification"
     variables:
-      recovery_message: |-
-        {% if notification_language == 'de' %}
-        **Govee-Verbindungsprüfung**
-
-        **Auslöser:** {{ 'Keine Verbindung: ' ~ starting_offline if offline_count | int > 0 else 'Ein Relais war ausgeschaltet' }}
-
-        **Status der Lampen:**
-        {% for lamp in lamp_entries %}
-        {% set relay = lamp.get('relay', '') | default('', true) %}
-        {% set ping = lamp.get('ping', '') | default('', true) %}
-        - **{{ state_attr(lamp.light, 'friendly_name') or lamp.light }}**: {{ 'Keine Verbindung' if states(lamp.light) in ['unavailable', 'unknown'] else 'Erreichbar' }}{% if relay != '' %}; Relais {{ 'AN' if is_state(relay, 'on') else ('AUS' if is_state(relay, 'off') else 'nicht erreichbar') }}{% endif %}{% if ping != '' %}; Ping {{ 'OK' if is_state(ping, 'on') else ('ohne Antwort' if is_state(ping, 'off') else 'unbekannt') }}{% endif %}
-
-        {% endfor %}
-        **Wiederherstellungsversuche:**
-        - Govee2MQTT: {{ 'Neustart angefordert' if restart_requested | bool else ('deaktiviert' if not app_restart_enabled else ('Add-on-Kennung fehlt' if app_slug | trim == '' else 'Sperrzeit noch aktiv')) }}
-        - Stromversorgung: {{ 'Relais einschalten angefordert' if restore_power and relay_off_count | int > 0 else 'kein ausgeschaltetes Relais erkannt' }}
-        - Hard-Reset: {{ ('für ' ~ reset_candidate_names ~ ' vorgesehen') if reset_candidates | count > 0 else ('ausgelassen: ' ~ hard_reset_skip_reason | trim) }}
-
-        **Ergebnis:** {{ 'Mindestens eine Lampe ist weiterhin nicht erreichbar. Bitte Govee2MQTT-Protokoll und WLAN prüfen.' if final_offline_count | int > 0 else ('Bitte Stromversorgung/Relais prüfen.' if final_relay_problem | bool else 'Alle Lampen wieder erreichbar.') }}
-        {% else %}
-        **Govee connection check**
-
-        **Reason:** {{ 'Offline: ' ~ starting_offline if offline_count | int > 0 else 'A power relay was OFF' }}
-
-        **Lamp status:**
-        {% for lamp in lamp_entries %}
-        {% set relay = lamp.get('relay', '') | default('', true) %}
-        {% set ping = lamp.get('ping', '') | default('', true) %}
-        - **{{ state_attr(lamp.light, 'friendly_name') or lamp.light }}**: {{ 'Offline' if states(lamp.light) in ['unavailable', 'unknown'] else 'Available' }}{% if relay != '' %}; relay {{ 'ON' if is_state(relay, 'on') else ('OFF' if is_state(relay, 'off') else 'unavailable') }}{% endif %}{% if ping != '' %}; Ping {{ 'OK' if is_state(ping, 'on') else ('no reply' if is_state(ping, 'off') else 'unknown') }}{% endif %}
-
-        {% endfor %}
-        **Recovery attempts:**
-        - Govee2MQTT: {{ 'Restart requested' if restart_requested | bool else ('disabled' if not app_restart_enabled else ('add-on slug missing' if app_slug | trim == '' else 'cooldown still active')) }}
-        - Relay: {{ 'Restore power requested' if restore_power and relay_off_count | int > 0 else 'No OFF relay found' }}
-        - Hard reset: {{ ('planned for ' ~ reset_candidate_names) if reset_candidates | count > 0 else ('skipped: ' ~ hard_reset_skip_reason | trim) }}
-
-        **Result:** {{ 'At least one lamp is still offline. Check the Govee2MQTT logs and Wi-Fi.' if final_offline_count | int > 0 else ('Check relay power and wiring.' if final_relay_problem | bool else 'All lamps are available again.') }}
-        {% endif %}
+      recovery_message: >-
+        {%- set de = notification_language == 'de' -%}
+        {%- set total = lamp_entries | count -%}
+        {%- set available = total - (final_offline_count | int) -%}
+        {%- set lines = namespace(items=[]) -%}
+        {%- set lines.items = lines.items + [
+          '**Govee-Verbindungsprüfung**' if de else '**Govee connection check**',
+          '',
+          ('**Ergebnis:** ' if de else '**Result:** ') ~ available ~ '/' ~ total ~
+          (' Lampen erreichbar.' if de else ' lights available.'),
+          ''
+        ] -%}
+        {%- if (final_offline_count | int > 0) or final_relay_problem | bool -%}
+          {%- set lines.items = lines.items + [
+            '**Betroffene Lampen:**' if de else '**Affected lights:**'
+          ] -%}
+          {%- for lamp in lamp_entries -%}
+            {%- set relay = lamp.get('relay', '') | default('', true) -%}
+            {%- set ping = lamp.get('ping', '') | default('', true) -%}
+            {%- set light_missing = states(lamp.light) in ['unavailable', 'unknown'] -%}
+            {%- set relay_bad = relay != '' and not is_state(relay, 'on') -%}
+            {%- if light_missing or relay_bad -%}
+              {%- set name = state_attr(lamp.light, 'friendly_name') or lamp.light -%}
+              {%- set power = (
+                ('Relais AUS' if de else 'relay OFF') if is_state(relay, 'off')
+                else ('Relais nicht erreichbar' if de else 'relay unavailable')
+                if relay != '' and not is_state(relay, 'on')
+                else ('Relais EIN' if de else 'relay ON')
+                if relay != '' else ('kein Relais' if de else 'no relay')
+              ) -%}
+              {%- set network = (
+                ('Ping OK' if de else 'Ping answered') if is_state(ping, 'on')
+                else ('Ping ohne Antwort' if de else 'Ping not responding')
+                if is_state(ping, 'off')
+                else ('Ping unbekannt' if de else 'Ping unknown')
+              ) if ping != '' else ('kein Ping-Sensor' if de else 'no Ping sensor') -%}
+              {%- set hint = (
+                'Stromversorgung am Relais prüfen' if de else 'Check the power relay'
+              ) if relay_bad else (
+                'Lampe antwortet auf Ping: Govee2MQTT/MQTT prüfen' if de
+                else 'Ping works: check Govee2MQTT/MQTT'
+              ) if ping != '' and is_state(ping, 'on') else (
+                'WLAN/Stromversorgung prüfen (Ping allein ist nicht eindeutig)' if de
+                else 'Check Wi-Fi/power (Ping alone is not definitive)'
+              ) if ping != '' and is_state(ping, 'off') else (
+                'Govee2MQTT-Protokoll und WLAN prüfen' if de
+                else 'Inspect Govee2MQTT logs and Wi-Fi'
+              ) -%}
+              {%- set lines.items = lines.items + [
+                '- **' ~ name ~ '**: ' ~
+                ('nicht erreichbar' if light_missing and de else
+                 'offline' if light_missing else
+                 'Verbindung vorhanden, Relaisproblem' if de else
+                 'light available, relay fault') ~
+                ' · ' ~ power ~ ' · ' ~ network ~ '. ' ~ hint ~ '.'
+              ] -%}
+            {%- endif -%}
+          {%- endfor -%}
+          {%- set lines.items = lines.items + [''] -%}
+        {%- endif -%}
+        {%- set addon_status = (
+          'Neustart angefordert; Erfolg bitte im Automations-Trace prüfen' if de
+          else 'Restart requested; check the automation trace for service errors'
+        ) if restart_requested | bool else (
+          'deaktiviert' if de else 'disabled'
+        ) if not app_restart_enabled else (
+          'Add-on-Kennung (Slug) fehlt' if de else 'add-on slug missing'
+        ) if app_slug | trim == '' else (
+          'wegen Sperrzeit ausgelassen' if de else 'skipped due to cooldown'
+        ) if not cooldown_ready | bool else (
+          'keine Lampe ausgefallen' if de else 'no lamp was offline'
+        ) -%}
+        {%- set relay_status = (
+          'Einschalten ausgeschalteter Relais versucht' if de
+          else 'Requested ON for relays found OFF'
+        ) if restore_power and relay_off_count | int > 0 else (
+          'deaktiviert' if de else 'disabled'
+        ) if not restore_power else (
+          'keine ausgeschalteten Relais' if de else 'no relays were OFF'
+        ) -%}
+        {%- set hard_status = (
+          ('für folgende Lampen vorgesehen (nicht unbedingt ausgeführt): ' if de
+           else 'Eligible targets (may have recovered before cycling): ') ~
+          reset_candidate_names
+        ) if reset_candidates | count > 0 else (
+          ('ausgelassen: ' if de else 'skipped: ') ~ (hard_reset_skip_reason | trim)
+        ) -%}
+        {%- set lines.items = lines.items + [
+          '**Wiederherstellungsversuche (Reihenfolge):**' if de
+            else '**Recovery steps (in order):**',
+          '1. Govee2MQTT: ' ~ addon_status,
+          '2. ' ~ ('Relais' if de else 'Power relay') ~ ': ' ~ relay_status,
+          '3. ' ~ ('Hard-Reset' if de else 'Hard reset') ~ ': ' ~ hard_status,
+          ''
+        ] -%}
+        {%- set lines.items = lines.items + [
+          ('**Nächster Schritt:** Add-on-Kennung, Automations-Trace und Govee2MQTT-Protokoll prüfen.'
+           if de else
+           '**Next step:** Verify the add-on slug, automation trace and Govee2MQTT logs.')
+          if final_offline_count | int > 0 else
+          ('**Erledigt:** Alle Lampen sind wieder erreichbar.' if de else
+           '**Recovered:** All lights are available again.')
+        ] -%}
+        {{- lines.items | join('\n') -}}
 
   - alias: "Notify on remaining faults; clear old warnings after recovery"
     choose:
@@ -625,7 +665,7 @@ actions:
               message: "{{ recovery_message }}"
           - if:
               - condition: template
-                value_template: "{{ notify_entity != '' }}"
+                value_template: "{{ notify_entity != '' and (trigger.id != 'periodic' or cooldown_ready | bool) }}"
             then:
               - action: notify.send_message
                 continue_on_error: true
