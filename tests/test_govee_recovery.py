@@ -92,7 +92,7 @@ class GoveeRecoveryTests(unittest.TestCase):
 
     def test_safe_defaults_and_languages(self):
         self.assertTrue(self.inputs["restore_power"]["default"])
-        self.assertFalse(self.inputs["app_restart_enabled"]["default"])
+        self.assertTrue(self.inputs["app_restart_enabled"]["default"])
         self.assertFalse(self.inputs["power_cycle_enabled"]["default"])
         self.assertFalse(self.inputs["require_ping_off"]["default"])
         self.assertEqual(self.inputs["max_power_cycles"]["default"], 2)
@@ -273,7 +273,7 @@ class GoveeRecoveryTests(unittest.TestCase):
             reset_candidates=[entries[0]], final_offline_count=1, final_relay_problem=False,
         )
         for lang, heading, missing_text in (
-            ("en", "Govee connection check", "Offline"),
+            ("en", "Govee connection check", "offline"),
             ("de", "Govee-Verbindungsprüfung", "Keine Verbindung"),
         ):
             report = str(self.render(
@@ -285,6 +285,57 @@ class GoveeRecoveryTests(unittest.TestCase):
             self.assertIn(missing_text, report)
             self.assertNotIn("initial_snapshot=", report)
             self.assertIn("Ping", report)
+
+    def test_cooldown_does_not_hide_new_offline_errors(self):
+        """Cooldown must block disruptive actions, not all diagnostic reporting."""
+        aliases = [step.get("alias", "") for step in self.actions()]
+        self.assertNotIn(
+            "Explain an active cooldown instead of silently skipping recovery", aliases
+        )
+        self.assertNotIn(
+            "Skip cooldown-only retries; still restore an OFF power relay", aliases
+        )
+        final = self.action("Collect readable final results")
+        report = self.action("Build human-readable notification")
+        self.assertLess(self.actions().index(final), self.actions().index(report))
+        notify = self.action("Notify on remaining faults; clear old warnings after recovery")
+        failure = notify["choose"][0]["sequence"]
+        self.assertEqual(failure[0]["action"], "persistent_notification.create")
+        self.assertIn("trigger.id != 'periodic' or cooldown_ready", str(failure))
+
+    def test_readable_message_contains_only_affected_lamps(self):
+        template = self.formula("recovery_message")
+        entries = [
+            {"light": "light.bedroom", "relay": "switch.bedroom", "ping": "binary_sensor.bedroom"},
+            {"light": "light.office"},
+            {"light": "light.hall"},
+        ]
+        states = {
+            "light.bedroom": "unavailable", "switch.bedroom": "on",
+            "binary_sensor.bedroom": "on", "light.office": "off",
+            "light.hall": "on",
+        }
+        kwargs = {
+            "final_offline_count": 1, "final_relay_problem": False,
+            "restart_requested": True, "app_restart_enabled": True,
+            "app_slug": "abc_govee2mqtt", "cooldown_ready": True,
+            "relay_off_count": 0, "restore_power": True,
+            "reset_candidates": [], "reset_candidate_names": "none",
+            "hard_reset_skip_reason": "disabled", "notification_language": "en",
+        }
+        rendered = str(self.render(template, entries, states, **kwargs))
+        self.assertIn("**Result:** 2/3 lights available", rendered)
+        self.assertIn("**Affected lights:**", rendered)
+        self.assertIn("Bedroom", rendered)
+        self.assertNotIn("Office", rendered)
+        self.assertNotIn("Hall", rendered)
+        self.assertIn("Ping works: check Govee2MQTT/MQTT", rendered)
+        self.assertIn("1. Govee2MQTT:", rendered)
+        self.assertIn("2. Power relay:", rendered)
+        self.assertIn("3. Hard reset:", rendered)
+        self.assertIn("Restart requested; check the automation trace", rendered)
+        self.assertNotIn("\\n", rendered)
+        self.assertLess(rendered.count("\n\n\n"), 2)
 
     def test_failure_notification_and_clear_on_success(self):
         choose = self.action("Notify on remaining faults; clear old warnings after recovery")
