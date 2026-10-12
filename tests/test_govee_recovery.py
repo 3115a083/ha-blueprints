@@ -215,6 +215,23 @@ class GoveeRecoveryTests(unittest.TestCase):
         result = self.render(self.formula("reset_candidates"), entries, states, **args)
         self.assertEqual([e["light"] for e in result], ["light.b"])
 
+    def test_shared_power_relay_is_never_hard_reset(self):
+        entries = [
+            {"light": "light.a", "relay": "switch.shared"},
+            {"light": "light.b", "relay": "switch.shared"},
+            {"light": "light.c", "relay": None},
+        ]
+        statuses = {
+            "light.a": "unavailable", "light.b": "off",
+            "light.c": "unavailable", "switch.shared": "on",
+        }
+        result = self.render(
+            self.formula("reset_candidates"), entries, statuses,
+            hard_reset_allowed=True, max_power_cycles=4, require_ping_off=False
+        )
+        self.assertEqual(result, [])
+        self.assertIn("match.count == 1", self.formula("reset_candidates"))
+
     def test_limit_hard_reset_to_configured_number(self):
         entries = [
             {"light": f"light.{i}", "relay": f"switch.{i}"}
