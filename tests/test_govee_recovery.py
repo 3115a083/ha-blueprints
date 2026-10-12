@@ -162,7 +162,7 @@ class GoveeRecoveryTests(unittest.TestCase):
 
     def test_one_relay_repair_loop_for_all_lights(self):
         loop_actions = [x for x in self.data["actions"]
-                        if "if" in x and "initial_relay_fault" in str(x["if"])
+                        if "if" in x and "restore_power and initial_relay_fault" in str(x["if"])
                         and "then" in x and any("repeat" in sub for sub in x["then"])]
         self.assertEqual(len(loop_actions), 1)
         repeater = loop_actions[0]["then"][0]["repeat"]
