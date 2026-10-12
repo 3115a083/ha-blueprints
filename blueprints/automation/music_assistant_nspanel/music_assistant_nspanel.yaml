@@ -62,7 +62,7 @@ blueprint:
       input:
         player_entries:
           name: "Music Assistant speakers"
-          description: "Add one row per MA player. Labels must be unique and must not be the same as a preset label constraint."
+          description: "Add one row per MA player. Each speaker label must be unique within this speaker list."
           selector:
             object:
               multiple: true
@@ -175,10 +175,10 @@ actions:
       - condition: template
         value_template: >-
           {{ media_labels | count == 0 or player_labels | count == 0
-             or media_labels | unique | list | count != media_labels | count
-             or player_labels | unique | list | count != player_labels | count
-             or media_labels | select('eq','') | list | count > 0
-             or player_labels | select('eq','') | list | count > 0 }}
+             or (media_labels | unique | list | count) != (media_labels | count)
+             or (player_labels | unique | list | count) != (player_labels | count)
+             or (media_labels | select('eq','') | list | count) > 0
+             or (player_labels | select('eq','') | list | count) > 0 }}
     then:
       - action: persistent_notification.create
         data:
