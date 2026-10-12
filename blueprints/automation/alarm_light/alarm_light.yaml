@@ -10,7 +10,9 @@ blueprint:
     Based on the idea of r3mcos3's Alarm Light blueprint; implementation,
     scheduling, curves and extra actions are independently extended.
     A changed alarm cancels any ongoing gradual fade. HA restarts interrupt
-    an active fade; scheduled future alarms are evaluated again.
+    an active fade; scheduled future alarms are evaluated again. The light
+    starts within about one minute of the selected lead time; no 15-second
+    polling or repeated automation runs are needed.
   domain: automation
   author: "3115a083 (inspired by r3mcos3)"
   source_url: https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/alarm_light/alarm_light.yaml
@@ -39,7 +41,7 @@ blueprint:
                 domain: person
         lead_minutes:
           name: "⏱️ Start lights this many minutes before the alarm"
-          description: "Free choice from 0 to 180 minutes. Example: alarm at 07:00, lead 30 -> start at 06:30. A 15-second scheduler checks the start time."
+          description: "Free choice from 0 to 180 minutes. Example: alarm at 07:00, lead 30 -> start at 06:30. A timestamp-aware trigger checks the start time once per minute."
           default: 30
           selector:
             number:
@@ -189,16 +191,25 @@ variables:
   ramp_minutes: !input ramp_minutes
   update_seconds: !input update_seconds
 
+# Resolve blueprint inputs for the template trigger without polling the automation.
+trigger_variables:
+  _alarm_sensor: !input alarm_sensor
+  _lead_minutes: !input lead_minutes
+
 triggers:
-  # An absolute time trigger handles additional actions at the alarm precisely.
+  # The native time trigger executes alarm-time actions at the alarm timestamp.
   - trigger: time
     id: alarm_time
     at: !input alarm_sensor
-  # A short periodic check permits any whole-minute lead, without enumerating offsets.
-  # The window is shorter than the interval, so the sunrise normally starts once.
-  - trigger: time_pattern
+  # Home Assistant re-evaluates now()-based templates once per minute,
+  # and also updates this template when the timestamp sensor changes.
+  # Unlike time_pattern, this only fires when the result turns true.
+  - trigger: template
     id: sunrise_start
-    seconds: "/15"
+    value_template: >-
+      {% set scheduled = as_timestamp(states(_alarm_sensor), 0) - (_lead_minutes | int(0) * 60) %}
+      {% set elapsed = as_timestamp(now()) - scheduled %}
+      {{ scheduled > 0 and 0 <= elapsed < 60 }}
 
 actions:
   - variables:
@@ -223,7 +234,7 @@ actions:
               {{ trigger.id == 'sunrise_start'
                  and alarm_timestamp | float(0) > 0
                  and scheduled_start | float(0) <= as_timestamp(now())
-                 and (as_timestamp(now()) - (scheduled_start | float(0))) < 15
+                 and (as_timestamp(now()) - (scheduled_start | float(0))) < 60
                  and person_is_home | bool
                  and active_weekday | bool
                  and (not require_dark or is_state('sun.sun', 'below_horizon')) }}
