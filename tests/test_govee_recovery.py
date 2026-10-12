@@ -1,6 +1,7 @@
-"""Static regression checks for the Govee/ESPHome recovery blueprint.
+"""Regression checks for the Govee2MQTT recovery automation blueprint.
 
-The checks do not simulate Supervisor, MQTT, ESPHome or physical power switching.
+Offline tests check YAML, Jinja, safety guards and unlimited optional device
+entries. They are not a substitute for real Home Assistant/Supervisor testing.
 """
 from __future__ import annotations
 
@@ -28,14 +29,38 @@ class GoveeRecoveryTests(unittest.TestCase):
         cls.text = BLUEPRINT.read_text(encoding="utf-8")
         cls.data = yaml.load(cls.text, Loader=InputLoader)
         cls.inputs = {
-            name: spec
-            for group in cls.data["blueprint"]["input"].values()
-            for name, spec in group["input"].items()
+            key: definition
+            for section in cls.data["blueprint"]["input"].values()
+            for key, definition in section["input"].items()
         }
         cls.env = jinja2.Environment(trim_blocks=True, lstrip_blocks=True)
-        cls.env.filters["bool"] = lambda value: str(value).strip().lower() in ("true", "on", "1")
+        cls.env.filters["bool"] = lambda x: str(x).strip().lower() in ("true", "on", "1")
 
-    def test_modern_automation_blueprint(self):
+    @staticmethod
+    def truthy(x):
+        return str(x).strip().lower() == "true"
+
+    def render(self, template, lamps, entity_states=None, **values):
+        states_map = entity_states or {}
+        context = {
+            "lamp_entries": lamps,
+            "_lamp_entries": lamps,
+            "states": lambda entity: states_map.get(entity, "unknown"),
+            "is_state": lambda entity, state: states_map.get(entity) == state,
+        }
+        context.update(values)
+        return self.env.from_string(template).render(**context).strip()
+
+    def get_variable(self, name):
+        for entry in self.data["actions"]:
+            if name in entry.get("variables", {}):
+                return entry["variables"][name]
+        raise AssertionError(f"Missing variable {name}")
+
+    def get_trigger(self, trigger_id):
+        return next(t for t in self.data["triggers"] if t["id"] == trigger_id)
+
+    def test_modern_blueprint_schema(self):
         self.assertEqual(self.data["blueprint"]["domain"], "automation")
         self.assertEqual(self.data["blueprint"]["homeassistant"]["min_version"], "2024.10.0")
         self.assertEqual(self.data["mode"], "single")
@@ -45,124 +70,168 @@ class GoveeRecoveryTests(unittest.TestCase):
         self.assertNotIn("trigger", self.data)
         self.assertNotIn("action", self.data)
 
-    def test_all_inputs_declared(self):
+    def test_all_input_references_exist(self):
         references = set(re.findall(r"!input\s+([a-z0-9_]+)", self.text))
         self.assertEqual(references - set(self.inputs), set())
-        self.assertNotIn("default", self.inputs["light_1"])
-        self.assertNotIn("default", self.inputs["relay_1"])
+        self.assertEqual(set(self.inputs) & {"light_1", "relay_1", "light_2", "relay_2"}, set())
+        self.assertNotIn("default", self.inputs["lamp_entries"])
         for name, spec in self.inputs.items():
-            if name not in ("light_1", "relay_1"):
+            if name != "lamp_entries":
                 self.assertIn("default", spec, name)
 
-    def test_ui_order_and_safe_defaults(self):
+    def test_repeated_objects_with_optional_relay_and_ping(self):
         sections = self.data["blueprint"]["input"]
-        self.assertEqual(
-            list(sections), ["devices", "recovery", "bridge", "diagnostics", "notify"]
-        )
-        self.assertEqual(self.inputs["restore_power"]["default"], True)
-        self.assertEqual(self.inputs["power_cycle_enabled"]["default"], False)
-        self.assertEqual(self.inputs["app_restart_enabled"]["default"], False)
-        self.assertEqual(self.inputs["cooldown_minutes"]["default"], 60)
-        self.assertEqual(self.inputs["light_2"]["default"], "")
+        self.assertEqual(list(sections),
+                         ["devices", "recovery", "bridge", "diagnostics", "notifications"])
+        schema = self.inputs["lamp_entries"]["selector"]["object"]
+        self.assertTrue(schema["multiple"])
+        self.assertEqual(schema["label_field"], "light")
+        self.assertTrue(schema["fields"]["light"]["required"])
+        self.assertFalse(schema["fields"]["relay"]["required"])
+        self.assertFalse(schema["fields"]["ping"]["required"])
+        self.assertEqual(schema["fields"]["light"]["selector"]["entity"]["filter"]["domain"], "light")
+        self.assertEqual(schema["fields"]["relay"]["selector"]["entity"]["filter"]["domain"], "switch")
+        self.assertEqual(schema["fields"]["ping"]["selector"]["entity"]["filter"]["domain"], "binary_sensor")
         self.assertTrue(sections["bridge"]["collapsed"])
         self.assertTrue(sections["diagnostics"]["collapsed"])
-        self.assertTrue(sections["notify"]["collapsed"])
+        self.assertTrue(sections["notifications"]["collapsed"])
+
+    def test_defaults_disruptive_actions_off(self):
+        self.assertTrue(self.inputs["restore_power"]["default"])
+        self.assertFalse(self.inputs["power_cycle_enabled"]["default"])
+        self.assertFalse(self.inputs["app_restart_enabled"]["default"])
+        self.assertEqual(self.inputs["cooldown_minutes"]["default"], 60)
+        self.assertEqual(self.inputs["cooldown_helper"]["default"], "")
 
     def test_all_templates_parse(self):
         def visit(value):
             if isinstance(value, str) and ("{{" in value or "{%" in value):
                 self.env.parse(value)
             elif isinstance(value, dict):
-                for v in value.values():
-                    visit(v)
+                for child in value.values():
+                    visit(child)
             elif isinstance(value, list):
-                for v in value:
-                    visit(v)
+                for child in value:
+                    visit(child)
 
         visit(self.data)
 
-    def test_watch_both_lamps_relays_startup_and_periodic(self):
-        ids = {trigger["id"] for trigger in self.data["triggers"]}
-        self.assertEqual(
-            ids,
-            {"lamp_1_unavailable", "lamp_2_unavailable", "relay_1_off",
-             "relay_2_off", "startup", "periodic"},
-        )
-        triggers = self.data["triggers"]
-        self.assertEqual(next(x for x in triggers if x["id"] == "periodic")["minutes"], "/30")
-        for trig_id in ("lamp_1_unavailable", "lamp_2_unavailable"):
-            self.assertEqual(next(x for x in triggers if x["id"] == trig_id)["for"],
-                             {"minutes": "!input offline_minutes"})
-        self.assertTrue(any("startup" in str(x) for x in self.data["actions"]))
+    def test_any_number_of_lights_detects_offline(self):
+        t = self.get_trigger("some_light_offline")
+        self.assertEqual(t["trigger"], "template")
+        self.assertEqual(t["for"], {"minutes": "!input offline_minutes"})
+        lamps = [
+            {"light": "light.living", "relay": "switch.a", "ping": "binary_sensor.ping"},
+            {"light": "light.bedroom"},
+            {"light": "light.hallway", "relay": None},
+            {"light": "light.office", "ping": "binary_sensor.ping_office"},
+        ]
+        healthy = {item["light"]: "off" for item in lamps}
+        self.assertFalse(self.truthy(self.render(t["value_template"], lamps, healthy)))
+        healthy["light.hallway"] = "unavailable"
+        self.assertTrue(self.truthy(self.render(t["value_template"], lamps, healthy)))
+        self.assertEqual(self.render(self.get_variable("initial_offline_count"), lamps, healthy), "1")
+        healthy["light.bedroom"] = "unknown"
+        self.assertEqual(self.render(self.get_variable("initial_offline_count"), lamps, healthy), "2")
+        self.assertFalse(self.truthy(self.render(t["value_template"], [], {})))
 
-    def test_incomplete_second_pair_notifies_and_stops(self):
-        body = str(self.data["actions"])
-        self.assertIn("pair_2_valid", body)
-        self.assertIn("Govee recovery configuration incomplete", body)
-        self.assertIn("Configure both the second light and its relay.", body)
+    def test_absent_relay_is_not_interpreted_as_power_fault(self):
+        t = self.get_trigger("some_relay_off")
+        lamps = [
+            {"light": "light.a"},
+            {"light": "light.b", "relay": None},
+            {"light": "light.c", "relay": "switch.c"},
+        ]
+        statuses = {"light.a": "unavailable", "light.b": "on",
+                    "light.c": "off", "switch.c": "on"}
+        self.assertFalse(self.truthy(self.render(t["value_template"], lamps, statuses)))
+        self.assertFalse(self.truthy(self.render(self.get_variable("initial_relay_fault"), lamps, statuses)))
+        statuses["switch.c"] = "off"
+        self.assertTrue(self.truthy(self.render(t["value_template"], lamps, statuses)))
+        self.assertTrue(self.truthy(self.render(self.get_variable("initial_relay_fault"), lamps, statuses)))
 
-    def test_cooldown_allows_soft_relay_restoration_only(self):
-        body = str(self.data["actions"])
-        self.assertIn("cooldown_ok", body)
-        self.assertIn("initial_relay_1_off", body)
-        self.assertIn("initial_relay_2_off", body)
-        self.assertIn("cooldown_saved", body)
-        self.assertIn("as_timestamp(states(cooldown_helper)", body)
-        self.assertIn("input_datetime.set_datetime", body)
+    def test_null_optional_fields_render_as_not_configured(self):
+        lamps = [{"light": "light.no_relay", "relay": None, "ping": None},
+                 {"light": "light.plain"}]
+        value = self.render(self.get_variable("initial_snapshot"), lamps,
+                            {"light.no_relay": "unavailable", "light.plain": "on"})
+        self.assertIn("power=no relay", value)
+        self.assertIn("ping=not configured", value)
+        final_bad = self.render(self.get_variable("final_bad_relay"), lamps, {})
+        self.assertFalse(self.truthy(final_bad))
 
-    def test_no_unattended_power_cycle_without_guard(self):
-        """Exactly two deliberate OFF commands, each guarded by ping and cooldown."""
-        turn_off = [x for x in self.text.split("- action: switch.turn_off")[1:]]
-        self.assertEqual(len(turn_off), 2)
-        for field in ("power_cycle_enabled", "cooldown_ok", "cooldown_saved",
-                      "not (both_missing_initially", "is_state(ping_1, 'off')"):
-            self.assertIn(field, self.text)
-        self.assertIn("is_state(ping_2, 'off')", self.text)
-        self.assertEqual(self.text.count("and cooldown_saved | bool"), 2)
-        self.assertEqual(self.text.count("not (both_missing_initially | bool)"), 2)
-        self.assertEqual(self.text.count("- action: switch.turn_on"), 4)
+    def test_one_relay_repair_loop_for_all_lights(self):
+        loop_actions = [x for x in self.data["actions"]
+                        if "if" in x and "initial_relay_fault" in str(x["if"])
+                        and "then" in x and any("repeat" in sub for sub in x["then"])]
+        self.assertEqual(len(loop_actions), 1)
+        repeater = loop_actions[0]["then"][0]["repeat"]
+        self.assertEqual(repeater["for_each"], "!input lamp_entries")
+        self.assertIn("get('relay'", str(repeater["sequence"]))
+        self.assertIn("current_relay != ''", str(repeater["sequence"]))
+        self.assertIn("switch.turn_on", str(repeater["sequence"]))
 
-    def test_one_optional_app_restart(self):
+    def test_power_cycle_only_when_single_failed_with_relay_and_ping(self):
+        self.assertEqual(self.text.count("- action: switch.turn_off"), 1)
+        outer = next(x for x in self.data["actions"] if "if" in x
+                     and "power_cycle_enabled" in str(x["if"]))
+        gate = outer["if"][0]["value_template"]
+        self.assertIn("initial_offline_count | int == 1", gate)
+        self.assertIn("not initial_relay_fault", gate)
+        self.assertIn("cooldown_saved", gate)
+        repeater = outer["then"][0]["repeat"]
+        self.assertEqual(repeater["for_each"], "!input lamp_entries")
+        inner = next(x for x in repeater["sequence"] if "if" in x)
+        inner_gate = inner["if"][0]["value_template"]
+        for phrase in ("current_relay != ''", "is_state(current_relay, 'on')",
+                       "current_ping != ''", "is_state(current_ping, 'off')"):
+            self.assertIn(phrase, inner_gate)
+        self.assertEqual([x["action"] for x in inner["then"] if "action" in x],
+                         ["switch.turn_off", "switch.turn_on"])
+
+    def test_addon_restart_once_including_relayless_lights(self):
         self.assertEqual(self.text.count("- action: hassio.app_restart"), 1)
-        self.assertIn("app_restart_enabled and cooldown_ok", self.text)
-        self.assertIn("app: \"{{ app_slug | trim }}\"", self.text)
-        self.assertNotIn("hassio.host_reboot", self.text)
-        self.assertNotIn("homeassistant.restart", self.text)
+        app = next(x for x in self.data["actions"] if "if" in x
+                   and "app_restart_enabled" in str(x["if"]))
+        guard = app["if"][0]["value_template"]
+        self.assertIn("relay == '' or is_state(relay, 'on')", guard)
+        self.assertIn("cooldown_saved", guard)
+        self.assertIn("app_slug | trim", guard)
+        self.assertTrue(self.truthy(self.render(
+            guard, [{"light": "light.norelay"}],
+            {"light.norelay": "unavailable"},
+            app_restart_enabled=True, cooldown_saved=True, app_slug="test_govee")))
+        self.assertFalse(self.truthy(self.render(
+            guard, [{"light": "light.norelay"}],
+            {"light.norelay": "off"},
+            app_restart_enabled=True, cooldown_saved=True, app_slug="test_govee")))
         self.assertNotIn("mqtt.publish", self.text)
+        self.assertNotIn("homeassistant.restart", self.text)
 
-    def test_failure_is_reported_without_mobile_notification_target(self):
-        self.assertIn("- action: persistent_notification.create", self.text)
-        self.assertIn("notification_id: govee_recovery_failed", self.text)
+    def test_persisted_cooldown_and_periodic_retry(self):
+        self.assertEqual(self.get_trigger("periodic")["minutes"], "/30")
+        self.assertIn("cooldown_ok", self.text)
+        self.assertIn("cooldown_saved", self.text)
+        self.assertIn("input_datetime.set_datetime", self.text)
+        self.assertIn("cooldown_helper != ''", self.text)
+        self.assertIn("trigger.id != 'periodic' or cooldown_helper != ''", self.text)
+
+    def test_startup_configuration_notifications_and_failure(self):
+        self.assertEqual(self.get_trigger("startup")["event"], "start")
+        self.assertIn("Select at least one Govee light", self.text)
+        self.assertIn('notification_id: govee_recovery_failed', self.text)
         self.assertIn("- action: notify.send_message", self.text)
-        self.assertIn("notify_entity != ''", self.text)
         self.assertIn("initial_snapshot", self.text)
         self.assertIn("final_snapshot", self.text)
+        self.assertIn("lamp_entries | count", self.text)
 
-    def test_safety_templates_for_power_cycle(self):
-        guards = [
-            x["if"][0]["value_template"]
-            for x in self.data["actions"]
-            if isinstance(x, dict)
-            and "if" in x
-            and isinstance(x["if"], list)
-            and x["if"]
-            and "value_template" in x["if"][0]
-            and "power_cycle_enabled" in x["if"][0]["value_template"]
-        ]
-        self.assertEqual(len(guards), 2)
-        for i, expr in enumerate(guards, start=1):
-            with self.subTest(lamp=i):
-                self.assertIn(f"states(light_{i}) in ['unavailable', 'unknown']", expr)
-                self.assertIn(f"is_state(relay_{i}, 'on')", expr)
-                self.assertIn(f"is_state(ping_{i}, 'off')", expr)
-                self.assertIn("cooldown_saved", expr)
-
-    def test_own_documentation_and_catalog(self):
-        local = BLUEPRINT.parent / "README.md"
-        root = ROOT / "README.md"
-        self.assertTrue(local.is_file())
-        self.assertIn("Govee", local.read_text(encoding="utf-8"))
-        self.assertIn("govee_recovery/README.md", root.read_text(encoding="utf-8"))
+    def test_documentation_and_root_catalog(self):
+        manual = (BLUEPRINT.parent / "README.md").read_text(encoding="utf-8")
+        overview = (ROOT / "README.md").read_text(encoding="utf-8")
+        self.assertIn("any number", manual)
+        self.assertIn("relay", manual.lower())
+        self.assertIn("Migrating from an earlier version", manual)
+        self.assertIn("govee_recovery/README.md", overview)
 
 
 if __name__ == "__main__":
