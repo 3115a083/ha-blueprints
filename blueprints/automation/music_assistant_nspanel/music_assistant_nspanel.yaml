@@ -1,0 +1,299 @@
+blueprint:
+  name: "🎵 Music Assistant | NSPanel Presets & Speakers"
+  description: >-
+    Extend Blackymas' NSPanel HA Blueprint without modifying its firmware.
+    Four NSPanel input-button shortcuts let you cycle through configured radio
+    stations/playlists and Music Assistant speakers, play the selected item,
+    or transfer an active player queue. Two input_select helpers show the
+    current preset and speaker on NSPanel entity pages.
+
+    Create the two Select helpers and four Button helpers first, then bind
+    their entities to NSPanel button pages. The automation keeps the Select
+    options synchronized from the two editable lists. A selection is made by
+    cycling, NOT by a native drop-down or Music Assistant library browser on
+    the NSPanel. Requires the Home Assistant Music Assistant integration.
+  domain: automation
+  author: "3115a083"
+  source_url: https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/music_assistant_nspanel/music_assistant_nspanel.yaml
+  homeassistant:
+    min_version: "2025.7.0"
+  input:
+    library:
+      name: "📻 01 | Radios and playlists"
+      icon: mdi:playlist-music
+      description: "Add one row for each favorite station or playlist. Each has a unique display label and a Music Assistant name or URI."
+      input:
+        media_entries:
+          name: "Favorite radios and playlists"
+          description: >-
+            Add unlimited entries. Use Radio for station names and Playlist
+            for playlist names. A Music Assistant URI is recommended when
+            several items share the same name. Labels must be unique.
+          selector:
+            object:
+              multiple: true
+              label_field: label
+              description_field: media_type
+              fields:
+                label:
+                  label: "Display name (unique)"
+                  required: true
+                  selector:
+                    text: {}
+                media_type:
+                  label: "Type"
+                  required: true
+                  selector:
+                    select:
+                      options:
+                        - label: "📻 Radio"
+                          value: radio
+                        - label: "🎶 Playlist"
+                          value: playlist
+                media_id:
+                  label: "Music Assistant name or URI"
+                  required: true
+                  selector:
+                    text: {}
+    speakers:
+      name: "🔊 02 | Available speakers"
+      icon: mdi:speaker-multiple
+      description: "List the Music Assistant players that should be selectable from the NSPanel."
+      input:
+        player_entries:
+          name: "Music Assistant speakers"
+          description: "Add one row per MA player. Labels must be unique and must not be the same as a preset label constraint."
+          selector:
+            object:
+              multiple: true
+              label_field: label
+              description_field: player
+              fields:
+                label:
+                  label: "Speaker name (unique)"
+                  required: true
+                  selector:
+                    text: {}
+                player:
+                  label: "Music Assistant player entity"
+                  required: true
+                  selector:
+                    entity:
+                      filter:
+                        domain: media_player
+    helpers:
+      name: "🎛️ 03 | NSPanel selection and action buttons"
+      icon: mdi:gesture-tap-button
+      description: >-
+        Create two Select helpers with at least one placeholder option,
+        and four Button helpers. Configure their entity IDs here and place
+        the four Button helpers on the existing NSPanel button pages.
+      input:
+        preset_select:
+          name: "Current preset (input_select)"
+          description: "Displays the selected station/playlist. The automation will automatically replace its options."
+          selector:
+            entity:
+              filter:
+                domain: input_select
+        speaker_select:
+          name: "Current speaker (input_select)"
+          description: "Displays the selected Music Assistant output. The automation will automatically replace its options."
+          selector:
+            entity:
+              filter:
+                domain: input_select
+        next_preset_button:
+          name: "📻 NSPanel button: Next radio/playlist"
+          selector:
+            entity:
+              filter:
+                domain: input_button
+        next_speaker_button:
+          name: "🔊 NSPanel button: Next speaker"
+          selector:
+            entity:
+              filter:
+                domain: input_button
+        play_button:
+          name: "▶️ NSPanel button: Play selected"
+          description: "Starts the currently selected station/playlist on the currently selected speaker."
+          selector:
+            entity:
+              filter:
+                domain: input_button
+        transfer_button:
+          name: "🔀 NSPanel button: Move playing music"
+          description: "Moves the first actively playing configured Music Assistant queue to the selected speaker. Does nothing if no other configured speaker is playing."
+          selector:
+            entity:
+              filter:
+                domain: input_button
+
+mode: queued
+max: 10
+max_exceeded: silent
+
+variables:
+  media_entries: !input media_entries
+  player_entries: !input player_entries
+  preset_select: !input preset_select
+  speaker_select: !input speaker_select
+
+triggers:
+  - trigger: state
+    id: next_preset
+    entity_id: !input next_preset_button
+  - trigger: state
+    id: next_speaker
+    entity_id: !input next_speaker_button
+  - trigger: state
+    id: play_selection
+    entity_id: !input play_button
+  - trigger: state
+    id: transfer_queue
+    entity_id: !input transfer_button
+  - trigger: homeassistant
+    id: initialize
+    event: start
+  - trigger: event
+    id: reload
+    event_type: automation_reloaded
+
+actions:
+  - if:
+      - condition: template
+        value_template: "{{ trigger.id == 'initialize' }}"
+    then:
+      - delay:
+          seconds: 10
+
+  - variables:
+      media_labels: "{{ media_entries | map(attribute='label') | list }}"
+      player_labels: "{{ player_entries | map(attribute='label') | list }}"
+  - if:
+      - condition: template
+        value_template: >-
+          {{ media_labels | count == 0 or player_labels | count == 0
+             or media_labels | unique | list | count != media_labels | count
+             or player_labels | unique | list | count != player_labels | count
+             or media_labels | select('eq','') | list | count > 0
+             or player_labels | select('eq','') | list | count > 0 }}
+    then:
+      - action: persistent_notification.create
+        data:
+          notification_id: nspanel_music_assistant_invalid_setup
+          title: "NSPanel Music Assistant: check the lists"
+          message: "Configure at least one radio/playlist and one speaker, with nonempty unique labels in each list."
+      - stop: "Invalid radio/playlist or speaker selection."
+  - action: persistent_notification.dismiss
+    continue_on_error: true
+    data:
+      notification_id: nspanel_music_assistant_invalid_setup
+
+  - if:
+      - condition: template
+        value_template: "{{ state_attr(preset_select, 'options') != media_labels }}"
+    then:
+      - action: input_select.set_options
+        target:
+          entity_id: "{{ preset_select }}"
+        data:
+          options: "{{ media_labels }}"
+  - if:
+      - condition: template
+        value_template: "{{ state_attr(speaker_select, 'options') != player_labels }}"
+    then:
+      - action: input_select.set_options
+        target:
+          entity_id: "{{ speaker_select }}"
+        data:
+          options: "{{ player_labels }}"
+
+  - choose:
+      - alias: "📻 Select next radio or playlist"
+        conditions:
+          - condition: template
+            value_template: "{{ trigger.id == 'next_preset' }}"
+        sequence:
+          - action: input_select.select_next
+            target:
+              entity_id: "{{ preset_select }}"
+            data:
+              cycle: true
+      - alias: "🔊 Select next Music Assistant speaker"
+        conditions:
+          - condition: template
+            value_template: "{{ trigger.id == 'next_speaker' }}"
+        sequence:
+          - action: input_select.select_next
+            target:
+              entity_id: "{{ speaker_select }}"
+            data:
+              cycle: true
+      - alias: "▶️ Play the selected station or playlist"
+        conditions:
+          - condition: template
+            value_template: "{{ trigger.id == 'play_selection' }}"
+        sequence:
+          - variables:
+              chosen_preset: "{{ states(preset_select) }}"
+              chosen_speaker: "{{ states(speaker_select) }}"
+          - variables:
+              matched_media: >-
+                {{ media_entries | selectattr('label', 'eq', chosen_preset) | list }}
+              matched_players: >-
+                {{ player_entries | selectattr('label', 'eq', chosen_speaker) | list }}
+          - condition: template
+            value_template: "{{ matched_media | count == 1 and matched_players | count == 1 }}"
+          - variables:
+              selected_media_type: "{{ matched_media[0].media_type }}"
+              selected_media_id: "{{ matched_media[0].media_id }}"
+              selected_player: "{{ matched_players[0].player }}"
+          - condition: template
+            value_template: >-
+              {{ selected_media_type in ['radio', 'playlist']
+                 and selected_media_id | trim != ''
+                 and selected_player.startswith('media_player.')
+                 and states(selected_player) not in ['unavailable', 'unknown'] }}
+          - action: music_assistant.play_media
+            target:
+              entity_id: "{{ selected_player }}"
+            data:
+              media_type: "{{ selected_media_type }}"
+              media_id: "{{ selected_media_id }}"
+              enqueue: play
+      - alias: "🔀 Transfer playing music to the chosen speaker"
+        conditions:
+          - condition: template
+            value_template: "{{ trigger.id == 'transfer_queue' }}"
+        sequence:
+          - variables:
+              chosen_speaker: "{{ states(speaker_select) }}"
+          - variables:
+              matched_players: >-
+                {{ player_entries | selectattr('label', 'eq', chosen_speaker) | list }}
+          - condition: template
+            value_template: "{{ matched_players | count == 1 }}"
+          - variables:
+              selected_player: "{{ matched_players[0].player }}"
+          - variables:
+              source_player: >-
+                {% set ns = namespace(player='') %}
+                {% for item in player_entries %}
+                  {% if item.player != selected_player and is_state(item.player, 'playing')
+                        and ns.player == '' %}
+                    {% set ns.player = item.player %}
+                  {% endif %}
+                {% endfor %}
+                {{ ns.player }}
+          - condition: template
+            value_template: >-
+              {{ source_player != '' and selected_player.startswith('media_player.')
+                 and states(selected_player) not in ['unavailable', 'unknown'] }}
+          - action: music_assistant.transfer_queue
+            target:
+              entity_id: "{{ selected_player }}"
+            data:
+              source_player: "{{ source_player }}"
+              auto_play: true
