@@ -13,6 +13,8 @@ blueprint:
     people. Configure reliable sensors or explicit guest/sleep protection.
     Alarms, locks, and garage doors need independent safety checks.
     Legacy in-memory delays do not survive Home Assistant restarts.
+    Persistent timer helpers use native time events instead of minute polling.
+    The five-minute reliability reconciliation runs only with an occupancy helper.
 
     Set custom trigger IDs to custom_away or custom_home.
   domain: automation
@@ -239,7 +241,7 @@ blueprint:
           name: "Actions after the delay"
           description: >-
             Example: close a garage door. With both timer helpers, the deadline is recovered after restarts
-            and checked roughly once per minute.
+            and checked at the exact deadline using a native time trigger.
           default: []
           selector:
             action: {}
@@ -485,6 +487,15 @@ trigger_variables:
   _guest: !input guest_mode
   _blockers: !input blocking_sensors
   _occupancy_helper: !input occupancy_helper
+  _temporary_enabled: !input temporary_enabled
+  _temporary_deadline: !input temporary_deadline
+  _temporary_pending: !input temporary_pending
+  _temporary_2_enabled: !input temporary_2_enabled
+  _temporary_2_deadline: !input temporary_2_deadline
+  _temporary_2_pending: !input temporary_2_pending
+  _temporary_3_enabled: !input temporary_3_enabled
+  _temporary_3_deadline: !input temporary_3_deadline
+  _temporary_3_pending: !input temporary_3_pending
 
 variables:
   occupancy_helper: !input occupancy_helper
@@ -585,15 +596,53 @@ triggers:
   - trigger: template
     id: became_home
     value_template: "{{ _occupancy_helper != '' and is_state(_occupancy_helper, 'on') }}"
+  # Startup/reload reconciles deadlines that passed during downtime.
   - trigger: homeassistant
     id: reconcile
     event: start
+  - trigger: event
+    id: reconcile
+    event_type: automation_reloaded
+
+  # When a presence blocker clears, try reconciling immediately.
+  - trigger: template
+    id: reconcile
+    value_template: >-
+      {% set configured = (_guest != '' or _sleep != '' or _blockers | count > 0) %}
+      {% set ns = namespace(clear=true) %}
+      {% if _guest != '' and not is_state(_guest, 'off') %}
+        {% set ns.clear = false %}
+      {% endif %}
+      {% if _sleep != '' and not is_state(_sleep, 'off') %}
+        {% set ns.clear = false %}
+      {% endif %}
+      {% for entity in _blockers %}
+        {% if not is_state(entity, 'off') %}
+          {% set ns.clear = false %}
+        {% endif %}
+      {% endfor %}
+      {{ _occupancy_helper != '' and configured and ns.clear }}
+
+  # Reliability fallback: the 5-minute run is disabled in direct-tracker mode.
   - trigger: time_pattern
     id: reconcile
+    enabled: "{{ _occupancy_helper != '' }}"
     minutes: "/5"
-  - trigger: time_pattern
-    id: temporary_tick
-    minutes: "*"
+
+  # Date+time helpers are scheduled once, and automatically rescheduled
+  # when their dates change. Disabled optional timers use a safe placeholder.
+  - trigger: time
+    id: temporary_1_due
+    enabled: "{{ _temporary_enabled and _temporary_deadline != '' and _temporary_pending != '' }}"
+    at: "{{ _temporary_deadline if _temporary_deadline != '' else '00:00:00' }}"
+  - trigger: time
+    id: temporary_2_due
+    enabled: "{{ _temporary_2_enabled and _temporary_2_deadline != '' and _temporary_2_pending != '' }}"
+    at: "{{ _temporary_2_deadline if _temporary_2_deadline != '' else '00:00:00' }}"
+  - trigger: time
+    id: temporary_3_due
+    enabled: "{{ _temporary_3_enabled and _temporary_3_deadline != '' and _temporary_3_pending != '' }}"
+    at: "{{ _temporary_3_deadline if _temporary_3_deadline != '' else '00:00:00' }}"
 
 # Parallel runs keep legacy delayed actions from blocking status transitions.
 mode: parallel
@@ -782,13 +831,14 @@ actions:
       - alias: "Process all independent restart-resilient timed actions"
         conditions:
           - condition: template
-            value_template: "{{ trigger.id == 'temporary_tick' }}"
+            value_template: "{{ trigger.id in ['temporary_1_due', 'temporary_2_due', 'temporary_3_due', 'reconcile'] }}"
         sequence:
           - parallel:
               - sequence:
                   - condition: template
                     value_template: >-
-                      {{ temporary_enabled and temporary_helpers_unique | bool
+                      {{ trigger.id in ['temporary_1_due', 'reconcile']
+                         and temporary_enabled and temporary_helpers_unique | bool
                          and temporary_deadline != '' and temporary_pending != ''
                          and is_state(temporary_pending, 'on')
                          and as_timestamp(states(temporary_deadline), 0) > 0
@@ -813,7 +863,8 @@ actions:
               - sequence:
                   - condition: template
                     value_template: >-
-                      {{ temporary_2_enabled and temporary_helpers_unique | bool
+                      {{ trigger.id in ['temporary_2_due', 'reconcile']
+                         and temporary_2_enabled and temporary_helpers_unique | bool
                          and temporary_2_deadline != '' and temporary_2_pending != ''
                          and is_state(temporary_2_pending, 'on')
                          and as_timestamp(states(temporary_2_deadline), 0) > 0
@@ -838,7 +889,8 @@ actions:
               - sequence:
                   - condition: template
                     value_template: >-
-                      {{ temporary_3_enabled and temporary_helpers_unique | bool
+                      {{ trigger.id in ['temporary_3_due', 'reconcile']
+                         and temporary_3_enabled and temporary_helpers_unique | bool
                          and temporary_3_deadline != '' and temporary_3_pending != ''
                          and is_state(temporary_3_pending, 'on')
                          and as_timestamp(states(temporary_3_deadline), 0) > 0
