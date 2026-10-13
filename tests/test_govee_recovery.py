@@ -68,7 +68,7 @@ class GoveeRecoveryTests(unittest.TestCase):
 
     def test_schema_and_current_home_assistant_format(self):
         self.assertEqual(self.data["blueprint"]["domain"], "automation")
-        self.assertEqual(self.data["blueprint"]["homeassistant"]["min_version"], "2025.7.0")
+        self.assertEqual(self.data["blueprint"]["homeassistant"]["min_version"], "2026.2.0")
         self.assertEqual(self.data["mode"], "single")
         self.assertIn("source_url", self.data["blueprint"])
         self.assertIn("triggers", self.data)
@@ -89,6 +89,18 @@ class GoveeRecoveryTests(unittest.TestCase):
         self.assertTrue(schema["fields"]["light"]["required"])
         self.assertFalse(schema["fields"]["relay"]["required"])
         self.assertFalse(schema["fields"]["ping"]["required"])
+
+    def test_installed_app_selector_instead_of_manually_typed_slug(self):
+        """The native HA App selector returns an installed application's slug."""
+        app_config = self.inputs["app_slug"]
+        self.assertEqual(app_config["selector"], {"app": {}})
+        self.assertEqual(app_config["default"], "")
+        self.assertIn("installed apps", app_config["name"])
+        restart = self.action("Step 1 - restart Govee2MQTT first")
+        self.assertEqual(restart["then"][0]["action"], "hassio.app_restart")
+        self.assertEqual(restart["then"][0]["data"]["app"], "!input app_slug")
+        self.assertNotIn("homeassistant.restart", self.text)
+        self.assertNotIn("hassio.host_reboot", self.text)
 
     def test_safe_defaults_and_languages(self):
         self.assertTrue(self.inputs["restore_power"]["default"])
