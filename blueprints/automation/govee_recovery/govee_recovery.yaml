@@ -19,7 +19,7 @@ blueprint:
   author: "3115a083"
   source_url: https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/govee_recovery/govee_recovery.yaml
   homeassistant:
-    min_version: "2025.7.0"
+    min_version: "2026.2.0"
   input:
     devices:
       name: "💡 01 | Lights and optional hardware"
@@ -143,21 +143,24 @@ blueprint:
     bridge:
       name: "🔄 03 | Govee2MQTT restart (first)"
       icon: mdi:restart
-      description: "The first recovery step for an unavailable light. Restart the shared Govee2MQTT app once, then wait before considering a relay hard reset."
+      description: "Choose an installed app from the dropdown. Restart runs first for offline lights, after any configured cooldown, before relay hard resets."
       collapsed: true
       input:
         app_restart_enabled:
           name: "Allow restarting the Govee2MQTT app"
-          description: "Enabled by default, but requires an exact add-on slug to take effect. Restart Govee2MQTT FIRST for an unavailable light. Requires Home Assistant OS/Supervised. Configure a cooldown helper to prevent frequent restarts."
+          description: "Enabled by default. The app must be selected below, a light must report unavailable/unknown, and the retry cooldown must allow recovery. The restart runs before relay power cycling."
           default: true
           selector:
             boolean: {}
         app_slug:
-          name: "Govee2MQTT app or add-on slug"
-          description: "Copy the exact slug from the installed Govee2MQTT app details."
+          name: "Govee2MQTT app (installed apps)"
+          description: >-
+            Select Govee2MQTT from the installed apps. Home Assistant provides
+            the correct slug automatically. The existing input ID is retained
+            so previously configured automations can retain their selection.
           default: ""
           selector:
-            text: {}
+            app: {}
         app_wait_seconds:
           name: "Wait after restarting Govee2MQTT (seconds)"
           default: 150
@@ -385,7 +388,7 @@ actions:
       - action: hassio.app_restart
         continue_on_error: true
         data:
-          app: "{{ app_slug | trim }}"
+          app: !input app_slug
       - wait_template: >-
           {% set ns = namespace(missing=false) %}
           {% for lamp in lamp_entries %}
