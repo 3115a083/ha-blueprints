@@ -13,7 +13,9 @@ blueprint:
     an active fade; scheduled future alarms are evaluated again. The light
     runs only when a scheduled alarm event occurs. Default scheduling checks
     a lightweight minute-based template; optional native time scheduling
-    disables that trigger and schedules an exact offset without clock polling.
+    uses a precise offset. The main lead time is always a safety limit:
+    a conflicting earlier precise offset falls back to the standard lead.
+    Every start is independently checked against the current alarm timestamp.
   domain: automation
   author: "3115a083 (inspired by r3mcos3)"
   source_url: https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/alarm_light/alarm_light.yaml
@@ -42,7 +44,7 @@ blueprint:
                 domain: person
         lead_minutes:
           name: "⏱️ Start lights this many minutes before the alarm"
-          description: "Free choice from 0 to 180 minutes. Example: 07:00 alarm and 30 minute lead starts at 06:30. This applies to standard scheduling; the optional precision mode uses its own exact offset."
+          description: "The earliest permitted start, 0–180 minutes before the alarm. Also acts as a safety limit in exact-time mode: a precise offset that would start earlier automatically falls back to this setting."
           default: 30
           selector:
             number:
@@ -178,18 +180,18 @@ blueprint:
     precision:
       name: "⏱️ 05 | Optional precise scheduling"
       icon: mdi:clock-check-outline
-      description: "Use a native alarm-timestamp time trigger with a precise negative offset. No repeating time checks. Leave disabled to keep the standard minutes-based schedule."
+      description: "Optional second-precision alarm offset. It may start later than the main lead, but NEVER earlier. If the offset conflicts with the main lead, the normal minute scheduler takes over."
       collapsed: true
       input:
         precise_start_enabled:
           name: "Enable native exact-time start"
-          description: "Uses the native time trigger with the offset below, instead of the standard minute-based lead. A changed alarm timestamp automatically reschedules the trigger."
+          description: "Uses a native time trigger if the precise offset is within the earlier-start limit defined in section 01. Otherwise automatically uses the section 01 lead. A changed alarm timestamp reschedules the native trigger."
           default: false
           selector:
             boolean: {}
         precise_start_offset:
           name: "Exact offset before the alarm (-HH:MM:SS)"
-          description: "Enter a negative time duration: -00:30:00 starts 30 minutes early, -00:05:30 starts 5 minutes 30 seconds early, 00:00:00 starts at alarm time. Overrides the standard lead-minutes field while enabled. Invalid durations prevent automation setup."
+          description: "Enter -HH:MM:SS, e.g. -00:05:30 for 5 min 30 sec before the alarm. IMPORTANT: If this would begin earlier than section 01's lead (e.g. 30 min vs 5 min), it is ignored and the normal lead is used instead. 00:00:00 means alarm time."
           default: "-00:30:00"
           selector:
             text: {}
@@ -210,12 +212,14 @@ variables:
   ramp_minutes: !input ramp_minutes
   update_seconds: !input update_seconds
   precise_start_enabled: !input precise_start_enabled
+  precise_start_offset: !input precise_start_offset
 
 # Resolve blueprint inputs for the template trigger without polling the automation.
 trigger_variables:
   _alarm_sensor: !input alarm_sensor
   _lead_minutes: !input lead_minutes
   _precise_start_enabled: !input precise_start_enabled
+  _precise_start_offset: !input precise_start_offset
 
 triggers:
   # The native time trigger executes alarm-time actions at the alarm timestamp.
@@ -227,7 +231,13 @@ triggers:
   # rescheduled if the alarm sensor changes.
   - trigger: time
     id: sunrise_precise
-    enabled: !input precise_start_enabled
+    enabled: >-
+      {% set raw = _precise_start_offset | string | trim %}
+      {% set parts = raw.lstrip('-').split(':') %}
+      {% set seconds = (parts[0] | int(0)) * 3600 + (parts[1] | int(0)) * 60 + (parts[2] | int(0)) if parts | count == 3 else 999999 %}
+      {{ _precise_start_enabled
+         and (raw.startswith('-') or seconds == 0)
+         and seconds <= (_lead_minutes | int(0)) * 60 }}
     at:
       entity_id: !input alarm_sensor
       offset: !input precise_start_offset
@@ -237,15 +247,17 @@ triggers:
   # Native precise scheduling disables this minute-dependent expression.
   - trigger: template
     id: sunrise_start
-    enabled: "{{ not _precise_start_enabled }}"
+    enabled: >-
+      {% set raw = _precise_start_offset | string | trim %}
+      {% set parts = raw.lstrip('-').split(':') %}
+      {% set seconds = (parts[0] | int(0)) * 3600 + (parts[1] | int(0)) * 60 + (parts[2] | int(0)) if parts | count == 3 else 999999 %}
+      {{ not _precise_start_enabled
+         or not (raw.startswith('-') or seconds == 0)
+         or seconds > (_lead_minutes | int(0)) * 60 }}
     value_template: >-
-      {% if not _precise_start_enabled %}
-        {% set scheduled = as_timestamp(states(_alarm_sensor), 0) - (_lead_minutes | int(0) * 60) %}
-        {% set elapsed = as_timestamp(now()) - scheduled %}
-        {{ scheduled > 0 and 0 <= elapsed < 60 }}
-      {% else %}
-        false
-      {% endif %}
+      {% set scheduled = as_timestamp(states(_alarm_sensor), 0) - (_lead_minutes | int(0) * 60) %}
+      {% set elapsed = as_timestamp(now()) - scheduled %}
+      {{ scheduled > 0 and 0 <= elapsed < 60 }}
 
 actions:
   - variables:
@@ -256,7 +268,16 @@ actions:
            if alarm_timestamp | float(0) > 0 else -1 }}
       scheduled_start: "{{ (alarm_timestamp | float(0)) - ((lead_minutes | int) * 60) }}"
       person_is_home: "{{ is_state(wake_person, 'home') }}"
+      precise_offset_seconds: >-
+        {% set raw = precise_start_offset | string | trim %}
+        {% set parts = raw.lstrip('-').split(':') %}
+        {% set seconds = (parts[0] | int(0)) * 3600 + (parts[1] | int(0)) * 60 + (parts[2] | int(0)) if parts | count == 3 else 999999 %}
+        {{ -seconds if raw.startswith('-') else seconds }}
   - variables:
+      precise_offset_safe: >-
+        {{ (precise_offset_seconds | float(999999)) <= 0
+           and (precise_offset_seconds | float(-999999)) >=
+               -(lead_minutes | int(0) * 60) }}
       active_weekday: >-
         {{ alarm_weekday | int >= 0 and (
              weekday_selection == 'all'
@@ -267,13 +288,20 @@ actions:
         conditions:
           - condition: template
             value_template: >-
+              {% set seconds_now = as_timestamp(now()) %}
+              {% set secs_to_alarm = (alarm_timestamp | float(0)) - seconds_now %}
+              {% set precise_due = (alarm_timestamp | float(0)) + (precise_offset_seconds | float(0)) %}
               {{ alarm_timestamp | float(0) > 0
+                 and secs_to_alarm >= -60
+                 and secs_to_alarm <= ((lead_minutes | int(0)) * 60 + 2)
                  and (
-                   (trigger.id == 'sunrise_precise' and precise_start_enabled)
+                   (trigger.id == 'sunrise_precise'
+                    and precise_start_enabled
+                    and precise_offset_safe | bool
+                    and -2 <= (seconds_now - precise_due) < 60)
                    or (trigger.id == 'sunrise_start'
-                       and not precise_start_enabled
-                       and scheduled_start | float(0) <= as_timestamp(now())
-                       and (as_timestamp(now()) - (scheduled_start | float(0))) < 60)
+                       and (not precise_start_enabled or not precise_offset_safe | bool)
+                       and 0 <= (seconds_now - (scheduled_start | float(0))) < 60)
                  )
                  and person_is_home | bool
                  and active_weekday | bool
