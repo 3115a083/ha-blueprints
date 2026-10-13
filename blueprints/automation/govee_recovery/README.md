@@ -4,7 +4,7 @@ Home Assistant recovery blueprint for **any number of Govee2MQTT lamps**, each w
 
 [**Import into Home Assistant**](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2F3115a083%2Fha-blueprints%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fgovee_recovery%2Fgovee_recovery.yaml) · [Blueprint YAML](govee_recovery.yaml) · [All blueprints](../../../README.md)
 
-**Requirements:** Home Assistant **2025.7+** for repeatable device lists, existing Govee2MQTT \`light\` entities, and optional \`switch\` relays and \`binary_sensor\` Ping entities. The app restart step uses **Home Assistant OS / Supervisor**.
+**Requirements:** Home Assistant **2026.2+** (native App selector and `hassio.app_restart` action) for repeatable device lists, existing Govee2MQTT \`light\` entities, and optional \`switch\` relays and \`binary_sensor\` Ping entities. The app restart step uses **Home Assistant OS / Supervisor**.
 
 ## What changed and why
 
@@ -41,7 +41,7 @@ Connected lamps with state \`off\` are considered available; **off** does not me
 
 1. Wait until one or more lamps have been unavailable for the configured time (default 2 minutes), until a power relay has been OFF for 1 minute, or perform periodic/startup reconciliation.
 2. Check whether a recovery is allowed by the shared cooldown.
-3. **Restart Govee2MQTT** once, if enabled and its exact slug has been provided. Wait for reconnection (default 150 seconds).
+3. **Restart Govee2MQTT** once if enabled and the app is selected from the installed-app dropdown. Wait for reconnection (default 150 seconds).
 4. If any configured relay is still OFF and **Restore a relay found OFF** is enabled, turn it ON; wait for the affected lamps (default 90 seconds).
 5. If one or more lamps remain unavailable, and **Allow one targeted power cycle** is explicitly enabled, select only lamps with a configured relay known to be ON. If a persistent cooldown helper is configured, power-cycle them sequentially, up to the configured limit (default 2). Wait after each cycle.
 6. Recheck every lamp and relay. Clear the previous warning if recovered, otherwise send one clear diagnostic notification.
@@ -59,10 +59,25 @@ If you wish to restrict hard resets to devices that fail Ping, enable **Require 
 In **03 | Govee2MQTT restart (first)**, set:
 
 - **Allow restarting the Govee2MQTT app:** **ON**.
-- **Govee2MQTT app or add-on slug:** Enter the **exact slug** from Home Assistant's app/add-on details.
+- **Govee2MQTT app (installed apps):** Select **Govee2MQTT** from the dropdown. Home Assistant fills in the exact slug automatically. **No typing or copying the slug is required.**
 - **Wait after restarting Govee2MQTT:** e.g. **150 seconds**.
 
 The automation uses the official Home Assistant Supervisor action \`hassio.app_restart\`, not a host reboot or MQTT broker restart. This action requires Home Assistant OS and administrator privileges. If disabled or the slug is missing, the notification explains that the add-on restart was skipped; an automatic hard reset is also skipped, to preserve the requested order.
+
+### Why the app might still not restart
+
+The selector removes mistakes in manually entered slugs, but the restart is intentionally conditional:
+
+1. **At least one Govee `light` entity must actually be `unavailable` or `unknown`.** If it stays `on` or `off` while ignoring commands, the availability check cannot recognize this silent failure.
+2. **The restart switch must be ON and Govee2MQTT must be selected from the dropdown.**
+3. **The cooldown must be over.** With the optional input_datetime helper, the default lockout is 60 minutes from the previous attempt. If the helper shows a future date/time, the cooldown will also block restarts.
+4. **The Govee2MQTT app must be restartable by Supervisor.** On Home Assistant Container this action is unavailable. Supervisor requires an administrator account.
+
+**Test the action independently first:** In Home Assistant, open **Developer tools → Actions**, select **Restart app** (`hassio.app_restart`), choose the same Govee2MQTT app from its dropdown, and run the action. If it fails there, inspect the returned service error / Supervisor log before relying on the automation.
+
+If the manual action works but the automation does not restart it, inspect **Settings → Automations & scenes → your Govee recovery automation → Traces** for the steps **Check cooldown** and **Step 1 - restart Govee2MQTT first**. When the step is skipped, the blueprint did not request a restart. When the step executes, an action failure is visible in the trace (the blueprint continues to the relay recovery stage where possible).
+
+Existing installations should **reselect the Govee2MQTT app once** after updating this blueprint, even if the previous text field already contained the correct slug.
 
 Official documentation: [Restart app](https://www.home-assistant.io/actions/hassio.app_restart/).
 
@@ -111,7 +126,7 @@ For Govee LAN-capable models, enable LAN control, reserve stable lamp IPs, revie
 
 1. Update/re-import the Govee recovery blueprint from GitHub, then open and **save** the existing automation.
 2. Ensure the old fixed light slots have been migrated to the repeatable **Govee lamps** list.
-3. Verify the exact **Govee2MQTT app slug** in section 03. The restart toggle now defaults to **ON**, but no restart occurs unless the slug is configured. Previously saved automation inputs may still contain an explicit OFF value.
+3. Select the installed **Govee2MQTT app** from the dropdown in section 03. The restart toggle defaults to **ON**; previously saved automations may still retain an explicit OFF value. Re-selecting the app is recommended after upgrading from the old text field.
 4. Set the desired language in **05 | Notifications**.
 5. Initially leave deliberate relay hard resets disabled. Confirm the bridge restarts and reconnects the lamps first.
 6. If appropriate, add a date+time cooldown helper and enable power cycling only after checking your relay wiring and safety.
