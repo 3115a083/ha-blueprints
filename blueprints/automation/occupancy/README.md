@@ -85,7 +85,9 @@ For **each enabled profile**, create two **unique** Home Assistant helpers:
 
 Assign the pair in the corresponding profile. **Never reuse the same deadline or pending helper across two profiles.** If any helper is shared between profiles, timed operations stop for safety until the configuration is corrected.
 
-Saved deadlines are checked roughly once per minute, including after Home Assistant restarts and automation reloads. If two profiles are due together, their follow-ups are executed in parallel. Their pending flags are cleared before evaluating end conditions, preventing repeated execution if a safety check fails. If a deadline is invalid or a helper is unavailable, the follow-up is not executed.
+Each saved deadline now uses **Home Assistant's native time trigger** on its dedicated date-and-time helper. The follow-up executes at its scheduled timestamp, **without an every-minute automation run**. Home Assistant dynamically reschedules the time trigger if the deadline helper changes. After Home Assistant restarts or automations reload, reconciliation catches already-overdue pending flags. A published occupancy helper additionally enables a five-minute reliability fallback.
+
+If two profiles are due together, their follow-ups may execute in parallel. Each pending flag is cleared before evaluating end conditions, preventing repeated follow-ups if a safety check fails. If a deadline is invalid or a helper is unavailable, the follow-up is not executed. Use input_datetime helpers with **both date and time**, not time-only helpers.
 
 **Fallback:** If *both* helpers of an enabled profile are left empty, that profile uses a normal in-memory delay. This is compatible with earlier installations, but the delayed follow-up does **not** survive Home Assistant restarts/reloads. If *only one* helper is selected, that profile does not start.
 
@@ -97,7 +99,7 @@ A guest-presence helper and a sleep-mode helper are optional `input_boolean` swi
 
 Additional ON-state presence-protection sensors (for example, bed occupancy) also restore occupied status. Only select sensors where ON truly means detected presence.
 
-When these protections turn off, a still-valid away or inactivity source can result in vacancy during the next five-minute reconciliation. One-shot door or custom triggers are not retained indefinitely and need to fire again if an earlier attempt was blocked.
+When these protections turn off, a configured occupancy switch can be reconciled **immediately** by the new guard-release template trigger, without waiting for a periodic scan. The standard five-minute fallback still handles cases in which an away/inactivity period has not finished or another custom condition becomes valid. One-shot door or custom triggers are not retained indefinitely and need to fire again if an earlier attempt was blocked.
 
 ## 08 | Optional occupancy status output
 
@@ -121,9 +123,23 @@ Optionally enable diagnostics in section **09 | Optional diagnostics and debug**
 
 Optional logging writes blocked vacancy attempts to the system log. Missing or unavailable diagnostic text helpers are skipped and do not stop occupancy processing. User-provided extra conditions are checked after the standard sensor guards and are not individually explained by the diagnostic line.
 
+## Efficiency and event-driven scheduling
+
+The previous blueprint had two unconditional clock triggers:
+
+| Before | Runs per day | After |
+| --- | ---: | --- |
+| Timed-action check every minute | 1,440 | **0 repeating timer checks**; only three independently scheduled time events when helpers are configured |
+| Five-minute occupancy reconciliation | 288 | **288 only with an occupancy switch**; **0** in direct person/tracker mode |
+| Person, tracker, presence, door, and guard transitions | Event-based | Still event-based |
+
+The old baseline was **1,728** scheduled automation starts per day even with no active timed actions. The updated direct-tracker setup has **no repeating time_pattern trigger**. A published occupancy switch keeps the conservative five-minute reconciliation (up to **288** safety checks per day), but timer deadlines no longer create minute-by-minute traces. No additional background polling services or integrations are needed.
+
+**Why keep a five-minute fallback with a published status switch?** Home Assistant's template-trigger `for` timers reset when automation reloads or HA restarts; without reconciliation a house that was already vacant during a restart might remain incorrectly marked occupied. The fallback repairs missed transitions. You can still use standard native time triggers for the exact persisted timer deadlines.
+
 ## Reliability, safety and tests
 
-The blueprint reconciles current signals after Home Assistant starts and every five minutes. State-change timestamps are used for conservative stability checks. A fresh sensor state after a restart can restart the minimum waiting period. Template-trigger `for` timers themselves do not persist across a restart.
+The blueprint reconciles current signals after Home Assistant starts, whenever automations reload, when guest/sleep/presence blockers clear, and every five minutes **only when the published occupancy switch is configured**. Direct person/tracker mode does not run the periodic reconciliation. State-change timestamps are used for conservative stability checks. A fresh sensor state after a restart can restart the minimum waiting period. Template-trigger `for` timers themselves do not persist across a restart; the five-minute fallback is retained as a deliberate reliability trade-off for helper-based installations.
 
 Concurrent triggers may overlap due to the parallel automation mode. Place safety-critical checks in the final actions and devices. Status and dashboard text are informative, not a safety certification.
 
