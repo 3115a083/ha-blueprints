@@ -306,7 +306,10 @@ class BlueprintTests(unittest.TestCase):
 
         main = self.data["actions"][-1]["choose"]
         due = next(b for b in main if b["alias"].startswith("Process all independent"))
-        self.assertIn("temporary_tick", due["conditions"][0]["value_template"])
+        self.assertIn("temporary_1_due", due["conditions"][0]["value_template"])
+        self.assertIn("temporary_2_due", due["conditions"][0]["value_template"])
+        self.assertIn("temporary_3_due", due["conditions"][0]["value_template"])
+        self.assertIn("reconcile", due["conditions"][0]["value_template"])
         branches = due["sequence"][0]["parallel"]
         self.assertEqual(len(branches), 3)
         now = dt.datetime(2026, 10, 8, 8, 0, tzinfo=dt.timezone.utc)
@@ -331,6 +334,7 @@ class BlueprintTests(unittest.TestCase):
                         prefix + "deadline": deadline_id,
                         prefix + "pending": pending_id,
                         "temporary_helpers_unique": unique,
+                        "trigger": {"id": f"temporary_{number}_due"},
                         "is_state": lambda entity, state: entities[entity] == state,
                         "states": lambda entity: entities[entity],
                         "as_timestamp": timestamp,
@@ -395,7 +399,10 @@ class BlueprintTests(unittest.TestCase):
                               ["input_boolean.a", "input_boolean.a", ""]))
 
     def test_persistent_timer_is_restart_recoverable_and_guarded(self):
-        self.assertIn("temporary_tick", {t.get("id") for t in self.data["triggers"]})
+        trigger_ids = {t.get("id") for t in self.data["triggers"]}
+        self.assertNotIn("temporary_tick", trigger_ids)
+        for index in range(1, 4):
+            self.assertIn(f"temporary_{index}_due", trigger_ids)
         due = next(b for b in self.data["actions"][-1]["choose"]
                    if b["alias"].startswith("Process all independent"))
         self.assertIn("parallel", due["sequence"][0])
@@ -404,6 +411,65 @@ class BlueprintTests(unittest.TestCase):
             self.assertLess(str(sequence).find("input_boolean.turn_off"),
                             str(sequence).find("end_actions"))
             self.assertIn("temporary_helpers_unique", str(sequence))
+
+    def test_native_deadline_triggers_only_when_helpers_configured(self):
+        """No minute tick. Every enabled date+time helper schedules a native event."""
+        triggers = self.data["triggers"]
+        self.assertFalse(any(t.get("id") == "temporary_tick" for t in triggers))
+        for i in range(1, 4):
+            prefix = "temporary" if i == 1 else f"temporary_{i}"
+            native = next(t for t in triggers if t.get("id") == f"temporary_{i}_due")
+            self.assertEqual(native["trigger"], "time")
+            self.assertIn(f"_{prefix}_deadline", native["at"])
+            self.assertIn("00:00:00", native["at"])
+            ctx = {
+                f"_{prefix}_enabled": True,
+                f"_{prefix}_deadline": f"input_datetime.timer_{i}",
+                f"_{prefix}_pending": f"input_boolean.pending_{i}",
+            }
+            enabled = self.env.from_string(native["enabled"])
+            at = self.env.from_string(native["at"])
+            self.assertEqual(enabled.render(**ctx).strip().lower(), "true")
+            self.assertEqual(at.render(**ctx).strip(), f"input_datetime.timer_{i}")
+            ctx[f"_{prefix}_deadline"] = ""
+            self.assertEqual(enabled.render(**ctx).strip().lower(), "false")
+            self.assertEqual(at.render(**ctx).strip(), "00:00:00")
+            ctx[f"_{prefix}_deadline"] = f"input_datetime.timer_{i}"
+            ctx[f"_{prefix}_pending"] = ""
+            self.assertEqual(enabled.render(**ctx).strip().lower(), "false")
+
+    def test_reconcile_only_periodic_with_published_occupancy(self):
+        triggers = self.data["triggers"]
+        time_patterns = [t for t in triggers if t.get("trigger") == "time_pattern"]
+        self.assertEqual(len(time_patterns), 1)
+        t = time_patterns[0]
+        self.assertEqual(t["id"], "reconcile")
+        self.assertEqual(t["minutes"], "/5")
+        enabled = self.env.from_string(t["enabled"])
+        self.assertEqual(enabled.render(_occupancy_helper="").strip().lower(), "false")
+        self.assertEqual(
+            enabled.render(_occupancy_helper="input_boolean.occupied").strip().lower(),
+            "true",
+        )
+        self.assertTrue(any(t.get("event_type") == "automation_reloaded"
+                            and t.get("id") == "reconcile" for t in triggers))
+        release = [t for t in triggers if t.get("trigger") == "template"
+                   and t.get("id") == "reconcile"]
+        self.assertEqual(len(release), 1)
+        self.assertNotIn("now()", release[0]["value_template"])
+        self.assertIn("_blockers", release[0]["value_template"])
+
+    def test_native_timer_dispatch_does_not_fire_others(self):
+        dispatcher = next(b for b in self.data["actions"][-1]["choose"]
+                          if b["alias"].startswith("Process all independent"))
+        for i, branch in enumerate(dispatcher["sequence"][0]["parallel"], start=1):
+            guard = branch["sequence"][0]["value_template"]
+            self.assertIn(f"temporary_{i}_due", guard)
+            self.assertIn("'reconcile'", guard)
+            for j in range(1, 4):
+                if j != i:
+                    self.assertNotIn(f"temporary_{j}_due", guard)
+            self.assertIn("temporary_helpers_unique", guard)
 
     def test_optional_occupancy_output_does_not_require_manual_toggle(self):
         """Input boolean is an optional published output; state triggers tolerate an empty input."""
