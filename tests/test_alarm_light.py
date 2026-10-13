@@ -52,6 +52,7 @@ class AlarmLightTests(unittest.TestCase):
         current="2026-10-12T06:30:01+00:00",
         weekday_selection="all",
         lead=30,
+        precise_offset="-00:30:00",
         home=True,
         sun="below_horizon",
         require_dark=True,
@@ -81,6 +82,7 @@ class AlarmLightTests(unittest.TestCase):
             "wake_person": "person.user",
             "lead_minutes": lead,
             "precise_start_enabled": False,
+            "precise_start_offset": precise_offset,
             "weekday_selection": weekday_selection,
             "require_dark": require_dark,
             "brightness_mode": mode,
@@ -158,7 +160,9 @@ class AlarmLightTests(unittest.TestCase):
         """Time-dependent template fires on false -> true, not every 15 seconds."""
         sunrise = next(t for t in self.data["triggers"] if t["id"] == "sunrise_start")
         self.assertEqual(sunrise["trigger"], "template")
-        self.assertEqual(sunrise["enabled"], "{{ not _precise_start_enabled }}")
+        self.assertIn("_precise_start_enabled", sunrise["enabled"])
+        self.assertIn("_precise_start_offset", sunrise["enabled"])
+        self.assertIn("_lead_minutes", sunrise["enabled"])
         self.assertNotIn("seconds", sunrise)
         self.assertFalse(any(t["trigger"] == "time_pattern" for t in self.data["triggers"]))
         self.assertIn("now()", sunrise["value_template"])
@@ -167,6 +171,7 @@ class AlarmLightTests(unittest.TestCase):
         self.assertEqual(self.data["trigger_variables"]["_alarm_sensor"], "!input alarm_sensor")
         self.assertEqual(self.data["trigger_variables"]["_lead_minutes"], "!input lead_minutes")
         self.assertEqual(self.data["trigger_variables"]["_precise_start_enabled"], "!input precise_start_enabled")
+        self.assertEqual(self.data["trigger_variables"]["_precise_start_offset"], "!input precise_start_offset")
 
         def evaluated(current, alarm="2026-10-12T07:00:00+00:00", lead=30):
             scope = self.context(current=current, alarm=alarm, lead=lead)
@@ -186,7 +191,9 @@ class AlarmLightTests(unittest.TestCase):
         """Native time trigger observes the timestamp sensor and exact configured offset."""
         sunrise = next(t for t in self.data["triggers"] if t["id"] == "sunrise_precise")
         self.assertEqual(sunrise["trigger"], "time")
-        self.assertEqual(sunrise["enabled"], "!input precise_start_enabled")
+        self.assertIn("_precise_start_enabled", sunrise["enabled"])
+        self.assertIn("_precise_start_offset", sunrise["enabled"])
+        self.assertIn("_lead_minutes", sunrise["enabled"])
         self.assertEqual(sunrise["at"]["entity_id"], "!input alarm_sensor")
         self.assertEqual(sunrise["at"]["offset"], "!input precise_start_offset")
         self.assertFalse(any(t["trigger"] == "time_pattern" for t in self.data["triggers"]))
@@ -201,17 +208,88 @@ class AlarmLightTests(unittest.TestCase):
         self.assertFalse(self.truthy(self.render(condition, ctx)))
 
     def test_precise_mode_disables_minute_template_path(self):
-        """When precise scheduling is on, the fallback never evaluates the clock."""
+        """Only one start trigger is enabled for each lead/offset pair."""
+        native = next(t for t in self.data["triggers"] if t["id"] == "sunrise_precise")
         fallback = next(t for t in self.data["triggers"] if t["id"] == "sunrise_start")
-        ctx = self.context()
-        ctx["_alarm_sensor"] = "sensor.alarm"
-        ctx["_lead_minutes"] = 30
-        ctx["_precise_start_enabled"] = True
-        ctx["now"] = lambda: self.fail("Precise mode should not read now()")
-        self.assertFalse(self.truthy(self.render(fallback["value_template"], ctx)))
-        ctx["_precise_start_enabled"] = False
-        ctx["now"] = lambda: dt.datetime.fromisoformat("2026-10-12T06:30:01+00:00")
-        self.assertTrue(self.truthy(self.render(fallback["value_template"], ctx)))
+
+        def enabled(lead, offset, precise):
+            ctx = {
+                "_lead_minutes": lead,
+                "_precise_start_offset": offset,
+                "_precise_start_enabled": precise,
+            }
+            return (
+                self.truthy(self.render(native["enabled"], ctx)),
+                self.truthy(self.render(fallback["enabled"], ctx)),
+            )
+
+        self.assertEqual(enabled(30, "-00:30:00", True), (True, False))
+        self.assertEqual(enabled(30, "-00:10:30", True), (True, False))
+        self.assertEqual(enabled(30, "00:00:00", True), (True, False))
+        self.assertEqual(enabled(30, "-00:30:00", False), (False, True))
+        # Core regression: five-minute lead must not become thirty minutes.
+        self.assertEqual(enabled(5, "-00:30:00", True), (False, True))
+        self.assertEqual(enabled(5, "-01:00:00", True), (False, True))
+        self.assertEqual(enabled(30, "00:10:00", True), (False, True))
+
+    def test_mismatched_precise_offset_never_starts_light_early(self):
+        """Two independent values used to allow waking 25 minutes too early."""
+        branch = self.data["actions"][-1]["choose"][0]
+        condition = branch["conditions"][0]["value_template"]
+
+        early = self.context(
+            lead=5, precise_offset="-00:30:00",
+            current="2026-10-12T06:30:00+00:00",
+        )
+        early["precise_start_enabled"] = True
+        early["trigger"] = {"id": "sunrise_precise"}
+        self.assertFalse(self.truthy(self.render(condition, early)))
+
+        fallback = self.context(
+            lead=5, precise_offset="-00:30:00",
+            current="2026-10-12T06:55:00+00:00",
+        )
+        fallback["precise_start_enabled"] = True
+        fallback["trigger"] = {"id": "sunrise_start"}
+        self.assertTrue(self.truthy(self.render(condition, fallback)))
+
+        too_soon = self.context(
+            lead=30, precise_offset="-00:30:00",
+            current="2026-10-12T06:15:00+00:00",
+        )
+        too_soon["precise_start_enabled"] = True
+        too_soon["trigger"] = {"id": "sunrise_precise"}
+        self.assertFalse(self.truthy(self.render(condition, too_soon)))
+
+    def test_precise_start_requires_correct_alarm_timestamp(self):
+        """Do not trust trigger ID alone when alarm sensor moves or reloads."""
+        check = self.data["actions"][-1]["choose"][0]["conditions"][0]["value_template"]
+        ctx = self.context(
+            lead=30, precise_offset="-00:10:00",
+            current="2026-10-12T06:50:00+00:00",
+        )
+        ctx["precise_start_enabled"] = True
+        ctx["trigger"] = {"id": "sunrise_precise"}
+        self.assertTrue(self.truthy(self.render(check, ctx)))
+
+        for current in ("2026-10-12T06:20:00+00:00",
+                        "2026-10-12T06:49:30+00:00",
+                        "2026-10-12T06:52:00+00:00"):
+            stale = self.context(
+                lead=30, precise_offset="-00:10:00", current=current,
+            )
+            stale["precise_start_enabled"] = True
+            stale["trigger"] = {"id": "sunrise_precise"}
+            self.assertFalse(self.truthy(self.render(check, stale)))
+
+        changed = self.context(
+            alarm="2026-10-12T09:00:00+00:00",
+            lead=30, precise_offset="-00:10:00",
+            current="2026-10-12T06:50:00+00:00",
+        )
+        changed["precise_start_enabled"] = True
+        changed["trigger"] = {"id": "sunrise_precise"}
+        self.assertFalse(self.truthy(self.render(check, changed)))
 
     def test_before_alarm_window_and_darkness(self):
         branch = self.data["actions"][-1]["choose"][0]
