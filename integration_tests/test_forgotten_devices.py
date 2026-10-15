@@ -36,12 +36,13 @@ async def environment(tmp_path, entries=None, **inputs):
     entries=entries if entries is not None else [{'entity':'light.test','last_attempt':'input_datetime.test','rules':[{'entity':'binary_sensor.room','state':'off'}]}]
     hass.states.async_set('binary_sensor.room','off')
     for item in entries:
-        target=item['entity']
-        domain=target.split('.')[0]
-        status={'climate':'heat','media_player':'playing'}.get(domain,'on')
-        attrs={'hvac_modes':['off','heat']} if domain=='climate' else {}
-        # Explicit past state time allows fast real-template tests without clock sleeps.
-        hass.states._states[target]=State(target,status,attrs,last_changed=now-timedelta(hours=1))
+        target=item.get('entity')
+        if target:
+            domain=target.split('.')[0]
+            status={'climate':'heat','media_player':'playing'}.get(domain,'on')
+            attrs={'hvac_modes':['off','heat']} if domain=='climate' else {}
+            # Explicit past state time allows fast real-template tests without clock sleeps.
+            hass.states._states[target]=State(target,status,attrs,last_changed=now-timedelta(hours=1))
         helper=item.get('last_attempt','input_datetime.test')
         hass.states.async_set(helper,'2020-01-01 00:00:00',{'has_date':True,'has_time':True,'timestamp':1577836800})
     async def record(call):
@@ -429,6 +430,6 @@ async def test_runtime_across_dst_and_midnight(tmp_path,elapsed,limit,expected):
         raw=yaml_util.load_yaml(str(PATH))
         sequence=next(a['repeat']['sequence'] for a in raw['actions'] if 'repeat' in a)
         block=next(a['variables']['runtime_due'] for a in sequence if 'runtime_due' in a.get('variables',{}))
-        result=template.Template(block,hass).async_render({'target_entity':'light.test','attempt_helper':'input_datetime.test','runtime_minutes':limit,'now':lambda:finish})
+        result=template.Template(block,hass).async_render({'active_members':[{'entity_id':'light.test','since':start.timestamp()}],'attempt_helper':'input_datetime.test','runtime_minutes':limit,'now':lambda:finish})
         assert result is expected
     finally: await hass.async_stop()
