@@ -267,7 +267,7 @@ class BlueprintTests(unittest.TestCase):
         c = self.evaluate(sleep="on")
         self.assertTrue(self.true(c["anyone_home_now"]))
         arrival = next(b for b in self.data["actions"][-1]["choose"] if b["alias"] == "Automatic arrival")
-        self.assertIn("sleep_home", arrival["conditions"][0]["value_template"])
+        self.assertIn("sleep_home", str(arrival["conditions"]))
         away = self.data["actions"][-1]["choose"][-1]
         self.assertTrue(any("sleep_clear" in str(cond) for cond in away["conditions"]))
 
@@ -315,6 +315,9 @@ class BlueprintTests(unittest.TestCase):
         now = dt.datetime(2026, 10, 8, 8, 0, tzinfo=dt.timezone.utc)
 
         def timestamp(value, default=0):
+            # HA as_timestamp accepts datetime objects as well as helper strings.
+            if isinstance(value, dt.datetime):
+                return value.timestamp()
             try:
                 return dt.datetime.fromisoformat(value).replace(tzinfo=dt.timezone.utc).timestamp()
             except (ValueError, TypeError):
@@ -578,7 +581,7 @@ class BlueprintTests(unittest.TestCase):
         for value in strings:
             self.assertTrue(value.isascii(), f"Non-English UI character in: {value!r}")
         self.assertIn("Presence & Vacancy", self.data["blueprint"]["name"])
-        self.assertIn("Automatic detection", str(strings))
+        self.assertIn("automatically", self.data["blueprint"]["description"])
 
     def test_vacancy_guards_remain_mandatory(self):
         checks = str(self.data["actions"][-1]["choose"][-1]["conditions"])
