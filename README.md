@@ -4,13 +4,47 @@ A collection of reusable, configurable **Home Assistant blueprints** maintained 
 
 ## Blueprint catalog
 
-| Blueprint | Description | Documentation | Install |
-| --- | --- | --- | --- |
-| **Area Occupancy Manager** | Detect occupied/vacant areas using people, devices, and optional sensors. Run configurable actions, with guest/sleep protections and independent timed routines. | [Setup and examples](blueprints/automation/occupancy/README.md) | [Import blueprint](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2F3115a083%2Fha-blueprints%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Foccupancy%2Farea_occupancy_manager.yaml) |
-| **🌅 Sunrise Alarm / Light Wake-Up** | Start lights a configurable time before a phone alarm. Linear, ramp-up or instant brightening, with optional start, completion and alarm-time actions. | [Setup and examples](blueprints/automation/alarm_light/README.md) | [Import blueprint](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2F3115a083%2Fha-blueprints%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Falarm_light%2Falarm_light.yaml) |
-| **🔧 Govee Light Recovery** | Diagnose Govee2MQTT light unavailability and ESPHome relay power issues for any number of lamps, each with an optional relay and Ping sensor; guarded restoration, optional app restart and notifications. | [Setup and safety](blueprints/automation/govee_recovery/README.md) | [Import blueprint](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2F3115a083%2Fha-blueprints%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fgovee_recovery%2Fgovee_recovery.yaml) |
-| **🎵 Music Assistant / NSPanel Presets** | Start favorite radios/playlists, cycle speakers and transfer playback from NSPanel buttons without changing Blackymas firmware. | [Setup and examples](blueprints/automation/music_assistant_nspanel/README.md) | [Import blueprint](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2F3115a083%2Fha-blueprints%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fmusic_assistant_nspanel%2Fmusic_assistant_nspanel.yaml) |
-| **💡 Forgotten Devices / Energy Saver** | Shut down forgotten devices after individual or global runtimes, with per-device conditions, global AND/OR/ignore modes and a preview. | [Setup and examples](blueprints/automation/forgotten_devices/README.md) | [Import blueprint](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2F3115a083%2Fha-blueprints%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fforgotten_devices%2Fforgotten_devices.yaml) |
+| Blueprint | Description | Documentation | Install | Manual import URL |
+| --- | --- | --- | --- | --- |
+| **🏠 Area Occupancy Manager** | Detect occupied/vacant areas using people, devices, and optional sensors. Run configurable actions, with guest/sleep protections and independent timed routines. | [Setup and examples](blueprints/automation/occupancy/README.md) | [Import blueprint](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2F3115a083%2Fha-blueprints%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Foccupancy%2Farea_occupancy_manager.yaml) | `https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/occupancy/area_occupancy_manager.yaml` · [Copy URL](#copy-area-occupancy-manager-url) |
+| **🌅 Sunrise Alarm / Light Wake-Up** | Start lights a configurable time before a phone alarm. Linear, ramp-up or instant brightening, with optional start, completion and alarm-time actions. | [Setup and examples](blueprints/automation/alarm_light/README.md) | [Import blueprint](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2F3115a083%2Fha-blueprints%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Falarm_light%2Falarm_light.yaml) | `https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/alarm_light/alarm_light.yaml` · [Copy URL](#copy-sunrise-alarm-light-wake-up-url) |
+| **🔧 Govee Light Recovery** | Diagnose Govee2MQTT light unavailability and ESPHome relay power issues for any number of lamps, each with an optional relay and Ping sensor; guarded restoration, optional app restart and notifications. | [Setup and safety](blueprints/automation/govee_recovery/README.md) | [Import blueprint](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2F3115a083%2Fha-blueprints%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fgovee_recovery%2Fgovee_recovery.yaml) | `https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/govee_recovery/govee_recovery.yaml` · [Copy URL](#copy-govee-light-recovery-url) |
+| **🎵 Music Assistant / NSPanel Presets** | Start favorite radios/playlists, cycle speakers and transfer playback from NSPanel buttons without changing Blackymas firmware. | [Setup and examples](blueprints/automation/music_assistant_nspanel/README.md) | [Import blueprint](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2F3115a083%2Fha-blueprints%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fmusic_assistant_nspanel%2Fmusic_assistant_nspanel.yaml) | `https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/music_assistant_nspanel/music_assistant_nspanel.yaml` · [Copy URL](#copy-music-assistant-nspanel-presets-url) |
+| **💡 Forgotten Devices / Energy Saver** | Shut down forgotten devices after individual or global runtimes, with per-device conditions, global AND/OR/ignore modes and a preview. | [Setup and examples](blueprints/automation/forgotten_devices/README.md) | [Import blueprint](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2F3115a083%2Fha-blueprints%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fforgotten_devices%2Fforgotten_devices.yaml) | `https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/forgotten_devices/forgotten_devices.yaml` · [Copy URL](#copy-forgotten-devices-energy-saver-url) |
+
+## Copy an import URL
+
+Paste a **blueprint YAML URL**, not a My Home Assistant redirect, into **Settings → Automations & scenes → Blueprints → Import blueprint**. The table shows each URL directly. Its **Copy URL** link jumps to the matching code block below; hover over the block and use GitHub's built-in copy button. On mobile, open the code block's copy control or select its single URL. No browser script or external clipboard service is needed.
+
+### Copy Area Occupancy Manager URL
+
+```text
+https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/occupancy/area_occupancy_manager.yaml
+```
+
+### Copy Sunrise Alarm Light Wake-Up URL
+
+```text
+https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/alarm_light/alarm_light.yaml
+```
+
+### Copy Govee Light Recovery URL
+
+```text
+https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/govee_recovery/govee_recovery.yaml
+```
+
+### Copy Music Assistant NSPanel Presets URL
+
+```text
+https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/music_assistant_nspanel/music_assistant_nspanel.yaml
+```
+
+### Copy Forgotten Devices Energy Saver URL
+
+```text
+https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/forgotten_devices/forgotten_devices.yaml
+```
 
 ## How to install a blueprint
 
@@ -20,6 +54,20 @@ A collection of reusable, configurable **Home Assistant blueprints** maintained 
 4. Test with non-critical actions before enabling alarms, locks, motors, or similar devices.
 
 The catalog is a starting point. **Blueprint-specific settings and use cases are documented in the linked README inside each blueprint folder**, rather than in this repository overview.
+
+## Updates with Blueprints Updater
+
+All five blueprints contain a canonical `blueprint.source_url` pointing to their own YAML file on this repository's `main` branch. The URLs in the catalog and copy blocks match those metadata values. Keep this metadata when importing or copying a file manually.
+
+[Blueprints Updater](https://github.com/luuquangvu/blueprints-updater) uses the source URL to retrieve the upstream file and compares normalized content hashes. It accepts GitHub `blob/main` URLs and converts them to raw downloads. **A GitHub Release, tag, release asset, or blueprint version field is not required.** A short hash shown as a blueprint's update version is normal for this integration; it is not the HACS release version of the updater integration itself. Adding a `version` key to blueprint metadata is unnecessary and may violate Home Assistant's blueprint schema.
+
+1. Import a blueprint using its canonical URL above. Install and configure **Blueprints Updater** separately in Home Assistant.
+2. Make sure its tracking filters include the imported blueprint. Choose manual update approval or auto-updates in the integration's options.
+3. After adding a blueprint, run **Developer Tools → Actions → `blueprints_updater.reload`**, or reload the integration, to refresh its scan. Use the blueprint's native update entity when a change is detected.
+4. Retain `source_url` and the original blueprint file path. Do not replace the source with a commit SHA, fixed tag, release attachment, README URL or My Home Assistant redirect if you want future `main` updates.
+5. Review the change and the updater's compatibility report before installing; use its backup option where appropriate. Each blueprint still requires its own declared minimum Home Assistant version. The updater's compatibility guard may block an incompatible update.
+
+The repository checks canonical source URLs, catalog/import links, copy blocks and Home Assistant blueprint schemas in CI. This establishes the source metadata needed for tracking; it does not claim that the updater was installed or tested on your own Home Assistant instance. Verification reference: upstream `luuquangvu/blueprints-updater` commit `ff76efac1667ead0db50fcef7469c416700b469e`, inspected 2026-10-15 (`README.md`, `providers.py`, `blueprint_validation.py` and `update.py`).
 
 ## Repository structure
 

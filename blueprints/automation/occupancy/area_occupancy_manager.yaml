@@ -1,5 +1,5 @@
 blueprint:
-  name: "Area Occupancy Manager | Presence & Vacancy"
+  name: "🏠 Area Occupancy Manager | Presence & Vacancy"
   description: >-
     Derive area occupancy automatically from persons, device trackers, and optional
     presence signals. An input_boolean can publish the computed result for dashboards
@@ -24,13 +24,13 @@ blueprint:
     min_version: "2024.10.0"
   input:
     automatic_evidence:
-      name: "01 | Presence and absence triggers"
+      name: "👥 01 | Presence and absence triggers"
       icon: mdi:account-search
       description: >-
         Start here: select one or more person entities (recommended default), or device trackers. A person leaving home is a standard absence signal; arrival is detected automatically. Motion/presence sensors are optional additional evidence.
       input:
         tracked_entities:
-          name: "People / device trackers (required without a switch)"
+          name: "👥 People / device trackers (required without a switch)"
           description: >-
             Select one or more person or device_tracker entities. They are the primary presence
             sources: a person at home means occupied; ALL selected trackers away long enough
@@ -55,7 +55,7 @@ blueprint:
               unit_of_measurement: min
               mode: box
         activity_sensors:
-          name: "Motion / presence sensors (optional)"
+          name: "📡 Motion / presence sensors (optional)"
           description: >-
             All selected sensors must be OFF and stable before vacancy. Any ON sensor immediately restores
             occupancy. PIR motion alone cannot detect sleeping people.
@@ -94,7 +94,7 @@ blueprint:
                 - label: "ANY one qualifying method (faster)"
                   value: any
     entrances:
-      name: "02 | Optional door and custom triggers"
+      name: "🚪 02 | Optional door and custom triggers"
       icon: mdi:door
       description: >-
         Add direction-sensitive door sequences, unlock events, or custom triggers only if needed. Standard person tracking works without this section.
@@ -129,7 +129,7 @@ blueprint:
               unit_of_measurement: s
               mode: box
         arrival_lock:
-          name: "Unlocked door means arrival (optional)"
+          name: "🔓 Unlocked door means arrival (optional)"
           description: >-
             Unlocking a selected lock can restore occupancy. Apply extra arrival conditions for remote
             unlocks.
@@ -153,13 +153,13 @@ blueprint:
           selector:
             trigger: {}
     actions_section:
-      name: "03 | Actions on occupied / vacant"
+      name: "⚡ 03 | Actions on occupied / vacant"
       icon: mdi:lightning-bolt
       description: >-
         Choose what happens when occupancy changes. Use any Home Assistant actions, scripts, conditions or scenes.
       input:
         away_actions:
-          name: "Actions when the area becomes vacant"
+          name: "🚶 Actions when the area becomes vacant"
           description: >-
             Choose any Home Assistant actions: alarm, lights, media, locks, or scripts. Runs once on ON to
             OFF.
@@ -167,7 +167,7 @@ blueprint:
           selector:
             action: {}
         home_actions:
-          name: "Actions when the area becomes occupied"
+          name: "🏠 Actions when the area becomes occupied"
           description: >-
             Choose any Home Assistant actions. Runs once on OFF to ON. For night-only lighting add a sun or
             lux condition here.
@@ -175,7 +175,7 @@ blueprint:
           selector:
             action: {}
     temporary:
-      name: "04 | Optional timed action 1"
+      name: "⏱️ 04 | Optional timed action 1"
       icon: mdi:timer-outline
       description: >-
         Separate arrival action with its own start conditions, actions, timer and follow-up. Existing input names remain unchanged.
@@ -246,7 +246,7 @@ blueprint:
           selector:
             action: {}
     temporary_2:
-      name: "05 | Optional timed action 2"
+      name: "⏱️ 05 | Optional timed action 2"
       icon: mdi:timer-outline
       description: >-
         A second independent timed action, for example lock a door 30 minutes after an authorized unlock.
@@ -309,7 +309,7 @@ blueprint:
           selector:
             action: {}
     temporary_3:
-      name: "06 | Optional timed action 3"
+      name: "⏱️ 06 | Optional timed action 3"
       icon: mdi:timer-outline
       description: >-
         A third independent timed arrival action; configure a different duration and checks.
@@ -372,14 +372,14 @@ blueprint:
           selector:
             action: {}
     safeguards:
-      name: "07 | Optional occupancy safeguards"
+      name: "🛡️ 07 | Optional occupancy safeguards"
       icon: mdi:shield-check
       description: >-
         Guest and sleep modes, presence blockers and custom conditions prevent unsafe vacancy decisions. Strongly recommended when visitors or sleeping occupants may remain.
       collapsed: true
       input:
         guest_mode:
-          name: "Guest mode / vacancy blocker (optional)"
+          name: "👋 Guest mode / vacancy blocker (optional)"
           description: >-
             ON means guests are present: restore occupancy and block automatic vacancy. Unknown or
             unavailable status also blocks vacancy. Manual occupancy changes remain possible.
@@ -389,7 +389,7 @@ blueprint:
               filter:
                 domain: input_boolean
         sleep_mode:
-          name: "Sleep mode (optional)"
+          name: "🛏️ Sleep mode (optional)"
           description: >-
             ON explicitly indicates occupancy and prevents vacancy even without activity. Turning it ON
             restores occupancy. Unknown or unavailable status blocks vacancy.
@@ -399,7 +399,7 @@ blueprint:
               filter:
                 domain: input_boolean
         blocking_sensors:
-          name: "Additional presence protection sensors (optional)"
+          name: "🛡️ Additional presence protection sensors (optional)"
           description: >-
             Every sensor must be OFF for automatic vacancy. ON restores occupancy. Unknown and unavailable
             also block vacancy. Use reliable bed or mmWave presence sensors.
@@ -426,14 +426,14 @@ blueprint:
           selector:
             condition: {}
     base:
-      name: "08 | Optional occupancy status output"
+      name: "📍 08 | Optional occupancy status output"
       icon: mdi:home-account
       description: >-
         Publish the computed occupied/vacant result to a Home Assistant input_boolean so dashboards and other automations can read it. No manual toggle is needed for tracker changes.
       collapsed: true
       input:
         occupancy_helper:
-          name: "Published occupancy switch (optional)"
+          name: "📍 Published occupancy switch (optional)"
           description: >-
             Optional input_boolean OUTPUT. The automation sets it automatically: ON = occupied,
             OFF = vacant. Other automations can read this switch. Do not manually set it for
@@ -446,14 +446,14 @@ blueprint:
               filter:
                 domain: input_boolean
     diagnostics:
-      name: "09 | Optional diagnostics and debug"
+      name: "🩺 09 | Optional diagnostics and debug"
       icon: mdi:clipboard-text-search
       description: >-
         Inspect blocked transitions, write a diagnostic text helper or enable logging. Leave disabled for a simple setup.
       collapsed: true
       input:
         diagnostics_enabled:
-          name: "Enable diagnostics"
+          name: "🩺 Enable diagnostics"
           description: >-
             Expose reasons in automation traces and optionally in a text helper.
           default: false
@@ -470,7 +470,7 @@ blueprint:
               filter:
                 domain: input_text
         diagnostics_log:
-          name: "Log blocked vacancy attempts"
+          name: "📝 Log blocked vacancy attempts"
           description: >-
             Write system-log entries for relevant vacancy events. This does not log every minute.
           default: false

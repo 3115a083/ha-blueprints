@@ -68,15 +68,15 @@ class BlueprintTests(unittest.TestCase):
         """The automation editor should expose essential steps before advanced options."""
         groups = self.data["blueprint"]["input"]
         order = [
-            ("automatic_evidence", "01 | Presence and absence triggers", False),
-            ("entrances", "02 | Optional door and custom triggers", True),
-            ("actions_section", "03 | Actions on occupied / vacant", False),
-            ("temporary", "04 | Optional timed action 1", True),
-            ("temporary_2", "05 | Optional timed action 2", True),
-            ("temporary_3", "06 | Optional timed action 3", True),
-            ("safeguards", "07 | Optional occupancy safeguards", True),
-            ("base", "08 | Optional occupancy status output", True),
-            ("diagnostics", "09 | Optional diagnostics and debug", True),
+            ("automatic_evidence", "👥 01 | Presence and absence triggers", False),
+            ("entrances", "🚪 02 | Optional door and custom triggers", True),
+            ("actions_section", "⚡ 03 | Actions on occupied / vacant", False),
+            ("temporary", "⏱️ 04 | Optional timed action 1", True),
+            ("temporary_2", "⏱️ 05 | Optional timed action 2", True),
+            ("temporary_3", "⏱️ 06 | Optional timed action 3", True),
+            ("safeguards", "🛡️ 07 | Optional occupancy safeguards", True),
+            ("base", "📍 08 | Optional occupancy status output", True),
+            ("diagnostics", "🩺 09 | Optional diagnostics and debug", True),
         ]
         self.assertEqual(list(groups), [key for key, _, _ in order])
         self.assertEqual(list(groups["automatic_evidence"]["input"])[:2],
@@ -103,9 +103,9 @@ class BlueprintTests(unittest.TestCase):
         guide = local_guide.read_text(encoding="utf-8")
         self.assertIn("## Blueprint catalog", root_text)
         self.assertIn("blueprints/automation/occupancy/README.md", root_text)
-        self.assertNotIn("## 01 | Presence and absence triggers", root_text)
-        self.assertIn("## 01 | Presence and absence triggers", guide)
-        self.assertIn("## 09 | Optional diagnostics and debug", guide)
+        self.assertNotIn("## 👥 01 | Presence and absence triggers", root_text)
+        self.assertIn("## 👥 01 | Presence and absence triggers", guide)
+        self.assertIn("## 🩺 09 | Optional diagnostics and debug", guide)
 
     def test_all_blueprint_references_exist(self):
         references = re.findall(r"!input\s+([\w]+)", self.text)
@@ -579,7 +579,8 @@ class BlueprintTests(unittest.TestCase):
             for spec in group["input"].values():
                 strings.extend([spec.get("name", ""), spec.get("description", "")])
         for value in strings:
-            self.assertTrue(value.isascii(), f"Non-English UI character in: {value!r}")
+            self.assertTrue(all(not char.isalpha() or char.isascii() for char in value),
+                            f"Non-English lettering in: {value!r}")
         self.assertIn("Presence & Vacancy", self.data["blueprint"]["name"])
         self.assertIn("automatically", self.data["blueprint"]["description"])
 

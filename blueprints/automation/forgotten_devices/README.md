@@ -124,3 +124,13 @@ python -m pytest integration_tests -q
 ```
 
 The real-HA suite validates the blueprint and nested object selectors, runs its actual script actions with simulated states/services, and tests runtime overrides, global modes, state hold times, away states, preview, unavailable inputs, duplicate configuration, one-attempt behavior, failures, rechecks and reactivation races. No physical-device behavior is inferred from these tests. Test your own sensors and devices before relying on shutdown behavior.
+
+## Import URL and updates
+
+Copy this URL into Home Assistant's **Import blueprint** dialog. On GitHub, the code block has a built-in copy button.
+
+```text
+https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/forgotten_devices/forgotten_devices.yaml
+```
+
+This is also the blueprint's `source_url`. [Blueprints Updater](https://github.com/luuquangvu/blueprints-updater) can track changes at this stable `main` URL without a GitHub Release or version tag. Keep `source_url` in the installed YAML. After import, refresh the integration with `blueprints_updater.reload` if necessary, and check its tracking filters. See the [repository update instructions](../../../README.md#updates-with-blueprints-updater).

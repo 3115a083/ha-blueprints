@@ -137,3 +137,13 @@ The test suite validates blueprint structure, Jinja syntax, timing-window calcul
 Inspired by [r3mcos3's Alarm Light blueprint](https://github.com/r3mcos3/blueprints/blob/main/alarm_light/alarm_light.yaml), particularly its timestamp-sensor, person-at-home, darkness and active-day approach. This implementation adds independently configured lead time and fade duration, three brightness behaviors, independent actions, and current blueprint/automation syntax.
 
 For other available blueprints, return to the [repository catalog](../../../README.md).
+
+## Import URL and updates
+
+Copy this URL into Home Assistant's **Import blueprint** dialog. On GitHub, the code block has a built-in copy button.
+
+```text
+https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/alarm_light/alarm_light.yaml
+```
+
+This is also the blueprint's `source_url`. [Blueprints Updater](https://github.com/luuquangvu/blueprints-updater) can track changes at this stable `main` URL without a GitHub Release or version tag. Keep `source_url` in the installed YAML. After import, refresh the integration with `blueprints_updater.reload` if necessary, and check its tracking filters. See the [repository update instructions](../../../README.md#updates-with-blueprints-updater).
