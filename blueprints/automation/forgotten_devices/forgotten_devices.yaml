@@ -1,0 +1,365 @@
+blueprint:
+  name: "💡 Forgotten Devices | Energy-Saving Shutoff"
+  description: >-
+    Switch off forgotten lights, switches, fans, humidifiers and thermostats,
+    or stop/pause media players after their maximum runtime, but only when
+    your conditions allow it. Add any number of independent entries with
+    their own runtime and conditions. An entry's runtime overrides the global
+    default. Global conditions can be required, an alternative, or ignored
+    for each entry. Checks run once per minute, never before the runtime expires.
+
+    Create one dedicated Date and/or time helper with BOTH date and time for
+    each entry (Settings > Devices & services > Helpers). It records one
+    attempt per active state period, including failed attempts. Never reuse
+    a helper or target in this automation. Attribute updates do not restart
+    runtime; state changes do. After an HA restart, allow a full new runtime.
+    Missing/unavailable targets, helpers and local condition sources are skipped.
+
+    Start with Preview only. This automation never switches anything on.
+    Use reliable presence sensors; PIR alone cannot detect sleeping people.
+    Never select essential equipment. Thermostat OFF changes real heating
+    or cooling, not just a display. Media defaults to STOP, not power off.
+  domain: automation
+  author: "3115a083"
+  source_url: https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/forgotten_devices/forgotten_devices.yaml
+  homeassistant:
+    min_version: "2026.10.1"
+  input:
+    devices:
+      name: "💡 01 | Devices and individual rules"
+      icon: mdi:power-sleep
+      input:
+        device_entries:
+          name: "Devices (add as many as needed)"
+          description: >-
+            One entry per target. Local rules use entity states or explicit
+            away-from-home checks. For complex local logic, select a Template
+            Binary Sensor helper as a rule source. No YAML is needed here.
+          default: []
+          selector:
+            object:
+              multiple: true
+              label_field: entity
+              fields:
+                entity:
+                  label: "Target entity"
+                  required: true
+                  selector:
+                    entity:
+                      filter:
+                        - domain: light
+                        - domain: switch
+                        - domain: fan
+                        - domain: climate
+                        - domain: media_player
+                        - domain: humidifier
+                        - domain: input_boolean
+                last_attempt:
+                  label: "Dedicated date AND time helper (one per device)"
+                  required: true
+                  selector:
+                    entity:
+                      filter:
+                        domain: input_datetime
+                max_minutes:
+                  label: "Maximum runtime in minutes (optional; overrides global)"
+                  required: false
+                  selector:
+                    number:
+                      min: 1
+                      max: 10080
+                      step: 1
+                      mode: box
+                      unit_of_measurement: min
+                global_mode:
+                  label: "How global conditions apply"
+                  default: require
+                  selector:
+                    select:
+                      options:
+                        - label: "Required: global AND local conditions"
+                          value: require
+                        - label: "Alternative: global OR local conditions"
+                          value: alternative
+                        - label: "Ignore global conditions"
+                          value: ignore
+                local_match:
+                  label: "Combine local rules"
+                  default: all
+                  selector:
+                    select:
+                      options:
+                        - label: "ALL local rules must pass"
+                          value: all
+                        - label: "ANY local rule may pass"
+                          value: any
+                rules:
+                  label: "Local conditions (optional)"
+                  default: []
+                  selector:
+                    object:
+                      multiple: true
+                      label_field: entity
+                      fields:
+                        entity:
+                          label: "Condition source entity"
+                          required: true
+                          selector:
+                            entity: {}
+                        match:
+                          label: "Condition type"
+                          default: state
+                          selector:
+                            select:
+                              options:
+                                - label: "State equals the value below"
+                                  value: state
+                                - label: "Person/tracker is away from home (any known zone)"
+                                  value: away
+                        state:
+                          label: "Expected state, e.g. off, on or not_home (state condition only)"
+                          required: false
+                          selector:
+                            text: {}
+                        for_minutes:
+                          label: "Source must stay in this state for (minutes)"
+                          default: 0
+                          selector:
+                            number:
+                              min: 0
+                              max: 10080
+                              step: 1
+                              mode: box
+                              unit_of_measurement: min
+                allow_time_only:
+                  label: "Allow runtime-only shutoff when no applicable conditions exist"
+                  default: false
+                  selector:
+                    boolean: {}
+                media_action:
+                  label: "Media player action (ignored for other targets)"
+                  default: media_stop
+                  selector:
+                    select:
+                      options:
+                        - label: "Stop playback"
+                          value: media_stop
+                        - label: "Pause playback"
+                          value: media_pause
+                        - label: "Power off player"
+                          value: turn_off
+    defaults:
+      name: "⏱️ 02 | Default runtime and global conditions"
+      icon: mdi:timer-check-outline
+      input:
+        global_minutes:
+          name: "Default maximum runtime (minutes)"
+          description: "An individual runtime always wins. Time counts from the target's latest state change."
+          default: 30
+          selector:
+            number:
+              min: 1
+              max: 10080
+              step: 1
+              mode: box
+              unit_of_measurement: min
+        global_conditions:
+          name: "Global shutoff conditions"
+          description: >-
+            Use the standard condition editor. All top-level conditions must
+            pass; add OR groups when needed. Example: nobody is home.
+            Empty global conditions do not count as a passing OR alternative.
+          default: []
+          selector:
+            condition: {}
+    protection:
+      name: "🛡️ 03 | Safety and preview"
+      icon: mdi:shield-check-outline
+      input:
+        safety_conditions:
+          name: "Always-required safety conditions"
+          description: >-
+            These conditions must ALWAYS pass, even when an entry ignores
+            global conditions or uses OR. Example: guest mode is off, or
+            an energy-saving enable switch is on. Rechecked before each device.
+          default: []
+          selector:
+            condition: {}
+        preview_only:
+          name: "Preview only (no device commands)"
+          description: >-
+            Creates or updates one persistent notification per eligible device.
+            Does not consume its attempt. Turn off after checking your rules.
+          default: true
+          selector:
+            boolean: {}
+
+mode: single
+max_exceeded: silent
+triggers:
+  - trigger: time_pattern
+    minutes: "/1"
+    id: check
+conditions: !input safety_conditions
+variables:
+  device_entries: !input device_entries
+  global_minutes: !input global_minutes
+  global_conditions: !input global_conditions
+  preview_only: !input preview_only
+actions:
+  - variables:
+      global_pass: false
+  - if: !input global_conditions
+    then:
+      - variables:
+          global_pass: true
+  - repeat:
+      for_each: "{{ device_entries }}"
+      sequence:
+        - variables:
+            entry: "{{ repeat.item }}"
+        - variables:
+            target_entity: "{{ entry.get('entity', '') }}"
+            attempt_helper: "{{ entry.get('last_attempt', '') }}"
+            rules: "{{ entry.get('rules', []) }}"
+            global_mode: "{{ entry.get('global_mode', 'require') }}"
+            local_match: "{{ entry.get('local_match', 'all') }}"
+            runtime_minutes: "{{ entry.get('max_minutes', global_minutes) | float(0) }}"
+        - variables:
+            configuration_ok: >-
+              {% set targets = device_entries | map(attribute='entity') | list %}
+              {% set helpers = device_entries | map(attribute='last_attempt') | list %}
+              {{ target_entity.split('.')[0] in ['light', 'switch', 'fan', 'climate', 'media_player', 'humidifier', 'input_boolean']
+                 and targets.count(target_entity) == 1 and helpers.count(attempt_helper) == 1
+                 and attempt_helper.startswith('input_datetime.')
+                 and state_attr(attempt_helper, 'has_date') == true
+                 and state_attr(attempt_helper, 'has_time') == true
+                 and states(attempt_helper) not in ['unknown', 'unavailable', '']
+                 and 1 <= runtime_minutes <= 10080
+                 and global_mode in ['require', 'alternative', 'ignore']
+                 and local_match in ['all', 'any'] }}
+            active: >-
+              {% set s = states(target_entity) %}
+              {% set domain = target_entity.split('.')[0] %}
+              {{ (domain in ['light', 'switch', 'fan', 'humidifier', 'input_boolean'] and s == 'on')
+                 or (domain == 'media_player' and (s in ['playing', 'paused', 'buffering', 'on']
+                     or (s == 'idle' and entry.get('media_action', 'media_stop') == 'turn_off')))
+                 or (domain == 'climate' and s in ['heat', 'cool', 'heat_cool', 'auto', 'dry', 'fan_only']) }}
+            runtime_due: >-
+              {% set s = states[target_entity] %}
+              {{ s is not none and as_timestamp(now()) - as_timestamp(s.last_changed) >= runtime_minutes * 60
+                 and (state_attr(attempt_helper, 'timestamp') | float(0)) < as_timestamp(s.last_changed) }}
+            local_pass: &local_rules_check >-
+              {% set ns = namespace(results=[]) %}
+              {% for rule in rules %}
+                {% set source = rule.get('entity', '') %}
+                {% set s = states[source] %}
+                {% set kind = rule.get('match', 'state') %}
+                {% set hold = rule.get('for_minutes', 0) | float(-1) %}
+                {% set known = s is not none and s.state not in ['unknown', 'unavailable', ''] %}
+                {% set match = known and ((kind == 'state' and rule.get('state', '') != '' and s.state == rule.get('state'))
+                   or (kind == 'away' and source.split('.')[0] in ['person', 'device_tracker'] and s.state != 'home')) %}
+                {% set stable = known and 0 <= hold <= 10080 and as_timestamp(now()) - as_timestamp(s.last_changed) >= hold * 60 %}
+                {% set ns.results = ns.results + [match and stable] %}
+              {% endfor %}
+              {{ (ns.results | count > 0) and
+                 ((local_match == 'all' and false not in ns.results) or
+                  (local_match == 'any' and true in ns.results)) }}
+        - variables:
+            conditions_pass: &combined_rules_check >-
+              {% set has_global = global_conditions | count > 0 %}
+              {% set has_local = rules | count > 0 %}
+              {% if global_mode == 'require' %}
+                {{ (has_global or has_local or entry.get('allow_time_only', false))
+                   and (not has_global or global_pass) and (not has_local or local_pass) }}
+              {% elif global_mode == 'alternative' %}
+                {{ (has_global and global_pass) or (has_local and local_pass)
+                   or (not has_global and not has_local and entry.get('allow_time_only', false)) }}
+              {% else %}
+                {{ local_pass if has_local else entry.get('allow_time_only', false) }}
+              {% endif %}
+        - if:
+            - condition: template
+              value_template: "{{ configuration_ok and active and runtime_due and conditions_pass }}"
+            - condition: and
+              conditions: !input safety_conditions
+          then:
+            - choose:
+                - conditions: "{{ preview_only }}"
+                  sequence:
+                    - action: persistent_notification.create
+                      continue_on_error: true
+                      data:
+                        notification_id: "{{ this.entity_id | replace('.', '_') }}_{{ target_entity | replace('.', '_') }}_energy_preview"
+                        title: "💡 Energy saver: preview only"
+                        message: >-
+                          {{ state_attr(target_entity, 'friendly_name') or target_entity }}
+                          ({{ target_entity }}) has exceeded {{ runtime_minutes | int }} minutes
+                          and its shutoff conditions currently pass. No device command was sent.
+                          Disable Preview only in the automation inputs to enable shutoff.
+              default:
+                - variables:
+                    attempt_time: "{{ as_timestamp(now()) | int }}"
+                    active_since: "{{ as_timestamp(states[target_entity].last_changed) }}"
+                - action: input_datetime.set_datetime
+                  continue_on_error: true
+                  target:
+                    entity_id: "{{ attempt_helper }}"
+                  data:
+                    timestamp: "{{ attempt_time }}"
+                - variables:
+                    global_pass: false
+                - if: !input global_conditions
+                  then:
+                    - variables:
+                        global_pass: true
+                - variables:
+                    local_pass: *local_rules_check
+                - variables:
+                    conditions_pass: *combined_rules_check
+                - if:
+                    - condition: template
+                      value_template: >-
+                        {{ state_attr(attempt_helper, 'timestamp') | float(0) >= attempt_time
+                           and states[target_entity] is not none
+                           and as_timestamp(states[target_entity].last_changed) == active_since
+                           and conditions_pass }}
+                    - condition: and
+                      conditions: !input safety_conditions
+                  then:
+                    - choose:
+                        - conditions: "{{ target_entity.startswith('media_player.') }}"
+                          sequence:
+                            - choose:
+                                - conditions: "{{ entry.get('media_action', 'media_stop') == 'media_pause' }}"
+                                  sequence:
+                                    - action: media_player.media_pause
+                                      continue_on_error: true
+                                      target:
+                                        entity_id: "{{ target_entity }}"
+                                - conditions: "{{ entry.get('media_action', 'media_stop') == 'turn_off' }}"
+                                  sequence:
+                                    - action: media_player.turn_off
+                                      continue_on_error: true
+                                      target:
+                                        entity_id: "{{ target_entity }}"
+                                - conditions: "{{ entry.get('media_action', 'media_stop') == 'media_stop' }}"
+                                  sequence:
+                                    - action: media_player.media_stop
+                                      continue_on_error: true
+                                      target:
+                                        entity_id: "{{ target_entity }}"
+                        - conditions: "{{ target_entity.startswith('climate.') and 'off' in (state_attr(target_entity, 'hvac_modes') or []) }}"
+                          sequence:
+                            - action: climate.set_hvac_mode
+                              continue_on_error: true
+                              target:
+                                entity_id: "{{ target_entity }}"
+                              data:
+                                hvac_mode: "off"
+                        - conditions: "{{ target_entity.split('.')[0] in ['light', 'switch', 'fan', 'humidifier', 'input_boolean'] }}"
+                          sequence:
+                            - action: "{{ target_entity.split('.')[0] }}.turn_off"
+                              continue_on_error: true
+                              target:
+                                entity_id: "{{ target_entity }}"

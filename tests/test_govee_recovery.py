@@ -6,6 +6,7 @@ formatting. These tests do not replace real Home Assistant hardware testing.
 from __future__ import annotations
 
 import re
+import ast
 import unittest
 from pathlib import Path
 
@@ -64,7 +65,15 @@ class GoveeRecoveryTests(unittest.TestCase):
             "as_timestamp": lambda value, default=0: default if value in ["unknown", "unavailable", ""] else value,
         }
         ctx.update(vars)
-        return self.env.from_string(template).render(**ctx)
+        result = self.env.from_string(template).render(**ctx)
+        # HA strips template whitespace before converting native values.
+        # NativeEnvironment alone leaves whitespace-prefixed lists as strings.
+        if isinstance(result, str):
+            try:
+                return ast.literal_eval(result.strip())
+            except (ValueError, SyntaxError):
+                pass
+        return result
 
     def test_schema_and_current_home_assistant_format(self):
         self.assertEqual(self.data["blueprint"]["domain"], "automation")
