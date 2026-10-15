@@ -81,3 +81,13 @@ Music Assistant players must be exposed by the Music Assistant HA integration. I
 References: [Blackymas NSPanel HA Blueprint](https://github.com/Blackymas/NSPanel_HA_Blueprint), [Music Assistant play media](https://www.music-assistant.io/faq/massplaymedia/), [Music Assistant queue transfer](https://www.home-assistant.io/actions/music_assistant.transfer_queue/), [Home Assistant input_button](https://www.home-assistant.io/integrations/input_button/) and [Input select](https://www.home-assistant.io/integrations/input_select/).
 
 The repository contains [static tests](../../../tests/test_music_assistant_nspanel.py). This companion has **not been tested on a live NSPanel or Music Assistant instance**.
+
+## Import URL and updates
+
+Copy this URL into Home Assistant's **Import blueprint** dialog. On GitHub, the code block has a built-in copy button.
+
+```text
+https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/music_assistant_nspanel/music_assistant_nspanel.yaml
+```
+
+This is also the blueprint's `source_url`. [Blueprints Updater](https://github.com/luuquangvu/blueprints-updater) can track changes at this stable `main` URL without a GitHub Release or version tag. Keep `source_url` in the installed YAML. After import, refresh the integration with `blueprints_updater.reload` if necessary, and check its tracking filters. See the [repository update instructions](../../../README.md#updates-with-blueprints-updater).

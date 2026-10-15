@@ -133,3 +133,13 @@ For Govee LAN-capable models, enable LAN control, reserve stable lamp IPs, revie
 7. Check Home Assistant automation **Traces** while simulating a short disconnection.
 
 Tests in [tests/test_govee_recovery.py](../../../tests/test_govee_recovery.py) cover input references, trigger paths, the restart-before-relay sequence, cooldown, safe hard-reset selection and readable notifications. **A test on actual Govee2MQTT/Sonoff hardware is still required.**
+
+## Import URL and updates
+
+Copy this URL into Home Assistant's **Import blueprint** dialog. On GitHub, the code block has a built-in copy button.
+
+```text
+https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/govee_recovery/govee_recovery.yaml
+```
+
+This is also the blueprint's `source_url`. [Blueprints Updater](https://github.com/luuquangvu/blueprints-updater) can track changes at this stable `main` URL without a GitHub Release or version tag. Keep `source_url` in the installed YAML. After import, refresh the integration with `blueprints_updater.reload` if necessary, and check its tracking filters. See the [repository update instructions](../../../README.md#updates-with-blueprints-updater).
