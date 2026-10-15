@@ -4,14 +4,17 @@ blueprint:
     Switch off forgotten lights, switches, fans, humidifiers and thermostats,
     or stop/pause media players after their maximum runtime, but only when
     your conditions allow it. Add any number of independent entries with
-    their own runtime and conditions. An entry's runtime overrides the global
+    their own runtime and conditions. Each entry can select individual entities,
+    expandable groups or whole rooms, with explicit exclusions. An entry's runtime overrides the global
     default. Global conditions can be required, an alternative, or ignored
     for each entry. Checks run once per minute, never before the runtime expires.
 
     Create one dedicated Date and/or time helper with BOTH date and time for
     each entry (Settings > Devices & services > Helpers). It records one
-    attempt per active state period, including failed attempts. Never reuse
-    a helper or target in this automation. Attribute updates do not restart
+    attempt per entry activation period, including failed attempts. One helper
+    is enough for a room or group. Never reuse a helper in this automation.
+    Groups wait until every included active member has reached the runtime.
+    Overlapping members in different entries are skipped. Attribute updates do not restart
     runtime; state changes do. After an HA restart, allow a full new runtime.
     Missing/unavailable targets, helpers and local condition sources are skipped.
 
@@ -30,20 +33,27 @@ blueprint:
       icon: mdi:power-sleep
       input:
         device_entries:
-          name: "Devices (add as many as needed)"
+          name: "Devices, groups and rooms (add as many as needed)"
           description: >-
-            One entry per target. Local rules use entity states or explicit
+            One entry can control a room or group with exceptions and shared
+            conditions, runtime and attempt helper. Rooms default to lights only.
+            Local rules use entity states or explicit
             away-from-home checks. For complex local logic, select a Template
             Binary Sensor helper as a rule source. No YAML is needed here.
           default: []
           selector:
             object:
               multiple: true
-              label_field: entity
+              label_field: name
               fields:
+                name:
+                  label: "Entry name (optional; useful for rooms)"
+                  required: false
+                  selector:
+                    text: {}
                 entity:
-                  label: "Target entity"
-                  required: true
+                  label: "Individual entity or existing group (optional)"
+                  required: false
                   selector:
                     entity:
                       filter:
@@ -54,8 +64,57 @@ blueprint:
                         - domain: media_player
                         - domain: humidifier
                         - domain: input_boolean
+                        - domain: group
+                entities:
+                  label: "Additional entities or groups (optional)"
+                  default: []
+                  selector:
+                    entity:
+                      multiple: true
+                      filter:
+                        - domain: light
+                        - domain: switch
+                        - domain: fan
+                        - domain: climate
+                        - domain: media_player
+                        - domain: humidifier
+                        - domain: input_boolean
+                        - domain: group
+                areas:
+                  label: "Rooms / areas (optional; members must belong to these areas)"
+                  default: []
+                  selector:
+                    area:
+                      multiple: true
+                area_domains:
+                  label: "Types selected from rooms (lights by default)"
+                  default: [light]
+                  selector:
+                    select:
+                      multiple: true
+                      options:
+                        - label: "Lights"
+                          value: light
+                        - label: "Switches (nonessential equipment only)"
+                          value: switch
+                        - label: "Fans"
+                          value: fan
+                        - label: "Thermostats"
+                          value: climate
+                        - label: "Media players"
+                          value: media_player
+                        - label: "Humidifiers"
+                          value: humidifier
+                        - label: "Input booleans"
+                          value: input_boolean
+                exclude_entities:
+                  label: "Exceptions: entities or groups that must not be controlled"
+                  default: []
+                  selector:
+                    entity:
+                      multiple: true
                 last_attempt:
-                  label: "Dedicated date AND time helper (one per device)"
+                  label: "Dedicated date AND time helper (one per entry, including groups)"
                   required: true
                   selector:
                     entity:
@@ -154,7 +213,7 @@ blueprint:
       input:
         global_minutes:
           name: "Default maximum runtime (minutes)"
-          description: "An individual runtime always wins. Time counts from the target's latest state change."
+          description: "An individual runtime always wins. Groups wait for the most recently activated included member. Individual states retain their existing timing."
           default: 30
           selector:
             number:
@@ -188,7 +247,7 @@ blueprint:
         preview_only:
           name: "Preview only (no device commands)"
           description: >-
-            Creates or updates one persistent notification per eligible device.
+            Creates or updates one persistent notification per eligible entry, listing its included active targets.
             Does not consume its attempt. Turn off after checking your rules.
           default: true
           selector:
@@ -208,18 +267,88 @@ variables:
   preview_only: !input preview_only
 actions:
   - variables:
+      resolved_entries: &resolve_all_targets >-
+        {% set known_groups = integration_entities('group') %}
+        {% macro collect_leaves(roots, returns) %}
+          {% set tree = namespace(front=roots, seen=[], leaves=[], complete=true) %}
+          {% for depth in range(32) %}
+            {% set level = namespace(next=[]) %}
+            {% for candidate in tree.front %}
+              {% if candidate is string and candidate not in tree.seen %}
+                {% set tree.seen = tree.seen + [candidate] %}
+                {% set s = states[candidate] %}
+                {% if s is not none %}
+                  {% set children = state_attr(candidate, 'entity_id') %}
+                  {% if children is iterable and children is not string and children is not mapping %}
+                    {% set level.next = level.next + (children | list) %}
+                  {% elif children is none and s.domain != 'group' and candidate not in known_groups %}
+                    {% set tree.leaves = tree.leaves + [candidate] %}
+                  {% else %}
+                    {% set tree.complete = false %}
+                  {% endif %}
+                {% elif candidate.startswith('group.') or candidate in known_groups %}
+                  {% set tree.complete = false %}
+                {% else %}
+                  {% set tree.leaves = tree.leaves + [candidate] %}
+                {% endif %}
+              {% endif %}
+            {% endfor %}
+            {% set tree.front = level.next %}
+          {% endfor %}
+          {% set _ = returns({'leaves': tree.leaves | unique | list, 'complete': tree.complete and tree.front | count == 0}) %}
+        {% endmacro %}
+        {% set leaves = collect_leaves | as_function %}
+        {% set ns = namespace(entries=[]) %}
+        {% set allowed = ['light', 'switch', 'fan', 'climate', 'media_player', 'humidifier', 'input_boolean'] %}
+        {% for item in device_entries %}
+          {% set row = namespace(roots=[], area_members=[], targets=[]) %}
+          {% if item.get('entity') %}{% set row.roots = row.roots + [item['entity']] %}{% endif %}
+          {% set row.roots = row.roots + item.get('entities', []) %}
+          {% set exceptions = item.get('exclude_entities', []) %}
+          {% set exception_tree = leaves(exceptions) %}
+          {% set excluded = exceptions + exception_tree['leaves'] %}
+          {% for member_id in leaves(row.roots)['leaves'] %}
+            {% if member_id.split('.')[0] in allowed and member_id not in excluded %}
+              {% set row.targets = row.targets + [member_id] %}
+            {% endif %}
+          {% endfor %}
+          {% for area in item.get('areas', []) %}
+            {% set row.area_members = row.area_members + area_entities(area) %}
+          {% endfor %}
+          {% for member_id in leaves(row.area_members)['leaves'] %}
+            {% if member_id in row.area_members and member_id.split('.')[0] in allowed
+                  and member_id.split('.')[0] in item.get('area_domains', ['light']) and member_id not in excluded %}
+              {% set row.targets = row.targets + [member_id] %}
+            {% endif %}
+          {% endfor %}
+          {% set targets = row.targets | unique | sort | list if exception_tree['complete'] else [] %}
+          {% set ns.entries = ns.entries + [dict(item, resolved_targets=targets, entry_index=loop.index)] %}
+        {% endfor %}
+        {{ ns.entries }}
+  - variables:
+      flattened_targets: >-
+        {% set ns = namespace(targets=[]) %}
+        {% for item in resolved_entries %}{% set ns.targets = ns.targets + item['resolved_targets'] %}{% endfor %}
+        {{ ns.targets }}
+  - variables:
       global_pass: false
   - if: !input global_conditions
     then:
       - variables:
           global_pass: true
   - repeat:
-      for_each: "{{ device_entries }}"
+      for_each: "{{ resolved_entries }}"
       sequence:
         - variables:
             entry: "{{ repeat.item }}"
         - variables:
-            target_entity: "{{ entry.get('entity', '') }}"
+            entry_label: "{{ entry.get('name') or entry.get('entity') or ('Entry ' ~ entry['entry_index']) }}"
+            selected_targets: >-
+              {% set ns = namespace(targets=[]) %}
+              {% for target in entry['resolved_targets'] %}
+                {% if flattened_targets.count(target) == 1 %}{% set ns.targets = ns.targets + [target] %}{% endif %}
+              {% endfor %}
+              {{ ns.targets }}
             attempt_helper: "{{ entry.get('last_attempt', '') }}"
             rules: "{{ entry.get('rules', []) }}"
             global_mode: "{{ entry.get('global_mode', 'require') }}"
@@ -227,10 +356,8 @@ actions:
             runtime_minutes: "{{ entry.get('max_minutes', global_minutes) | float(0) }}"
         - variables:
             configuration_ok: >-
-              {% set targets = device_entries | map(attribute='entity') | list %}
               {% set helpers = device_entries | map(attribute='last_attempt') | list %}
-              {{ target_entity.split('.')[0] in ['light', 'switch', 'fan', 'climate', 'media_player', 'humidifier', 'input_boolean']
-                 and targets.count(target_entity) == 1 and helpers.count(attempt_helper) == 1
+              {{ selected_targets | count > 0 and helpers.count(attempt_helper) == 1
                  and attempt_helper.startswith('input_datetime.')
                  and state_attr(attempt_helper, 'has_date') == true
                  and state_attr(attempt_helper, 'has_time') == true
@@ -238,17 +365,27 @@ actions:
                  and 1 <= runtime_minutes <= 10080
                  and global_mode in ['require', 'alternative', 'ignore']
                  and local_match in ['all', 'any'] }}
-            active: >-
-              {% set s = states(target_entity) %}
-              {% set domain = target_entity.split('.')[0] %}
-              {{ (domain in ['light', 'switch', 'fan', 'humidifier', 'input_boolean'] and s == 'on')
-                 or (domain == 'media_player' and (s in ['playing', 'paused', 'buffering', 'on']
-                     or (s == 'idle' and entry.get('media_action', 'media_stop') == 'turn_off')))
-                 or (domain == 'climate' and s in ['heat', 'cool', 'heat_cool', 'auto', 'dry', 'fan_only']) }}
+            active_members: >-
+              {% set ns = namespace(members=[]) %}
+              {% for target in selected_targets %}
+                {% set s = states[target] %}
+                {% if s is not none %}
+                  {% set active = (s.domain in ['light', 'switch', 'fan', 'humidifier', 'input_boolean'] and s.state == 'on')
+                     or (s.domain == 'media_player' and (s.state in ['playing', 'paused', 'buffering', 'on']
+                         or (s.state == 'idle' and entry.get('media_action', 'media_stop') == 'turn_off')))
+                     or (s.domain == 'climate' and s.state in ['heat', 'cool', 'heat_cool', 'auto', 'dry', 'fan_only']) %}
+                  {% if active %}
+                    {% set ns.members = ns.members + [{'entity_id': target, 'since': as_timestamp(s.last_changed)}] %}
+                  {% endif %}
+                {% endif %}
+              {% endfor %}
+              {{ ns.members }}
+        - variables:
+            active: "{{ active_members | count > 0 }}"
             runtime_due: >-
-              {% set s = states[target_entity] %}
-              {{ s is not none and as_timestamp(now()) - as_timestamp(s.last_changed) >= runtime_minutes * 60
-                 and (state_attr(attempt_helper, 'timestamp') | float(0)) < as_timestamp(s.last_changed) }}
+              {% set newest = active_members | map(attribute='since') | max | default(0) %}
+              {{ active_members | count > 0 and as_timestamp(now()) - newest >= runtime_minutes * 60
+                 and (state_attr(attempt_helper, 'timestamp') | float(0)) < newest }}
             local_pass: &local_rules_check >-
               {% set ns = namespace(results=[]) %}
               {% for rule in rules %}
@@ -290,76 +427,95 @@ actions:
                     - action: persistent_notification.create
                       continue_on_error: true
                       data:
-                        notification_id: "{{ this.entity_id | replace('.', '_') }}_{{ target_entity | replace('.', '_') }}_energy_preview"
+                        notification_id: "{{ this.entity_id | replace('.', '_') }}_{{ attempt_helper | replace('.', '_') }}_energy_preview"
                         title: "💡 Energy saver: preview only"
                         message: >-
-                          {{ state_attr(target_entity, 'friendly_name') or target_entity }}
-                          ({{ target_entity }}) has exceeded {{ runtime_minutes | int }} minutes
+                          {{ entry_label }}: included active targets
+                          {{ active_members | map(attribute='entity_id') | join(', ') }}
+                          have all exceeded {{ runtime_minutes | int }} minutes
                           and its shutoff conditions currently pass. No device command was sent.
                           Disable Preview only in the automation inputs to enable shutoff.
               default:
                 - variables:
                     attempt_time: "{{ as_timestamp(now()) | int }}"
-                    active_since: "{{ as_timestamp(states[target_entity].last_changed) }}"
                 - action: input_datetime.set_datetime
                   continue_on_error: true
                   target:
                     entity_id: "{{ attempt_helper }}"
                   data:
                     timestamp: "{{ attempt_time }}"
-                - variables:
-                    global_pass: false
-                - if: !input global_conditions
-                  then:
-                    - variables:
-                        global_pass: true
-                - variables:
-                    local_pass: *local_rules_check
-                - variables:
-                    conditions_pass: *combined_rules_check
-                - if:
-                    - condition: template
-                      value_template: >-
-                        {{ state_attr(attempt_helper, 'timestamp') | float(0) >= attempt_time
-                           and states[target_entity] is not none
-                           and as_timestamp(states[target_entity].last_changed) == active_since
-                           and conditions_pass }}
-                    - condition: and
-                      conditions: !input safety_conditions
-                  then:
-                    - choose:
-                        - conditions: "{{ target_entity.startswith('media_player.') }}"
-                          sequence:
-                            - choose:
-                                - conditions: "{{ entry.get('media_action', 'media_stop') == 'media_pause' }}"
-                                  sequence:
-                                    - action: media_player.media_pause
-                                      continue_on_error: true
-                                      target:
-                                        entity_id: "{{ target_entity }}"
-                                - conditions: "{{ entry.get('media_action', 'media_stop') == 'turn_off' }}"
-                                  sequence:
-                                    - action: media_player.turn_off
-                                      continue_on_error: true
-                                      target:
-                                        entity_id: "{{ target_entity }}"
-                                - conditions: "{{ entry.get('media_action', 'media_stop') == 'media_stop' }}"
-                                  sequence:
-                                    - action: media_player.media_stop
-                                      continue_on_error: true
-                                      target:
-                                        entity_id: "{{ target_entity }}"
-                        - conditions: "{{ target_entity.startswith('climate.') and 'off' in (state_attr(target_entity, 'hvac_modes') or []) }}"
-                          sequence:
-                            - action: climate.set_hvac_mode
-                              continue_on_error: true
-                              target:
-                                entity_id: "{{ target_entity }}"
-                              data:
-                                hvac_mode: "off"
-                        - conditions: "{{ target_entity.split('.')[0] in ['light', 'switch', 'fan', 'humidifier', 'input_boolean'] }}"
-                          sequence:
-                            - action: "{{ target_entity.split('.')[0] }}.turn_off"
-                              continue_on_error: true
-                              target:
-                                entity_id: "{{ target_entity }}"
+                - repeat:
+                    for_each: "{{ active_members }}"
+                    sequence:
+                      - variables:
+                          target_entity: "{{ repeat.item.entity_id }}"
+                          active_since: "{{ repeat.item.since }}"
+                          current_entries: *resolve_all_targets
+                      - variables:
+                          current_targets: >-
+                            {% set ns = namespace(all=[], own=[]) %}
+                            {% for item in current_entries %}
+                              {% set ns.all = ns.all + item['resolved_targets'] %}
+                              {% if item['entry_index'] == entry['entry_index'] %}{% set ns.own = item['resolved_targets'] %}{% endif %}
+                            {% endfor %}
+                            {% set row = namespace(targets=[]) %}
+                            {% for target in ns.own %}
+                              {% if ns.all.count(target) == 1 %}{% set row.targets = row.targets + [target] %}{% endif %}
+                            {% endfor %}
+                            {{ row.targets }}
+                          global_pass: false
+                      - if: !input global_conditions
+                        then:
+                          - variables:
+                              global_pass: true
+                      - variables:
+                          local_pass: *local_rules_check
+                      - variables:
+                          conditions_pass: *combined_rules_check
+                      - if:
+                          - condition: template
+                            value_template: >-
+                              {{ state_attr(attempt_helper, 'timestamp') | float(0) >= attempt_time
+                                 and target_entity in current_targets
+                                 and states[target_entity] is not none
+                                 and as_timestamp(states[target_entity].last_changed) == active_since
+                                 and conditions_pass }}
+                          - condition: and
+                            conditions: !input safety_conditions
+                        then:
+                          - choose:
+                              - conditions: "{{ target_entity.startswith('media_player.') }}"
+                                sequence:
+                                  - choose:
+                                      - conditions: "{{ entry.get('media_action', 'media_stop') == 'media_pause' }}"
+                                        sequence:
+                                          - action: media_player.media_pause
+                                            continue_on_error: true
+                                            target:
+                                              entity_id: "{{ target_entity }}"
+                                      - conditions: "{{ entry.get('media_action', 'media_stop') == 'turn_off' }}"
+                                        sequence:
+                                          - action: media_player.turn_off
+                                            continue_on_error: true
+                                            target:
+                                              entity_id: "{{ target_entity }}"
+                                      - conditions: "{{ entry.get('media_action', 'media_stop') == 'media_stop' }}"
+                                        sequence:
+                                          - action: media_player.media_stop
+                                            continue_on_error: true
+                                            target:
+                                              entity_id: "{{ target_entity }}"
+                              - conditions: "{{ target_entity.startswith('climate.') and 'off' in (state_attr(target_entity, 'hvac_modes') or []) }}"
+                                sequence:
+                                  - action: climate.set_hvac_mode
+                                    continue_on_error: true
+                                    target:
+                                      entity_id: "{{ target_entity }}"
+                                    data:
+                                      hvac_mode: "off"
+                              - conditions: "{{ target_entity.split('.')[0] in ['light', 'switch', 'fan', 'humidifier', 'input_boolean'] }}"
+                                sequence:
+                                  - action: "{{ target_entity.split('.')[0] }}.turn_off"
+                                    continue_on_error: true
+                                    target:
+                                      entity_id: "{{ target_entity }}"

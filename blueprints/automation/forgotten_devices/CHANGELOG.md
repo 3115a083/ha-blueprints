@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.1.0 - 2026-10-15
+
+- Add existing groups, multiple selected entities and whole-room selections to each entry, with explicit entity/group exceptions.
+- Default room selection to lights, with optional supported domain selection.
+- Resolve nested group membership with cycle protection and a 32-level bound. Dispatch only concrete leaf entities, never aggregate group/area targets.
+- Share conditions, runtime and one attempt helper per entry. Groups wait until every included active member has reached the runtime; excluded members do not influence it.
+- Deduplicate members within an entry and skip overlaps between entries. Recheck membership, exclusions, state and conditions before every command.
+- Preserve legacy single-entity entries and the canonical source URL for Blueprint Updater.
+- Add real HA expansion/registry/action tests for groups, areas, exclusions, timing, overlap, cycle/depth guards and dispatch races.
+
 ## 1.0.0 - 2026-10-15
 
 - Add an unlimited repeated-entry form for independent device targets and local conditions.
