@@ -28,11 +28,12 @@ A customizable sunrise-style light alarm for Home Assistant. It reads an existin
 | **Linear** | Increases brightness evenly over the selected fade duration |
 | **Ramp-up / Ease-in** | Increases slowly at first and increasingly quickly toward the target; uses a quadratic curve |
 | **Instant** | Turns on directly at target brightness and does not wait for the fade duration |
-| **Brightening duration** | 1 to 180 minutes, used only by the two gradual curves |
+| **Brightening duration** | 1 to 180 minutes. **Maximum** fade time; by default automatically shortened to finish by the alarm. |
+| **Reach target brightness by alarm time** | **On by default.** Example: 5-minute lead + 30-minute fade setting → brightness reaches the target in 5 minutes. Turn off only if you deliberately want fading to continue after the alarm. |
 | **Starting / target brightness** | 1 to 100%; the starting level cannot exceed the target (it is clamped) |
 | **Fade update interval** | 15 to 120 seconds per brightness command, subject to a cap of 240 total steps |
 
-The gradual modes use Home Assistant's normal **light.turn_on** brightness and **transition** options. Devices with native transition support should fade smoothly between updates. Lights without transition support may visibly jump between intermediate levels. Multiple selected lights may not synchronize perfectly due to device behavior. <https://www.home-assistant.io/actions/light.turn_on/>
+Gradual modes send plain Home Assistant **light.turn_on** commands with `brightness_pct` at each configured interval. They **no longer force a `transition` parameter**, which is not consistently supported by all light integrations, including some Govee2MQTT configurations. This improves compatibility but some lamps may show discrete brightness steps rather than perfectly smooth transitions. Multiple selected lights may not synchronize perfectly. <https://www.home-assistant.io/actions/light.turn_on/>
 
 ### Example: morning alarm at 07:00
 
@@ -43,7 +44,15 @@ The gradual modes use Home Assistant's normal **light.turn_on** brightness and *
 | Brightening time | 30 min | 40 min | Ignored |
 | Target | 85% at 07:00 | 85% at 07:00 | 85% at 06:50 |
 
-**The lead time and fade time are independent.** If the fade duration exceeds the lead time, it may continue *after* the actual alarm while optional alarm-time actions run separately.
+**The lead time limits the default fade duration.** With **Reach target brightness by alarm time** enabled, the ramp finishes no later than the scheduled wake-up, even if the configured fade duration is longer than the lead. This is important for next-alarm sensors on phones: some move to the next alarm when today's alarm sounds. If you need a fade continuing after the alarm, disable the new option explicitly. Alarm-time actions always run independently.
+
+### Fixed: lights staying dim instead of brightening
+
+Prior releases could leave the light dim with a short lead time and longer fade duration. For example, with a 07:00 alarm, five-minute lead, 30-minute linear fade and 1% → 85% brightness, the light would still be around **15%** at 07:00 and the fade could stop if a phone updated its next-alarm sensor. The fixed default shortens the fade to the remaining five minutes, reaching **85% at 07:00**.
+
+The updated loop waits between successive brightness commands, rechecks the selected person and alarm, and allows the last step to complete when the phone's next-alarm timestamp rolls over **at the actual scheduled alarm time**. If the alarm is moved to another time earlier during the fade, the remaining steps are still cancelled as a safeguard.
+
+For Govee/Govee2MQTT and other lights without reliable hardware fade support, the blueprint now uses plain `brightness_pct` commands rather than assuming the light supports `transition`. **An integration still needs to support brightness changes**; check that changing brightness manually from 10% to 80% in Home Assistant actually works on that entity.
 
 ### 📈 Brightness curve example
 
@@ -121,14 +130,14 @@ Choose the specific entities and automation actions directly in Home Assistant. 
 ## Safety, scheduling, and known limitations
 
 - **Timing precision and efficiency:** Standard mode uses a once-per-minute evaluated template, not a 15-second periodic trigger. Safe native precise mode schedules the timestamp and negative offset directly. Conflicting earlier precise offsets automatically revert to the standard lead. Missed starts during downtime are not executed retroactively.
-- **Rescheduling:** A changed alarm timestamp prevents the remaining steps and completion actions of an already running gradual fade. A new valid future alarm will schedule its own start.
+- **Rescheduling:** Changing the alarm time before the current alarm sounds stops the remaining fade steps. When a phone rolls over to the next alarm at the original alarm time, the current ramp is allowed to finish (up to 60 seconds' grace). A new valid future alarm schedules its own start.
 - **Restarts:** Home Assistant restarts or automation reloads cancel any fade currently running. Later alarm starts are evaluated normally. This blueprint does **not** save and restore in-progress brightness curves.
 - **Presence:** The selected person must be at **home** for the sunrise to begin. During a gradual fade, leaving home stops subsequent brightness commands. At the alarm timestamp, alarm-time actions require the person to be home.
 - **Sun check:** The default checks \`sun.sun\` is \`below_horizon\` when the lights begin; disable the condition for daytime/light alarms.
 - **Day selection:** Weekdays and weekends are checked against the **local date of the actual alarm**, even when the lights start before midnight the previous day.
 - **Next alarm:** The source must provide a valid future datetime as a timestamp sensor. Invalid, unavailable or past timestamps are ignored by the start scheduler.
 - **Multiple alarm events:** Use one automation instance per person/alarm source. Home Assistant's parallel mode lets alarm-time actions run while a fade is still active.
-- **Device capabilities:** Different lights may implement transitions differently. Try a short fade with your chosen lights before relying on the result for waking up.
+- **Device capabilities:** Standard brightness updates are used, without forced transition support. A lamp still needs working Home Assistant brightness control. Test manual brightness changes and try a short fade before relying on the automation to wake you.
 
 The test suite validates blueprint structure, Jinja syntax, timing-window calculations, active-day rollover, brightness curves, and action branches. **A live Home Assistant runtime test is still recommended.**
 
