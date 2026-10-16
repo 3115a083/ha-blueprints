@@ -10,7 +10,7 @@ A customizable sunrise-style light alarm for Home Assistant. It reads an existin
 
 1. Import the blueprint using the link above, then create an automation from it.
 2. In **⏰ 01 | Alarm & start time**, select your next-alarm timestamp sensor and person entity. Set **Start lights this many minutes before the alarm** (0–180 minutes) and choose the active days.
-3. In **💡 02 | Light & brightness**, select the target lights, brightness curve, start/target brightness, and how many minutes the fade takes.
+3. In **💡 02 | Light & brightness**, select the target lights, brightness curve, start/target brightness, and when the fade should finish. For a gentler wake-up, set **Reach target brightness minutes AFTER the alarm** to e.g. `15`.
 4. Optionally open **🎵 03 | Additional actions** to configure start, finish and alarm-time actions.
 5. Optionally open **🛡️ 04 | Optional conditions** to adjust darkness checking or add any Home Assistant conditions.
 6. For an exact-time start, open **⏱️ 05 | Optional precise scheduling**, enable native exact-time start, and enter an offset such as `-00:05:00`. **The offset must not start earlier than the lead time in section 01.** If it would, the automation safely falls back to the section 01 lead time.
@@ -28,8 +28,9 @@ A customizable sunrise-style light alarm for Home Assistant. It reads an existin
 | **Linear** | Increases brightness evenly over the selected fade duration |
 | **Ramp-up / Ease-in** | Increases slowly at first and increasingly quickly toward the target; uses a quadratic curve |
 | **Instant** | Turns on directly at target brightness and does not wait for the fade duration |
-| **Brightening duration** | 1 to 180 minutes. **Maximum** fade time; by default automatically shortened to finish by the alarm. |
-| **Reach target brightness by alarm time** | **On by default.** Example: 5-minute lead + 30-minute fade setting → brightness reaches the target in 5 minutes. Turn off only if you deliberately want fading to continue after the alarm. |
+| **Brightening duration** | 1 to 180 minutes. Used when the post-alarm completion delay is **0**. |
+| **Reach target brightness by alarm time** | **On by default**, when the post-alarm delay is **0**. With this enabled, a 5-minute lead and 30-minute fade setting finishes in 5 minutes. Turning it off allows the configured fade to extend beyond the alarm. |
+| **🌄 Reach target brightness minutes AFTER the alarm** | **0–120 minutes, default 0.** A positive number sets an **explicit completion time** after the alarm, overriding the fade duration and the preceding switch in Linear and Ease-in modes. E.g. 5-minute lead and `15` means a 20-minute fade, ending 15 minutes after the alarm. |
 | **Starting / target brightness** | 1 to 100%; the starting level cannot exceed the target (it is clamped) |
 | **Fade update interval** | 15 to 120 seconds per brightness command, subject to a cap of 240 total steps |
 
@@ -44,13 +45,33 @@ Gradual modes send plain Home Assistant **light.turn_on** commands with `brightn
 | Brightening time | 30 min | 40 min | Ignored |
 | Target | 85% at 07:00 | 85% at 07:00 | 85% at 06:50 |
 
-**The lead time limits the default fade duration.** With **Reach target brightness by alarm time** enabled, the ramp finishes no later than the scheduled wake-up, even if the configured fade duration is longer than the lead. This is important for next-alarm sensors on phones: some move to the next alarm when today's alarm sounds. If you need a fade continuing after the alarm, disable the new option explicitly. Alarm-time actions always run independently.
+**The lead time limits the default fade duration.** With **Reach target brightness by alarm time** enabled and the after-alarm delay at `0`, the ramp finishes no later than the scheduled wake-up.
+
+**For a gentler wake-up**, set a positive **Reach target brightness minutes AFTER the alarm** value. The ramp then spreads the increase across the period from when the light turns on until the selected time *after* the alarm, irrespective of the shorter fade duration setting or the finish-by-alarm switch. The **Instant** brightness mode is an exception: it still jumps to target immediately. Alarm-time actions remain scheduled at the actual alarm time, even while the lights continue to brighten.
+
+### Example: reach full target brightness *after* the alarm
+
+For a **07:00** alarm, choose:
+
+| Input | Value |
+| --- | --- |
+| Start lights before alarm | **10 minutes** |
+| How brightness increases | **Linear** or **Ramp-up / Ease-in** |
+| Starting brightness | **1%** |
+| Target brightness | **75%** (your comfortable maximum) |
+| Reach target brightness minutes AFTER the alarm | **15 minutes** |
+
+**Result:** Lights start at **06:50** with 1% brightness; they are still at a gentle intermediate level when the alarm rings at **07:00**, and rise gradually to **75% by 07:15**. Choosing **30 minutes** instead finishes at **07:30**.
+
+If you prefer a gentler curve with less light at the alarm time, use **Ramp-up / Ease-in**. The goal is the configured **target brightness**, not necessarily the device's physical 100% maximum.
+
+A phone may change its next-alarm sensor to tomorrow after the alarm rings. The fade now allows an alarm-sensor rollover at or after the original alarm time and continues until the planned completion time. If the scheduled alarm was changed **before** it rang, the existing fade is cancelled instead.
 
 ### Fixed: lights staying dim instead of brightening
 
 Prior releases could leave the light dim with a short lead time and longer fade duration. For example, with a 07:00 alarm, five-minute lead, 30-minute linear fade and 1% → 85% brightness, the light would still be around **15%** at 07:00 and the fade could stop if a phone updated its next-alarm sensor. The fixed default shortens the fade to the remaining five minutes, reaching **85% at 07:00**.
 
-The updated loop waits between successive brightness commands, rechecks the selected person and alarm, and allows the last step to complete when the phone's next-alarm timestamp rolls over **at the actual scheduled alarm time**. If the alarm is moved to another time earlier during the fade, the remaining steps are still cancelled as a safeguard.
+The updated loop waits between successive brightness commands, rechecks the selected person and alarm, and allows the fade to continue when the phone's next-alarm timestamp rolls over **at or after the actual scheduled alarm time**, up to the planned finish time. If the alarm changes before that time, the remaining steps are cancelled as a safeguard.
 
 For Govee/Govee2MQTT and other lights without reliable hardware fade support, the blueprint now uses plain `brightness_pct` commands rather than assuming the light supports `transition`. **An integration still needs to support brightness changes**; check that changing brightness manually from 10% to 80% in Home Assistant actually works on that entity.
 
@@ -112,7 +133,7 @@ The light's brightness update interval is independent of the alarm start trigger
 Each slot accepts the standard Home Assistant **action selector**, including services, scripts, scenes, choose/if blocks, and conditions:
 
 - **Sunrise start actions:** Run in parallel with the first light command. Example: start a gentle playlist or adjust the thermostat.
-- **Sunrise complete actions:** Run after the gradual brightening finishes, or immediately after instant-on. These are skipped if the alarm timestamp changes or the person is no longer home before completion.
+- **Sunrise complete actions:** Run after the gradual brightening finishes (including a configured post-alarm fade), or immediately after instant-on. They are skipped if the alarm changes before it rings, or the person leaves home before completion.
 - **Alarm-time actions:** Run **at the actual alarm timestamp**. Example: gradually increase music volume, announce today's weather, or open smart blinds. They have their own time trigger and do not wait for the light fade to finish.
 
 The same person-at-home, active-day, and custom additional conditions apply to both triggers. **Darkness is checked only when lights begin**, so alarm-time actions can still run after sunrise.
@@ -130,7 +151,7 @@ Choose the specific entities and automation actions directly in Home Assistant. 
 ## Safety, scheduling, and known limitations
 
 - **Timing precision and efficiency:** Standard mode uses a once-per-minute evaluated template, not a 15-second periodic trigger. Safe native precise mode schedules the timestamp and negative offset directly. Conflicting earlier precise offsets automatically revert to the standard lead. Missed starts during downtime are not executed retroactively.
-- **Rescheduling:** Changing the alarm time before the current alarm sounds stops the remaining fade steps. When a phone rolls over to the next alarm at the original alarm time, the current ramp is allowed to finish (up to 60 seconds' grace). A new valid future alarm schedules its own start.
+- **Rescheduling:** Changing the alarm time before the current alarm sounds stops the remaining fade steps. When a phone rolls over to the next alarm **at or after** the original alarm time, the current ramp is allowed to finish at the chosen post-alarm completion time (with up to 60 seconds' scheduling grace). A new valid future alarm schedules its own start.
 - **Restarts:** Home Assistant restarts or automation reloads cancel any fade currently running. Later alarm starts are evaluated normally. This blueprint does **not** save and restore in-progress brightness curves.
 - **Presence:** The selected person must be at **home** for the sunrise to begin. During a gradual fade, leaving home stops subsequent brightness commands. At the alarm timestamp, alarm-time actions require the person to be home.
 - **Sun check:** The default checks \`sun.sun\` is \`below_horizon\` when the lights begin; disable the condition for daytime/light alarms.
