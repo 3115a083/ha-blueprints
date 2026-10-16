@@ -59,6 +59,7 @@ class AlarmLightTests(unittest.TestCase):
         mode="linear",
         duration=30,
         update_seconds=30,
+        finish_by_alarm=True,
     ):
         now_time = dt.datetime.fromisoformat(current)
         entity_states = {
@@ -90,6 +91,7 @@ class AlarmLightTests(unittest.TestCase):
             "target_brightness": 85,
             "ramp_minutes": duration,
             "update_seconds": update_seconds,
+            "finish_by_alarm": finish_by_alarm,
             "trigger": {"id": "sunrise_start"},
             "now": lambda: now_time,
             "states": lambda entity: entity_states.get(entity, "unknown"),
@@ -143,6 +145,8 @@ class AlarmLightTests(unittest.TestCase):
         self.assertEqual(self.inputs["weekday_selection"]["default"], "all")
         self.assertFalse(self.inputs["precise_start_enabled"]["default"])
         self.assertEqual(self.inputs["precise_start_offset"]["default"], "-00:30:00")
+        self.assertTrue(self.inputs["finish_by_alarm"]["default"])
+        self.assertIn("finish_by_alarm", self.data["variables"])
 
     def test_every_jinja_template_parses(self):
         def visit(item):
@@ -334,9 +338,9 @@ class AlarmLightTests(unittest.TestCase):
 
     def test_linear_and_ease_in_curves(self):
         branch = self.data["actions"][-1]["choose"][0]
-        light_branch = branch["sequence"][2]["parallel"][1]["sequence"]
+        light_branch = branch["sequence"][4]["parallel"][1]["sequence"]
         repeat = light_branch[0]["default"][1]["repeat"]
-        step_template = repeat["sequence"][1]["data"]["brightness_pct"]
+        step_template = repeat["sequence"][2]["data"]["brightness_pct"]
         results = {}
         for curve in ("linear", "ease_in"):
             values = []
@@ -352,25 +356,94 @@ class AlarmLightTests(unittest.TestCase):
         self.assertEqual(results["linear"][-1], 85)
         self.assertEqual(results["ease_in"][-1], 85)
 
+    def fade_parameters(self, **context_options):
+        branch = self.data["actions"][-1]["choose"][0]
+        scope = self.context(**context_options)
+        for block in branch["sequence"][:4]:
+            for name, template in block["variables"].items():
+                scope[name] = self.render(template, scope)
+        return scope
+
     def test_ramp_duration_and_instant_mode(self):
         branch = self.data["actions"][-1]["choose"][0]
-        duration_variables = branch["sequence"][0]["variables"]
-        interval_variables = branch["sequence"][1]["variables"]
-        c = self.context(duration=30, update_seconds=30)
-        for name, formula in duration_variables.items():
-            c[name] = self.render(formula, c)
-        for name, formula in interval_variables.items():
-            c[name] = self.render(formula, c)
+        c = self.fade_parameters(
+            current="2026-10-12T06:30:00+00:00",
+            duration=30, lead=30, update_seconds=30,
+        )
+        self.assertEqual(int(c["effective_ramp_seconds"]), 1800)
         self.assertEqual(int(c["total_steps"]), 60)
         self.assertEqual(int(c["interval_seconds"]), 30)
         self.assertEqual(int(c["total_steps"]) * int(c["interval_seconds"]), 1800)
-        choice = branch["sequence"][2]["parallel"][1]["sequence"][0]["choose"][0]
+        choice = branch["sequence"][4]["parallel"][1]["sequence"][0]["choose"][0]
         self.assertIn("instant", choice["conditions"][0]["value_template"])
         self.assertEqual(choice["sequence"][0]["action"], "light.turn_on")
 
+    def test_short_lead_compresses_fade_to_finish_at_alarm(self):
+        """Five minute lead must not leave light at 15-20% after a 30-minute fade."""
+        c = self.fade_parameters(
+            current="2026-10-12T06:55:00+00:00",
+            lead=5, duration=30, update_seconds=30,
+        )
+        self.assertEqual(int(c["seconds_until_alarm"]), 300)
+        self.assertEqual(int(c["requested_ramp_seconds"]), 1800)
+        self.assertEqual(int(c["effective_ramp_seconds"]), 300)
+        self.assertEqual(int(c["total_steps"]), 10)
+        self.assertEqual(int(c["interval_seconds"]), 30)
+
+        branch = self.data["actions"][-1]["choose"][0]
+        repeat = branch["sequence"][4]["parallel"][1]["sequence"][0]["default"][1]["repeat"]
+        steps = repeat["sequence"]
+        self.assertEqual(steps[0]["delay"]["seconds"], "{{ interval_seconds | int }}")
+        self.assertEqual(steps[1]["condition"], "template")
+        self.assertEqual(steps[2]["action"], "light.turn_on")
+        self.assertEqual(set(steps[2]["data"]), {"brightness_pct"})
+        self.assertNotIn("transition", str(steps[2]))
+        values = []
+        for n in range(1, int(c["total_steps"]) + 1):
+            sample = {**c, "safe_start": "1", "repeat": {"index": n}}
+            values.append(int(self.render(steps[2]["data"]["brightness_pct"], sample)))
+        self.assertTrue(all(a <= b for a, b in zip(values, values[1:])))
+        self.assertEqual(values[-1], 85)
+        self.assertGreater(values[4], 1)
+
+    def test_can_opt_out_of_finishing_by_alarm(self):
+        c = self.fade_parameters(
+            current="2026-10-12T06:55:00+00:00",
+            lead=5, duration=30, finish_by_alarm=False,
+        )
+        self.assertEqual(int(c["effective_ramp_seconds"]), 1800)
+        self.assertEqual(int(c["total_steps"]), 60)
+
+    def test_no_time_left_uses_immediate_target_instead_of_dim_start(self):
+        branch = self.data["actions"][-1]["choose"][0]
+        condition = branch["sequence"][4]["parallel"][1]["sequence"][0]["choose"][0]["conditions"][0]["value_template"]
+        c = self.fade_parameters(current="2026-10-12T07:00:00+00:00", lead=0)
+        self.assertEqual(int(c["effective_ramp_seconds"]), 0)
+        self.assertTrue(self.truthy(self.render(condition, c)))
+        self.assertEqual(int(c["target_brightness"]), 85)
+
+    def test_phone_next_alarm_rollover_does_not_abort_last_step(self):
+        branch = self.data["actions"][-1]["choose"][0]
+        light = branch["sequence"][4]["parallel"][1]["sequence"]
+        guard = light[0]["default"][1]["repeat"]["sequence"][1]["value_template"]
+        c = self.context(
+            alarm="2026-10-13T07:00:00+00:00",
+            current="2026-10-12T07:00:00+00:00",
+        )
+        c["anchor_alarm_timestamp"] = str(
+            dt.datetime.fromisoformat("2026-10-12T07:00:00+00:00").timestamp()
+        )
+        self.assertTrue(self.truthy(self.render(guard, c)))
+        early = self.context(
+            alarm="2026-10-13T07:00:00+00:00",
+            current="2026-10-12T06:45:00+00:00",
+        )
+        early["anchor_alarm_timestamp"] = c["anchor_alarm_timestamp"]
+        self.assertFalse(self.truthy(self.render(guard, early)))
+
     def test_additional_action_slots_and_parallel_alarm(self):
         branch = self.data["actions"][-1]["choose"][0]
-        concurrent = branch["sequence"][2]["parallel"]
+        concurrent = branch["sequence"][4]["parallel"]
         self.assertEqual(concurrent[0]["sequence"], "!input sunrise_start_actions")
         self.assertIn("!input sunrise_complete_actions", str(concurrent[1]))
         alarm_branch = self.data["actions"][-1]["choose"][1]
@@ -381,8 +454,8 @@ class AlarmLightTests(unittest.TestCase):
 
     def test_changed_alarm_or_departure_aborts_gradual_fade(self):
         branch = self.data["actions"][-1]["choose"][0]
-        light_branch = branch["sequence"][2]["parallel"][1]["sequence"]
-        check = light_branch[0]["default"][1]["repeat"]["sequence"][0]["value_template"]
+        light_branch = branch["sequence"][4]["parallel"][1]["sequence"]
+        check = light_branch[0]["default"][1]["repeat"]["sequence"][1]["value_template"]
         c = self.context()
         c["anchor_alarm_timestamp"] = str(
             dt.datetime.fromisoformat("2026-10-12T07:00:00+00:00").timestamp()
