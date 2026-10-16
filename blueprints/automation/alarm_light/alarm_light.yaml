@@ -16,8 +16,11 @@ blueprint:
     uses a precise offset. The main lead time is always a safety limit:
     a conflicting earlier precise offset falls back to the standard lead.
     Every start is independently checked against the current alarm timestamp.
-    By default the fade is shortened to finish by the alarm time; stepwise
-    brightness updates work on lights that cannot handle transition commands.
+    By default the fade is shortened to finish by the alarm time. An optional
+    post-alarm brightness target lets a gradual fade continue for a chosen
+    number of minutes after the alarm, including when a phone switches its
+    next-alarm sensor to tomorrow. Stepwise brightness updates work with lights
+    that do not support transition commands.
   domain: automation
   author: "3115a083 (inspired by r3mcos3)"
   source_url: https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/alarm_light/alarm_light.yaml
@@ -117,7 +120,7 @@ blueprint:
               mode: slider
         ramp_minutes:
           name: "🌅 Brightening duration (minutes)"
-          description: "Maximum duration of the fade. By default the fade is shortened automatically to reach target brightness BY the alarm time (for example, 5-minute lead + 30-minute fade -> 5-minute fade). Instant mode ignores this."
+          description: "The desired fade length. Usually shortened to finish at the alarm if the option below is enabled. If a positive after-alarm delay is selected, the fade instead ends at alarm time PLUS that delay; this duration is then overridden. Instant mode ignores fades."
           default: 30
           selector:
             number:
@@ -128,10 +131,27 @@ blueprint:
               mode: box
         finish_by_alarm:
           name: "Reach target brightness by the alarm time"
-          description: "ON (recommended): shorten the requested fade when the remaining time before the alarm is less than the fade duration. Prevents the light staying dim when lead time is shorter than the fade. OFF allows a fade to extend past the alarm."
+          description: "ON (default): shorten the fade when necessary to finish by the alarm. OFF: allow the configured fade duration to extend past the alarm. Overridden by a positive after-alarm delay below."
           default: true
           selector:
             boolean: {}
+        target_after_alarm_minutes:
+          name: "🌄 Reach target brightness minutes AFTER the alarm"
+          description: >-
+            0 = use the current fade settings, usually finishing at alarm time.
+            A value above 0 (e.g. 10 or 20) means the chosen target brightness
+            is reached at alarm time PLUS that many minutes, not when the
+            alarm begins. For Linear and Ease-in this overrides both the fade
+            duration and the Finish by alarm switch. Instant mode still
+            turns on immediately. Allows a gentler wake-up after the alarm.
+          default: 0
+          selector:
+            number:
+              min: 0
+              max: 120
+              step: 1
+              unit_of_measurement: min
+              mode: box
         update_seconds:
           name: "Fade update interval (seconds)"
           description: "How often to send a new brightness level. Uses basic brightness_pct commands without device-specific transition support (works with Govee2MQTT). At most 240 updates are used."
@@ -219,6 +239,7 @@ variables:
   target_brightness: !input target_brightness
   ramp_minutes: !input ramp_minutes
   finish_by_alarm: !input finish_by_alarm
+  target_after_alarm_minutes: !input target_after_alarm_minutes
   update_seconds: !input update_seconds
   precise_start_enabled: !input precise_start_enabled
   precise_start_offset: !input precise_start_offset
@@ -325,15 +346,21 @@ actions:
               requested_ramp_seconds: "{{ (ramp_minutes | int) * 60 }}"
           - variables:
               effective_ramp_seconds: >-
-                {{ [(requested_ramp_seconds | int), (seconds_until_alarm | int)] | min
-                   if finish_by_alarm else (requested_ramp_seconds | int) }}
+                {% if (target_after_alarm_minutes | int(0)) > 0 %}
+                  {{ (seconds_until_alarm | int) + (target_after_alarm_minutes | int(0) * 60) }}
+                {% elif finish_by_alarm %}
+                  {{ [(requested_ramp_seconds | int), (seconds_until_alarm | int)] | min }}
+                {% else %}
+                  {{ requested_ramp_seconds | int }}
+                {% endif %}
           - variables:
               total_steps: >-
                 {{ [240, [1, ((((effective_ramp_seconds | int) + (update_seconds | int) - 1)
                      // (update_seconds | int)))] | max] | min }}
           - variables:
               interval_seconds: >-
-                {{ [1, ((effective_ramp_seconds | float(0) / (total_steps | float(1))) | round(0) | int)] | max }}
+                {{ [0.1, ((effective_ramp_seconds | float(0)) / (total_steps | float(1))) | round(3)] | max }}
+              fade_end_timestamp: "{{ as_timestamp(now()) + (effective_ramp_seconds | float(0)) }}"
           - parallel:
               - sequence: !input sunrise_start_actions
               - sequence:
@@ -343,7 +370,8 @@ actions:
                           - condition: template
                             value_template: >-
                               {{ brightness_mode == 'instant'
-                                 or (effective_ramp_seconds | int) <= (update_seconds | int) }}
+                                 or ((target_after_alarm_minutes | int(0)) == 0
+                                     and (effective_ramp_seconds | int) <= (update_seconds | int)) }}
                         sequence:
                           - action: light.turn_on
                             target: !input lights_target
@@ -361,19 +389,21 @@ actions:
                             # Wait between steps: do not jump above the low
                             # starting brightness immediately on startup.
                             - delay:
-                                seconds: "{{ interval_seconds | int }}"
+                                seconds: "{{ interval_seconds | float }}"
                             # A changed future alarm cancels the fade; if the
                             # phone rolls over at the actual alarm time,
                             # complete the final brightness step instead.
                             - condition: template
                               value_template: >-
+                                {% set anchor = anchor_alarm_timestamp | float(0) %}
+                                {% set still_same_alarm = (as_timestamp(states(alarm_sensor_id), 0) - anchor) | abs < 1 %}
+                                {% set sensor_state = states[alarm_sensor_id] if not still_same_alarm else none %}
+                                {% set rollover_at_alarm = sensor_state is not none
+                                   and as_timestamp(sensor_state.last_changed, 0) >= anchor
+                                   and as_timestamp(now()) >= anchor
+                                   and as_timestamp(now()) <= (fade_end_timestamp | float(0)) + 60 %}
                                 {{ is_state(wake_person, 'home')
-                                   and (
-                                     (as_timestamp(states(alarm_sensor_id), 0) -
-                                      (anchor_alarm_timestamp | float(0))) | abs < 1
-                                     or (as_timestamp(now()) >= (anchor_alarm_timestamp | float(0))
-                                         and as_timestamp(now()) <= (anchor_alarm_timestamp | float(0)) + 60)
-                                   ) }}
+                                   and (still_same_alarm or rollover_at_alarm) }}
                             - action: light.turn_on
                               target: !input lights_target
                               data:
@@ -385,13 +415,15 @@ actions:
                   - if:
                       - condition: template
                         value_template: >-
+                          {% set anchor = anchor_alarm_timestamp | float(0) %}
+                          {% set still_same_alarm = (as_timestamp(states(alarm_sensor_id), 0) - anchor) | abs < 1 %}
+                          {% set sensor_state = states[alarm_sensor_id] if not still_same_alarm else none %}
+                          {% set rollover_at_alarm = sensor_state is not none
+                             and as_timestamp(sensor_state.last_changed, 0) >= anchor
+                             and as_timestamp(now()) >= anchor
+                             and as_timestamp(now()) <= (fade_end_timestamp | float(0)) + 60 %}
                           {{ is_state(wake_person, 'home')
-                             and (
-                               (as_timestamp(states(alarm_sensor_id), 0) -
-                                (anchor_alarm_timestamp | float(0))) | abs < 1
-                               or (as_timestamp(now()) >= (anchor_alarm_timestamp | float(0))
-                                   and as_timestamp(now()) <= (anchor_alarm_timestamp | float(0)) + 60)
-                             ) }}
+                             and (still_same_alarm or rollover_at_alarm) }}
                     then: !input sunrise_complete_actions
       - alias: "⏰ Run optional actions at alarm time"
         conditions:
