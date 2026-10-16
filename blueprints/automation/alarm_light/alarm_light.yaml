@@ -16,6 +16,8 @@ blueprint:
     uses a precise offset. The main lead time is always a safety limit:
     a conflicting earlier precise offset falls back to the standard lead.
     Every start is independently checked against the current alarm timestamp.
+    By default the fade is shortened to finish by the alarm time; stepwise
+    brightness updates work on lights that cannot handle transition commands.
   domain: automation
   author: "3115a083 (inspired by r3mcos3)"
   source_url: https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/alarm_light/alarm_light.yaml
@@ -115,7 +117,7 @@ blueprint:
               mode: slider
         ramp_minutes:
           name: "🌅 Brightening duration (minutes)"
-          description: "How long the linear/ease-in fade takes. Independent from the lead time: it may finish before, at, or after the alarm. Ignored in instant mode."
+          description: "Maximum duration of the fade. By default the fade is shortened automatically to reach target brightness BY the alarm time (for example, 5-minute lead + 30-minute fade -> 5-minute fade). Instant mode ignores this."
           default: 30
           selector:
             number:
@@ -124,9 +126,15 @@ blueprint:
               step: 1
               unit_of_measurement: min
               mode: box
+        finish_by_alarm:
+          name: "Reach target brightness by the alarm time"
+          description: "ON (recommended): shorten the requested fade when the remaining time before the alarm is less than the fade duration. Prevents the light staying dim when lead time is shorter than the fade. OFF allows a fade to extend past the alarm."
+          default: true
+          selector:
+            boolean: {}
         update_seconds:
           name: "Fade update interval (seconds)"
-          description: "How often to send a new brightness level. Lights that do not support transitions may brighten in visible steps. At most 240 updates are used."
+          description: "How often to send a new brightness level. Uses basic brightness_pct commands without device-specific transition support (works with Govee2MQTT). At most 240 updates are used."
           default: 30
           selector:
             number:
@@ -210,6 +218,7 @@ variables:
   initial_brightness: !input initial_brightness
   target_brightness: !input target_brightness
   ramp_minutes: !input ramp_minutes
+  finish_by_alarm: !input finish_by_alarm
   update_seconds: !input update_seconds
   precise_start_enabled: !input precise_start_enabled
   precise_start_offset: !input precise_start_offset
@@ -312,11 +321,19 @@ actions:
           - variables:
               anchor_alarm_timestamp: "{{ alarm_timestamp | float(0) }}"
               safe_start: "{{ [initial_brightness | int, target_brightness | int] | min }}"
-              total_steps: >-
-                {{ [240, (((ramp_minutes | int) * 60 + (update_seconds | int) - 1)
-                     // (update_seconds | int))] | min }}
+              seconds_until_alarm: "{{ [0, ((alarm_timestamp | float(0)) - as_timestamp(now())) | round(0) | int] | max }}"
+              requested_ramp_seconds: "{{ (ramp_minutes | int) * 60 }}"
           - variables:
-              interval_seconds: "{{ ((ramp_minutes | int) * 60 / (total_steps | float(1))) | round(0) | int }}"
+              effective_ramp_seconds: >-
+                {{ [(requested_ramp_seconds | int), (seconds_until_alarm | int)] | min
+                   if finish_by_alarm else (requested_ramp_seconds | int) }}
+          - variables:
+              total_steps: >-
+                {{ [240, [1, ((((effective_ramp_seconds | int) + (update_seconds | int) - 1)
+                     // (update_seconds | int)))] | max] | min }}
+          - variables:
+              interval_seconds: >-
+                {{ [1, ((effective_ramp_seconds | float(0) / (total_steps | float(1))) | round(0) | int)] | max }}
           - parallel:
               - sequence: !input sunrise_start_actions
               - sequence:
@@ -324,7 +341,9 @@ actions:
                       - alias: "⚡ Immediate target brightness"
                         conditions:
                           - condition: template
-                            value_template: "{{ brightness_mode == 'instant' }}"
+                            value_template: >-
+                              {{ brightness_mode == 'instant'
+                                 or (effective_ramp_seconds | int) <= (update_seconds | int) }}
                         sequence:
                           - action: light.turn_on
                             target: !input lights_target
@@ -339,11 +358,22 @@ actions:
                       - repeat:
                           count: "{{ total_steps | int }}"
                           sequence:
+                            # Wait between steps: do not jump above the low
+                            # starting brightness immediately on startup.
+                            - delay:
+                                seconds: "{{ interval_seconds | int }}"
+                            # A changed future alarm cancels the fade; if the
+                            # phone rolls over at the actual alarm time,
+                            # complete the final brightness step instead.
                             - condition: template
                               value_template: >-
-                                {{ (as_timestamp(states(alarm_sensor_id), 0) -
-                                    (anchor_alarm_timestamp | float(0))) | abs < 1
-                                   and is_state(wake_person, 'home') }}
+                                {{ is_state(wake_person, 'home')
+                                   and (
+                                     (as_timestamp(states(alarm_sensor_id), 0) -
+                                      (anchor_alarm_timestamp | float(0))) | abs < 1
+                                     or (as_timestamp(now()) >= (anchor_alarm_timestamp | float(0))
+                                         and as_timestamp(now()) <= (anchor_alarm_timestamp | float(0)) + 60)
+                                   ) }}
                             - action: light.turn_on
                               target: !input lights_target
                               data:
@@ -352,15 +382,16 @@ actions:
                                   {% set progress = fraction * fraction if brightness_mode == 'ease_in' else fraction %}
                                   {% set level = (safe_start | int) + ((target_brightness | int) - (safe_start | int)) * progress %}
                                   {{ level | round(0) | int }}
-                                transition: "{{ interval_seconds | int }}"
-                            - delay:
-                                seconds: "{{ interval_seconds | int }}"
                   - if:
                       - condition: template
                         value_template: >-
-                          {{ (as_timestamp(states(alarm_sensor_id), 0) -
-                              (anchor_alarm_timestamp | float(0))) | abs < 1
-                             and is_state(wake_person, 'home') }}
+                          {{ is_state(wake_person, 'home')
+                             and (
+                               (as_timestamp(states(alarm_sensor_id), 0) -
+                                (anchor_alarm_timestamp | float(0))) | abs < 1
+                               or (as_timestamp(now()) >= (anchor_alarm_timestamp | float(0))
+                                   and as_timestamp(now()) <= (anchor_alarm_timestamp | float(0)) + 60)
+                             ) }}
                     then: !input sunrise_complete_actions
       - alias: "⏰ Run optional actions at alarm time"
         conditions:
