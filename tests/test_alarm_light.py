@@ -8,6 +8,7 @@ import datetime as dt
 import re
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 import jinja2
 import yaml
@@ -60,6 +61,8 @@ class AlarmLightTests(unittest.TestCase):
         duration=30,
         update_seconds=30,
         finish_by_alarm=True,
+        post_alarm_minutes=0,
+        alarm_last_changed=None,
     ):
         now_time = dt.datetime.fromisoformat(current)
         entity_states = {
@@ -78,6 +81,19 @@ class AlarmLightTests(unittest.TestCase):
             except (ValueError, TypeError, OverflowError):
                 return default
 
+        class StatesView:
+            def __call__(self, entity):
+                return entity_states.get(entity, "unknown")
+
+            def __getitem__(self, entity):
+                changed = dt.datetime.fromisoformat(
+                    alarm_last_changed or current
+                )
+                return SimpleNamespace(
+                    state=entity_states.get(entity, "unknown"),
+                    last_changed=changed,
+                )
+
         scope = {
             "alarm_sensor_id": "sensor.alarm",
             "wake_person": "person.user",
@@ -92,9 +108,10 @@ class AlarmLightTests(unittest.TestCase):
             "ramp_minutes": duration,
             "update_seconds": update_seconds,
             "finish_by_alarm": finish_by_alarm,
+            "target_after_alarm_minutes": post_alarm_minutes,
             "trigger": {"id": "sunrise_start"},
             "now": lambda: now_time,
-            "states": lambda entity: entity_states.get(entity, "unknown"),
+            "states": StatesView(),
             "as_timestamp": timestamp,
             "as_datetime": lambda string: dt.datetime.fromisoformat(
                 string.replace("Z", "+00:00")
@@ -147,6 +164,8 @@ class AlarmLightTests(unittest.TestCase):
         self.assertEqual(self.inputs["precise_start_offset"]["default"], "-00:30:00")
         self.assertTrue(self.inputs["finish_by_alarm"]["default"])
         self.assertIn("finish_by_alarm", self.data["variables"])
+        self.assertEqual(self.inputs["target_after_alarm_minutes"]["default"], 0)
+        self.assertIn("target_after_alarm_minutes", self.data["variables"])
 
     def test_every_jinja_template_parses(self):
         def visit(item):
@@ -393,7 +412,7 @@ class AlarmLightTests(unittest.TestCase):
         branch = self.data["actions"][-1]["choose"][0]
         repeat = branch["sequence"][4]["parallel"][1]["sequence"][0]["default"][1]["repeat"]
         steps = repeat["sequence"]
-        self.assertEqual(steps[0]["delay"]["seconds"], "{{ interval_seconds | int }}")
+        self.assertEqual(steps[0]["delay"]["seconds"], "{{ interval_seconds | float }}")
         self.assertEqual(steps[1]["condition"], "template")
         self.assertEqual(steps[2]["action"], "light.turn_on")
         self.assertEqual(set(steps[2]["data"]), {"brightness_pct"})
@@ -433,6 +452,7 @@ class AlarmLightTests(unittest.TestCase):
         c["anchor_alarm_timestamp"] = str(
             dt.datetime.fromisoformat("2026-10-12T07:00:00+00:00").timestamp()
         )
+        c["fade_end_timestamp"] = str(float(c["anchor_alarm_timestamp"]) + 60)
         self.assertTrue(self.truthy(self.render(guard, c)))
         early = self.context(
             alarm="2026-10-13T07:00:00+00:00",
@@ -440,6 +460,106 @@ class AlarmLightTests(unittest.TestCase):
         )
         early["anchor_alarm_timestamp"] = c["anchor_alarm_timestamp"]
         self.assertFalse(self.truthy(self.render(guard, early)))
+
+    def test_post_alarm_target_override_delays_full_brightness(self):
+        """The user chooses the *completion time*, not just a maximum fade."""
+        for delay in (5, 10, 20, 60):
+            with self.subTest(post_alarm_minutes=delay):
+                c = self.fade_parameters(
+                    current="2026-10-12T06:55:00+00:00",
+                    lead=5, duration=3, finish_by_alarm=True,
+                    post_alarm_minutes=delay, update_seconds=30,
+                )
+                planned = (5 + delay) * 60
+                self.assertEqual(int(c["effective_ramp_seconds"]), planned)
+                self.assertEqual(int(c["total_steps"]), planned // 30)
+                expected_end = dt.datetime.fromisoformat(
+                    "2026-10-12T07:00:00+00:00"
+                ).timestamp() + delay * 60
+                self.assertAlmostEqual(float(c["fade_end_timestamp"]), expected_end)
+
+                branch = self.data["actions"][-1]["choose"][0]
+                light = branch["sequence"][4]["parallel"][1]["sequence"]
+                choice = light[0]["choose"][0]["conditions"][0]["value_template"]
+                self.assertFalse(self.truthy(self.render(choice, c)))
+                ramp = light[0]["default"][1]["repeat"]
+                values = []
+                for index in range(1, int(c["total_steps"]) + 1):
+                    ctx = {**c, "safe_start": "1", "repeat": {"index": index}}
+                    values.append(int(self.render(
+                        ramp["sequence"][2]["data"]["brightness_pct"], ctx
+                    )))
+                self.assertLess(values[5], 85)
+                self.assertEqual(values[-1], 85)
+
+    def test_zero_post_alarm_offset_preserves_existing_scheduling(self):
+        c = self.fade_parameters(
+            current="2026-10-12T06:55:00+00:00",
+            lead=5, duration=30, post_alarm_minutes=0,
+        )
+        self.assertEqual(int(c["effective_ramp_seconds"]), 300)
+        self.assertTrue(c["finish_by_alarm"])
+        explicit = self.fade_parameters(
+            current="2026-10-12T06:55:00+00:00",
+            lead=5, duration=30, finish_by_alarm=False,
+            post_alarm_minutes=0,
+        )
+        self.assertEqual(int(explicit["effective_ramp_seconds"]), 1800)
+
+    def test_post_alarm_fade_survives_phone_rollover_after_ten_minutes(self):
+        """Do not cancel at +60 s when target is scheduled at +15 min."""
+        current = "2026-10-12T07:10:00+00:00"
+        yesterday_alarm = dt.datetime.fromisoformat(
+            "2026-10-12T07:00:00+00:00"
+        ).timestamp()
+        c = self.context(
+            alarm="2026-10-13T07:00:00+00:00", current=current,
+            alarm_last_changed="2026-10-12T07:00:00+00:00",
+            post_alarm_minutes=15,
+        )
+        c["anchor_alarm_timestamp"] = str(yesterday_alarm)
+        c["fade_end_timestamp"] = str(yesterday_alarm + 15 * 60)
+        ramp = self.data["actions"][-1]["choose"][0]["sequence"][4]["parallel"][1]["sequence"][0]["default"][1]["repeat"]
+        guard = ramp["sequence"][1]["value_template"]
+        self.assertTrue(self.truthy(self.render(guard, c)))
+        completion = self.data["actions"][-1]["choose"][0]["sequence"][4]["parallel"][1]["sequence"][1]["if"][0]["value_template"]
+        self.assertTrue(self.truthy(self.render(completion, c)))
+
+        too_late = self.context(
+            alarm="2026-10-13T07:00:00+00:00",
+            current="2026-10-12T07:17:00+00:00",
+            alarm_last_changed="2026-10-12T07:00:00+00:00",
+        )
+        too_late["anchor_alarm_timestamp"] = str(yesterday_alarm)
+        too_late["fade_end_timestamp"] = str(yesterday_alarm + 15 * 60)
+        self.assertFalse(self.truthy(self.render(guard, too_late)))
+
+    def test_changed_alarm_early_stops_post_alarm_fade(self):
+        original = dt.datetime.fromisoformat(
+            "2026-10-12T07:00:00+00:00"
+        ).timestamp()
+        changed = self.context(
+            alarm="2026-10-13T07:00:00+00:00",
+            current="2026-10-12T07:05:00+00:00",
+            alarm_last_changed="2026-10-12T06:45:00+00:00",
+            post_alarm_minutes=15,
+        )
+        changed["anchor_alarm_timestamp"] = str(original)
+        changed["fade_end_timestamp"] = str(original + 15 * 60)
+        guard = self.data["actions"][-1]["choose"][0]["sequence"][4]["parallel"][1]["sequence"][0]["default"][1]["repeat"]["sequence"][1]["value_template"]
+        self.assertFalse(self.truthy(self.render(guard, changed)))
+
+    def test_delay_less_than_update_interval_still_waits_until_post_alarm_goal(self):
+        # With the post-alarm setting, a short fade is not switched to instant.
+        c = self.fade_parameters(
+            current="2026-10-12T07:00:00+00:00", lead=0,
+            post_alarm_minutes=1, update_seconds=120,
+        )
+        self.assertEqual(int(c["effective_ramp_seconds"]), 60)
+        self.assertEqual(int(c["total_steps"]), 1)
+        condition = self.data["actions"][-1]["choose"][0]["sequence"][4]["parallel"][1]["sequence"][0]["choose"][0]["conditions"][0]["value_template"]
+        self.assertFalse(self.truthy(self.render(condition, c)))
+        self.assertEqual(float(c["interval_seconds"]), 60.0)
 
     def test_additional_action_slots_and_parallel_alarm(self):
         branch = self.data["actions"][-1]["choose"][0]
