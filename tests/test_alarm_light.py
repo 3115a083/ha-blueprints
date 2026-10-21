@@ -583,6 +583,7 @@ class AlarmLightTests(unittest.TestCase):
         c["fade_end_timestamp"] = c["anchor_alarm_timestamp"]
         self.assertTrue(self.truthy(self.render(check, c)))
         c["anchor_alarm_timestamp"] = "123456789"
+        c["fade_end_timestamp"] = "123456789"
         self.assertFalse(self.truthy(self.render(check, c)))
         c = self.context(home=False)
         c["anchor_alarm_timestamp"] = str(
