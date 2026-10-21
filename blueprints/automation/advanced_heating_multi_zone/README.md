@@ -89,6 +89,34 @@ If Vacation mode is ON with **Setback**, each room normally requests its configu
 
 In an automation trace, check `vacation_valid`, `vacation_active`, `window_unknown`, `schedule_valid`, `desired_profile`, `effective_profile`, `proposed_mode`, `new_temperature` and `temperature_change`. Vacation now intentionally overrides unavailable schedules, but not unavailable window contacts. Verify that **Preview only** is OFF, the global enable input is not OFF, and the automation actually runs. With automatic Summer mode ON, warm outdoor temperatures may intentionally choose OFF/frost rather than 14 °C. Other thermostats or automations can overwrite requested targets, so compare the climate entity history with the trace. A change to this repository does not automatically update an already imported local blueprint.
 
+## Manual thermostat overrides (optional)
+
+A user may turn a physical radiator thermostat dial or change its target in the Home Assistant frontend. By default, the blueprint resumes its calculated target at the next evaluation. To **keep a manual adjustment temporarily and then resume automatic heating**, use the following setup:
+
+1. Under **Settings → Devices & services → Helpers**, create **one Input Text helper per room** with a **maximum length of at least 100 characters**, no fixed initial value and no pattern restriction. The blueprint stores only its own last confirmed mode, target and timing information, not credentials.
+2. In **01 | Rooms**, select that helper in each room's **Manual override memory (Input Text helper)** field.
+3. In **02 | General controls and actions**, set **Manual thermostat override duration (minutes)**, for example 60 or 120. Default **0** disables manual holds.
+4. Save and reload the imported automation. Allow it to send/confirm the ordinary setpoint at least once. Thereafter, a change at the physical thermostat or in the HA climate UI can be recognized as a manual override when it differs from the last **confirmed** automation command.
+5. The new manual target is kept until the hold expires. At expiry, the automation restores the currently applicable rule (Vacation, scheduled Comfort/Eco, etc.), **not a saved historical target**.
+
+The optional memory helper is **supported only for rooms with exactly one climate entity**; rooms with multiple thermostats still use standard automatic heating. Use a **different Input Text helper for every room**. Do not edit the helper value manually. The state is retained across Home Assistant restarts unless the helper is configured with an overriding initial state. The first run initializes control memory rather than interpreting a pre-existing value as manual.
+
+A 90-second settling period after a confirmed command prevents slow thermostat state echoes from being mistaken for a manual change. Detection uses the existing approximately once-per-minute check, so it is **not instantaneous**. Repeated changes during a hold do not extend its deadline automatically.
+
+**Priority:** Open-window protection, Summer mode and frost safety may override an active manual hold. A manual hold temporarily takes precedence over Vacation and individual room schedules when those safety controls are not active. A competing external thermostat automation can look like a manual override: avoid multiple controllers writing to the same thermostat. Tracking and the hold are disabled in Preview mode; enabling this option without a valid Input Text helper does not activate manual detection.
+
+## Optional fault notifications and command verification
+
+Under **05 | Preview and diagnostics**, enable **Optional heating fault notifications** (OFF by default). Home Assistant's built-in **Persistent Notifications** are created for the following conditions:
+
+- **Window contact unavailable:** an entity is unknown/unavailable or a selected contact is missing. Heating commands for that room remain paused. Notification IDs are stable per room; recent state failures can trigger a notification promptly, with ongoing reminders at most every 30 minutes.
+- **Thermostat unavailable:** the configured climate entity is unknown/offline, so the room cannot be controlled. The ongoing issue is reported on Home Assistant startup or at a 30-minute reminder boundary.
+- **Setpoint change not confirmed:** after sending mode/target actions the automation waits (default **15 seconds**, configurable from 5 to 60) until Home Assistant reports the requested HVAC mode and target (within 0.4 °C), then marks the command confirmed. If the state does not reflect the request in time, a stable per-thermostat notification identifies the requested and reported targets. Subsequent checks may retry the command; stable notification IDs prevent multiple separate notification cards for the same issue.
+
+Command **state verification runs even when notifications are OFF**, ensuring the blueprint only runs **global after-change actions** after the reported target matches. Commands that throw a service error are handled without aborting other rooms; failures can then be reported. However, a Home Assistant target attribute changing does **not** prove the physical valve moved or the heating device actually reached that temperature. Persistent notifications stay in the Home Assistant interface until dismissed or updated and are **not push notifications**.
+
+On existing installations, enable notifications first and check for competing automations before enabling manual hold. A thermostat repeatedly reverting to another temperature could indicate another automation or a thermostat's internal schedule.
+
 ## Safety and migration checks
 
 - Start with **Preview only ON**. Test schedules, window-open durations, vacation ON/OFF, summer cutoff/resume, temporary sensor unavailability, apartment presence hold, thermostat OFF availability, and Home Assistant restart before enabling physical control.
