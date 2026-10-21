@@ -391,8 +391,8 @@ class AlarmLightTests(unittest.TestCase):
         )
         self.assertEqual(int(c["effective_ramp_seconds"]), 1800)
         self.assertEqual(int(c["total_steps"]), 60)
-        self.assertEqual(int(c["interval_seconds"]), 30)
-        self.assertEqual(int(c["total_steps"]) * int(c["interval_seconds"]), 1800)
+        self.assertEqual(int(float(c["interval_seconds"])), 30)
+        self.assertEqual(int(c["total_steps"]) * int(float(c["interval_seconds"])), 1800)
         choice = branch["sequence"][4]["parallel"][1]["sequence"][0]["choose"][0]
         self.assertIn("instant", choice["conditions"][0]["value_template"])
         self.assertEqual(choice["sequence"][0]["action"], "light.turn_on")
@@ -407,7 +407,7 @@ class AlarmLightTests(unittest.TestCase):
         self.assertEqual(int(c["requested_ramp_seconds"]), 1800)
         self.assertEqual(int(c["effective_ramp_seconds"]), 300)
         self.assertEqual(int(c["total_steps"]), 10)
-        self.assertEqual(int(c["interval_seconds"]), 30)
+        self.assertEqual(int(float(c["interval_seconds"])), 30)
 
         branch = self.data["actions"][-1]["choose"][0]
         repeat = branch["sequence"][4]["parallel"][1]["sequence"][0]["default"][1]["repeat"]
@@ -580,6 +580,7 @@ class AlarmLightTests(unittest.TestCase):
         c["anchor_alarm_timestamp"] = str(
             dt.datetime.fromisoformat("2026-10-12T07:00:00+00:00").timestamp()
         )
+        c["fade_end_timestamp"] = c["anchor_alarm_timestamp"]
         self.assertTrue(self.truthy(self.render(check, c)))
         c["anchor_alarm_timestamp"] = "123456789"
         self.assertFalse(self.truthy(self.render(check, c)))
@@ -587,6 +588,7 @@ class AlarmLightTests(unittest.TestCase):
         c["anchor_alarm_timestamp"] = str(
             dt.datetime.fromisoformat("2026-10-12T07:00:00+00:00").timestamp()
         )
+        c["fade_end_timestamp"] = c["anchor_alarm_timestamp"]
         self.assertFalse(self.truthy(self.render(check, c)))
 
     def test_documentation_and_catalog(self):
