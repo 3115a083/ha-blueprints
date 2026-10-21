@@ -371,186 +371,199 @@ actions:
             room_vacation: "{{ room.get('vacation_temperature', 14) | float(14) }}"
             room_frost: "{{ room.get('frost_temperature', 7) | float(7) }}"
             room_window_strategy: "{{ room.get('window_strategy', 'frost') }}"
-        - condition: template
-          value_template: >-
-            {{ room is mapping and room_enabled and
-               room_paused_id in ['', none] or
-               (room is mapping and room_enabled and not is_state(room_paused_id, 'on')) }}
-        - condition: template
-          value_template: >-
-            {{ room_trvs is sequence and room_trvs is not string and room_trvs | count > 0 }}
-        - variables:
-            window_unknown: >-
-              {{ room_windows | count > 0 and
-                 (expand(room_windows) | count != room_windows | count or
-                  expand(room_windows) | selectattr('state', 'in', ['unavailable','unknown']) | list | count > 0) }}
-            windows_open_long: >-
-              {% set ns = namespace(open=false) %}
-              {% for window in expand(room_windows) %}
-                {% if window.state in ['on', 'open', 'tilted'] and
-                      as_timestamp(now()) - as_timestamp(window.last_changed, 0) >= room_window_delay * 60 %}
-                  {% set ns.open = true %}
-                {% endif %}
-              {% endfor %}
-              {{ ns.open }}
-            schedule_valid: "{{ room_schedule in ['', none] or has_value(room_schedule) }}"
-            motion_valid: "{{ room_motion in ['', none] or has_value(room_motion) }}"
-        - condition: template
-          value_template: "{{ not window_unknown and schedule_valid and motion_valid }}"
-        - variables:
-            desired_profile: >-
-              {% if windows_open_long %}
-                window
-              {% elif vacation_active %}
-                vacation
-              {% elif party_active %}
-                comfort
-              {% elif not anybody_home and not guest_active %}
-                eco
-              {% elif room_schedule not in ['', none] and not is_state(room_schedule, 'on') %}
-                eco
-              {% elif room_motion not in ['', none] and not is_state(room_motion, 'on') %}
-                eco
-              {% elif room_schedule not in ['', none] or room_motion not in ['', none] %}
-                comfort
-              {% else %}
-                {{ unscheduled_value }}
-              {% endif %}
-        - variables:
-            desired_off: >-
-              {{ (desired_profile == 'window' and room_window_strategy == 'off')
-                 or (desired_profile == 'vacation' and vacation_strategy_value == 'off') }}
-            profile_temp: >-
-              {% if desired_profile == 'window' %}
-                {{ room_frost }}
-              {% elif desired_profile == 'vacation' %}
-                {% if vacation_strategy_value == 'eco' %}
-                  {{ room_eco }}
-                {% else %}
-                  {{ room_vacation }}
-                {% endif %}
-              {% elif desired_profile == 'comfort' %}
-                {{ room_comfort }}
-              {% else %}
-                {{ room_eco }}
-              {% endif %}
-        - repeat:
-            for_each: "{{ room_trvs }}"
-            sequence:
-              - variables:
-                  thermostat: "{{ repeat.item }}"
-              - condition: template
-                value_template: >-
-                  {{ thermostat is string and thermostat.startswith('climate.') and
-                     has_value(thermostat) }}
-              - variables:
-                  supported_modes: "{{ state_attr(thermostat, 'hvac_modes') | default([], true) }}"
-                  current_room_temp: >-
-                    {% if room_sensor not in ['', none] and has_value(room_sensor) %}
-                      {{ states(room_sensor) | float(999) }}
-                    {% else %}
-                      {{ state_attr(thermostat, 'current_temperature') | float(999) }}
-                    {% endif %}
-                  sensor_temperature: "{{ states(room_sensor) | float(999) if room_sensor not in ['', none] else 999 }}"
-                  thermostat_temperature: "{{ state_attr(thermostat, 'current_temperature') | float(999) }}"
-              - variables:
-                  frost_needed: >-
-                    {{ desired_off and
-                       (current_room_temp | float(999) == 999 or
-                        current_room_temp | float(999) <= room_frost + 0.5) }}
-                  proposed_mode: >-
-                    {% if desired_off and not frost_needed and 'off' in supported_modes %}
-                      off
-                    {% elif room_hvac_mode in supported_modes %}
-                      {{ room_hvac_mode }}
-                    {% elif 'heat' in supported_modes %}
-                      heat
-                    {% elif 'auto' in supported_modes %}
-                      auto
-                    {% else %}
-                      unsupported
-                    {% endif %}
-                  bounded_room_target: "{{ [room_frost, profile_temp | float(room_eco)] | max }}"
-              - condition: template
-                value_template: "{{ proposed_mode != 'unsupported' }}"
-              - variables:
-                  adjustment: >-
-                    {% if room_calibrate and room_sensor not in ['', none] and
-                          sensor_temperature | float(999) != 999 and
-                          thermostat_temperature | float(999) != 999 %}
-                      {{ [3, [-3, thermostat_temperature | float - sensor_temperature | float] | max] | min }}
-                    {% else %}
-                      0
-                    {% endif %}
-                  trv_min: "{{ state_attr(thermostat, 'min_temp') | float(5) }}"
-                  trv_max: "{{ state_attr(thermostat, 'max_temp') | float(35) }}"
-              - variables:
-                  new_temperature: >-
-                    {% set temp = bounded_room_target | float + adjustment | float %}
-                    {{ [trv_max, [trv_min, temp] | max] | min | round(1) }}
-                  mode_change: "{{ states(thermostat) != proposed_mode }}"
-                  temperature_change: >-
-                    {{ proposed_mode != 'off' and
-                       (state_attr(thermostat, 'temperature') is none or
-                        ((state_attr(thermostat, 'temperature') | float(0) -
-                          new_temperature | float) | abs) >= 0.2) }}
-              - if:
-                  - condition: template
-                    value_template: "{{ mode_change or temperature_change }}"
-                then:
-                  - choose:
-                      - conditions:
-                          - condition: template
-                            value_template: "{{ preview_value }}"
+        - if:
+            - condition: template
+              value_template: >-
+                {{ room is mapping and room_enabled and
+                   (room_paused_id in ['', none] or
+                    (has_value(room_paused_id) and is_state(room_paused_id, 'off'))) }}
+          then:
+            - if:
+                - condition: template
+                  value_template: >-
+                    {{ room_trvs is sequence and room_trvs is not string and room_trvs | count > 0 }}
+              then:
+                - variables:
+                    window_unknown: >-
+                      {{ room_windows | count > 0 and
+                         (expand(room_windows) | count != room_windows | count or
+                          expand(room_windows) | selectattr('state', 'in', ['unavailable','unknown']) | list | count > 0) }}
+                    windows_open_long: >-
+                      {% set ns = namespace(open=false) %}
+                      {% for window in expand(room_windows) %}
+                        {% if window.state in ['on', 'open', 'tilted'] and
+                              as_timestamp(now()) - as_timestamp(window.last_changed, 0) >= room_window_delay * 60 %}
+                          {% set ns.open = true %}
+                        {% endif %}
+                      {% endfor %}
+                      {{ ns.open }}
+                    schedule_valid: "{{ room_schedule in ['', none] or has_value(room_schedule) }}"
+                    motion_valid: "{{ room_motion in ['', none] or has_value(room_motion) }}"
+                - if:
+                    - condition: template
+                      value_template: "{{ not window_unknown and schedule_valid and motion_valid }}"
+                  then:
+                    - variables:
+                        desired_profile: >-
+                          {% if windows_open_long %}
+                            window
+                          {% elif vacation_active %}
+                            vacation
+                          {% elif party_active %}
+                            comfort
+                          {% elif not anybody_home and not guest_active %}
+                            eco
+                          {% elif room_schedule not in ['', none] and not is_state(room_schedule, 'on') %}
+                            eco
+                          {% elif room_motion not in ['', none] and not is_state(room_motion, 'on') %}
+                            eco
+                          {% elif room_schedule not in ['', none] or room_motion not in ['', none] %}
+                            comfort
+                          {% else %}
+                            {{ unscheduled_value }}
+                          {% endif %}
+                    - variables:
+                        desired_off: >-
+                          {{ (desired_profile == 'window' and room_window_strategy == 'off')
+                             or (desired_profile == 'vacation' and vacation_strategy_value == 'off') }}
+                        profile_temp: >-
+                          {% if desired_profile == 'window' %}
+                            {{ room_frost }}
+                          {% elif desired_profile == 'vacation' %}
+                            {% if vacation_strategy_value == 'eco' %}
+                              {{ room_eco }}
+                            {% else %}
+                              {{ room_vacation }}
+                            {% endif %}
+                          {% elif desired_profile == 'comfort' %}
+                            {{ room_comfort }}
+                          {% else %}
+                            {{ room_eco }}
+                          {% endif %}
+                    - repeat:
+                        for_each: "{{ room_trvs }}"
                         sequence:
+                          - variables:
+                              thermostat: "{{ repeat.item }}"
                           - if:
                               - condition: template
-                                value_template: "{{ log_changes_value }}"
+                                value_template: >-
+                                  {{ thermostat is string and thermostat.startswith('climate.') and
+                                     has_value(thermostat) }}
                             then:
-                              - action: system_log.write
-                                data:
-                                  logger: blueprints.advanced_heating_multi_zone
-                                  level: info
-                                  message: >-
-                                    Preview {{ room_name }} ({{ thermostat }}):
-                                    {{ desired_profile }} / {{ proposed_mode }} /
-                                    {{ new_temperature }} °C
-                    default:
-                      - if:
-                          - condition: template
-                            value_template: "{{ mode_change }}"
-                        then:
-                          - action: climate.set_hvac_mode
-                            target:
-                              entity_id: "{{ thermostat }}"
-                            data:
-                              hvac_mode: "{{ proposed_mode }}"
-                          - delay:
-                              seconds: "{{ call_delay }}"
-                      - if:
-                          - condition: template
-                            value_template: "{{ temperature_change }}"
-                        then:
-                          - action: climate.set_temperature
-                            target:
-                              entity_id: "{{ thermostat }}"
-                            data:
-                              temperature: "{{ new_temperature | float }}"
-                          - delay:
-                              seconds: "{{ call_delay }}"
-                      - if:
-                          - condition: template
-                            value_template: "{{ log_changes_value }}"
-                        then:
-                          - action: system_log.write
-                            data:
-                              logger: blueprints.advanced_heating_multi_zone
-                              level: info
-                              message: >-
-                                Updated {{ room_name }} ({{ thermostat }}):
-                                {{ desired_profile }} / {{ proposed_mode }} /
-                                {{ new_temperature }} °C
-                      - sequence: !input after_change_actions
+                              - variables:
+                                  supported_modes: "{{ state_attr(thermostat, 'hvac_modes') | default([], true) }}"
+                                  current_room_temp: >-
+                                    {% if room_sensor not in ['', none] and has_value(room_sensor) %}
+                                      {{ states(room_sensor) | float(999) }}
+                                    {% else %}
+                                      {{ state_attr(thermostat, 'current_temperature') | float(999) }}
+                                    {% endif %}
+                                  sensor_temperature: "{{ states(room_sensor) | float(999) if room_sensor not in ['', none] else 999 }}"
+                                  thermostat_temperature: "{{ state_attr(thermostat, 'current_temperature') | float(999) }}"
+                              - variables:
+                                  frost_needed: >-
+                                    {{ desired_off and
+                                       (current_room_temp | float(999) == 999 or
+                                        current_room_temp | float(999) <= room_frost + 0.5) }}
+                                  proposed_mode: >-
+                                    {% if desired_off and not frost_needed and 'off' in supported_modes %}
+                                      off
+                                    {% elif room_hvac_mode in supported_modes %}
+                                      {{ room_hvac_mode }}
+                                    {% elif 'heat' in supported_modes %}
+                                      heat
+                                    {% elif 'auto' in supported_modes %}
+                                      auto
+                                    {% else %}
+                                      unsupported
+                                    {% endif %}
+                                  bounded_room_target: "{{ [room_frost, profile_temp | float(room_eco)] | max }}"
+                              - if:
+                              - condition: template
+                                    value_template: "{{ proposed_mode != 'unsupported' }}"
+                                    then:
+                              - variables:
+                                      adjustment: >-
+                                        {% if room_calibrate and room_sensor not in ['', none] and
+                                              sensor_temperature | float(999) != 999 and
+                                              thermostat_temperature | float(999) != 999 %}
+                                          {{ [3, [-3, thermostat_temperature | float - sensor_temperature | float] | max] | min }}
+                                        {% else %}
+                                          0
+                                        {% endif %}
+                                      trv_min: "{{ state_attr(thermostat, 'min_temp') | float(5) }}"
+                                      trv_max: "{{ state_attr(thermostat, 'max_temp') | float(35) }}"
+                                  - variables:
+                                      new_temperature: >-
+                                        {% set temp = bounded_room_target | float + adjustment | float %}
+                                        {{ [trv_max, [trv_min, temp] | max] | min | round(1) }}
+                                      mode_change: "{{ states(thermostat) != proposed_mode }}"
+                                      temperature_change: >-
+                                        {{ proposed_mode != 'off' and
+                                           (state_attr(thermostat, 'temperature') is none or
+                                            ((state_attr(thermostat, 'temperature') | float(0) -
+                                              new_temperature | float) | abs) >= 0.2) }}
+                                  - if:
+                                      - condition: template
+                                        value_template: "{{ mode_change or temperature_change }}"
+                                    then:
+                                      - choose:
+                                          - conditions:
+                                              - condition: template
+                                                value_template: "{{ preview_value }}"
+                                            sequence:
+                                              - if:
+                                                  - condition: template
+                                                    value_template: "{{ log_changes_value }}"
+                                                then:
+                                                  - action: system_log.write
+                                                    data:
+                                                      logger: blueprints.advanced_heating_multi_zone
+                                                      level: info
+                                                      message: >-
+                                                        Preview {{ room_name }} ({{ thermostat }}):
+                                                        {{ desired_profile }} / {{ proposed_mode }} /
+                                                        {{ new_temperature }} °C
+                                        default:
+                                          - if:
+                                              - condition: template
+                                                value_template: "{{ mode_change }}"
+                                            then:
+                                              - action: climate.set_hvac_mode
+                                                target:
+                                                  entity_id: "{{ thermostat }}"
+                                                data:
+                                                  hvac_mode: "{{ proposed_mode }}"
+                                              - delay:
+                                                  seconds: "{{ call_delay }}"
+                                          - if:
+                                              - condition: template
+                                                value_template: "{{ temperature_change }}"
+                                            then:
+                                              - action: climate.set_temperature
+                                                target:
+                                                  entity_id: "{{ thermostat }}"
+                                                data:
+                                                  temperature: "{{ new_temperature | float }}"
+                                              - delay:
+                                                  seconds: "{{ call_delay }}"
+                                          - if:
+                                              - condition: template
+                                                value_template: "{{ log_changes_value }}"
+                                            then:
+                                              - action: system_log.write
+                                                data:
+                                                  logger: blueprints.advanced_heating_multi_zone
+                                                  level: info
+                                                  message: >-
+                                                    Updated {{ room_name }} ({{ thermostat }}):
+                                                    {{ desired_profile }} / {{ proposed_mode }} /
+                                                    {{ new_temperature }} °C
+                                          - if:
+                                              - condition: template
+                                                value_template: "{{ true }}"
+                                            then: !input after_change_actions
 
 mode: single
 max_exceeded: silent
