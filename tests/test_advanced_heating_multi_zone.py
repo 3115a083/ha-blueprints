@@ -267,12 +267,13 @@ class HeatingMultiZoneTests(unittest.TestCase):
         def result(**kw):
             return tmpl.render(**(base | kw)).strip()
         self.assertEqual(result(), "True")  # the thermostat dial was changed
-        self.assertEqual(result(tracker_written=1950), "False")  # suppress slow self-echo
+        self.assertEqual(result(tracker_written=1950), "True")  # confirmed changes are external, even soon after write
         self.assertEqual(result(tracker_phase="pending"), "False")
         self.assertEqual(result(tracking_ready=False), "False")
         self.assertEqual(result(desired_profile="window"), "False")
         self.assertEqual(result(summer_active_for_trv=True), "False")
         self.assertEqual(result(current_room_temp=7.2), "False")
+        self.assertEqual(result(state_attr=lambda e, a: 6.5), "False")  # do not hold below frost
         self.assertEqual(result(state_attr=lambda e, a: 14), "False")
 
         hold = self.env.from_string(find_variable(self.data["actions"], "manual_override_active"))
