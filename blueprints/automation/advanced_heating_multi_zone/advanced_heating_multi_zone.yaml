@@ -544,14 +544,15 @@ actions:
                 - if:
                     - condition: template
                       value_template: >-
+                        {% set ns = namespace(recent=false) %}
+                        {% for contact in expand(room_windows) %}
+                          {% if contact.state in ['unknown', 'unavailable'] and
+                                as_timestamp(now()) - as_timestamp(contact.last_changed, 0) < 70 %}
+                            {% set ns.recent = true %}
+                          {% endif %}
+                        {% endfor %}
                         {{ notify_enabled and window_unknown and
-                           (trigger.id == 'home_assistant_start' or
-                            now().minute % 30 == 0 or
-                            expand(room_windows) | selectattr('state', 'in', ['unavailable', 'unknown'])
-                              | selectattr('last_changed', 'defined') | list | count > 0 and
-                            (expand(room_windows) | selectattr('state', 'in', ['unavailable', 'unknown'])
-                              | map(attribute='last_changed') | map('as_timestamp', 0) | max(default=0))
-                            >= as_timestamp(now()) - 65) }}
+                           (ns.recent or trigger.id == 'home_assistant_start' or now().minute % 30 == 0) }}
                   then:
                     - action: persistent_notification.create
                       data:
