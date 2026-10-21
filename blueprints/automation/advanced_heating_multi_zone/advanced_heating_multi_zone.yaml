@@ -70,6 +70,13 @@ blueprint:
                       filter:
                         - domain: input_boolean
                         - domain: binary_sensor
+                manual_override_state_helper:
+                  label: "Optional manual override memory (Input Text helper)"
+                  required: false
+                  selector:
+                    entity:
+                      filter:
+                        - domain: input_text
                 temperature_sensor:
                   label: "Optional external room temperature sensor"
                   required: false
@@ -255,6 +262,22 @@ blueprint:
                   value: comfort
                 - label: "Eco unless party mode is active"
                   value: eco
+        manual_override_minutes:
+          name: "Manual thermostat override duration (minutes; 0 = disabled)"
+          description: >-
+            If enabled, configure one separate Input Text helper in each
+            single-thermostat room under Rooms. The blueprint stores its last
+            confirmed commands so turning the radiator dial or changing its
+            target in Home Assistant can hold the new setting temporarily.
+            Window, summer and frost safety still take precedence.
+          default: 0
+          selector:
+            number:
+              min: 0
+              max: 1440
+              step: 1
+              mode: box
+              unit_of_measurement: min
         safety_conditions:
           name: "Always-required global conditions"
           description: >-
@@ -373,6 +396,31 @@ blueprint:
           default: true
           selector:
             boolean: {}
+        fault_notifications:
+          name: "Optional heating fault notifications"
+          description: >-
+            Create Home Assistant persistent notifications for unavailable
+            window contacts, offline thermostats, or target changes that
+            fail to appear after a command. Disabled by default. Reuses a
+            stable notification ID per issue; availability reminders occur
+            at most every 30 minutes while an issue persists.
+          default: false
+          selector:
+            boolean: {}
+        command_verify_seconds:
+          name: "Wait for thermostat command confirmation (seconds)"
+          description: >-
+            Used for optional fault notifications and manual override
+            tracking. A successful target-state update is not proof
+            of physical valve movement.
+          default: 15
+          selector:
+            number:
+              min: 5
+              max: 60
+              step: 1
+              mode: box
+              unit_of_measurement: s
         log_changes:
           name: "Log planned changes (preview) or successful commands"
           description: >-
@@ -399,6 +447,9 @@ variables:
   unscheduled_value: !input unscheduled_mode
   preview_value: !input preview_only
   log_changes_value: !input log_changes
+  notify_enabled: !input fault_notifications
+  verify_seconds: !input command_verify_seconds
+  manual_hold_minutes: !input manual_override_minutes
   call_delay: !input action_delay
 
 triggers:
@@ -443,6 +494,7 @@ actions:
             room: "{{ repeat.item }}"
         - variables:
             room_name: "{{ room.get('name', 'Unnamed room') }}"
+            room_manual_helper: "{{ room.get('manual_override_state_helper', '') | default('', true) }}"
             room_enabled: "{{ room.get('enabled', true) }}"
             room_paused_id: "{{ room.get('pause_entity', '') | default('', true) }}"
             room_trvs: "{{ room.get('thermostats', []) | default([], true) }}"
@@ -489,6 +541,27 @@ actions:
                       {% endfor %}
                       {{ ns.open }}
                     schedule_valid: "{{ room_schedule in ['', none] or has_value(room_schedule) }}"
+                - if:
+                    - condition: template
+                      value_template: >-
+                        {{ notify_enabled and window_unknown and
+                           (trigger.id == 'home_assistant_start' or
+                            now().minute % 30 == 0 or
+                            expand(room_windows) | selectattr('state', 'in', ['unavailable', 'unknown'])
+                              | selectattr('last_changed', 'defined') | list | count > 0 and
+                            (expand(room_windows) | selectattr('state', 'in', ['unavailable', 'unknown'])
+                              | map(attribute='last_changed') | map('as_timestamp', 0) | max(default=0))
+                            >= as_timestamp(now()) - 65) }}
+                  then:
+                    - action: persistent_notification.create
+                      data:
+                        title: "Heating: window contact unavailable"
+                        notification_id: "{{ 'ahc_window_' ~ (room_name | replace(' ', '_')) }}"
+                        message: >-
+                          {{ room_name }}: one or more configured window contacts
+                          are unknown or unavailable. Heating commands for this
+                          room are paused until the contacts report reliably.
+                          Check: {{ room_windows | join(', ') }}.
                 - if:
                     - condition: template
                       value_template: "{{ not window_unknown and (vacation_active or schedule_valid) }}"
