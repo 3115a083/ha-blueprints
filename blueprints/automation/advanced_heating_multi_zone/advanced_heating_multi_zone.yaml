@@ -620,6 +620,24 @@ actions:
                                     {% endif %}
                                   sensor_temperature: "{{ states(room_sensor) | float(999) if room_sensor not in ['', none] else 999 }}"
                                   thermostat_temperature: "{{ state_attr(thermostat, 'current_temperature') | float(999) }}"
+                                  tracking_ready: >-
+                                    {{ not preview_value and manual_hold_minutes | float(0) > 0 and
+                                       room_trvs | count == 1 and
+                                       room_manual_helper.startswith('input_text.') and
+                                       states(room_manual_helper) not in ['unknown', 'unavailable'] }}
+                                  tracker_string: >-
+                                    {{ states(room_manual_helper) if room_manual_helper not in ['', none]
+                                       and states(room_manual_helper) not in ['unknown','unavailable']
+                                       else '' }}
+                              - variables:
+                                  tracker_fields: "{{ tracker_string.split('|') }}"
+                              - variables:
+                                  tracker_ok: "{{ tracker_fields | count == 5 }}"
+                                  tracker_mode: "{{ tracker_fields[0] if tracker_fields | count == 5 else '' }}"
+                                  tracker_temp: "{{ tracker_fields[1] | float(999) if tracker_fields | count == 5 else 999 }}"
+                                  tracker_written: "{{ tracker_fields[2] | float(0) if tracker_fields | count == 5 else 0 }}"
+                                  tracker_until: "{{ tracker_fields[3] | float(0) if tracker_fields | count == 5 else 0 }}"
+                                  tracker_phase: "{{ tracker_fields[4] if tracker_fields | count == 5 else '' }}"
                               - variables:
                                   summer_active_for_trv: >-
                                     {% set outdoor = states(outdoor_sensor_id) if outdoor_sensor_id not in ['', none] else 'unknown' %}
@@ -633,17 +651,51 @@ actions:
                                        (outdoor_c >= summer_start_temperature | float(20) or
                                         (outdoor_c > summer_resume_temperature | float(17) and held_back)) }}
                               - variables:
+                                  manual_detected: >-
+                                    {{ tracking_ready and tracker_ok and tracker_phase == 'confirmed'
+                                       and as_timestamp(now()) - tracker_written > 90
+                                       and desired_profile != 'window' and not summer_active_for_trv
+                                       and current_room_temp | float(999) > room_frost + 0.5
+                                       and (states(thermostat) != tracker_mode or
+                                         (states(thermostat) != 'off' and
+                                          state_attr(thermostat, 'temperature') is not none and
+                                          ((state_attr(thermostat, 'temperature') | float(999) -
+                                            tracker_temp) | abs) >= 0.4)) }}
+                              - variables:
+                                  manual_override_active: >-
+                                    {{ tracking_ready and desired_profile != 'window'
+                                       and not summer_active_for_trv
+                                       and current_room_temp | float(999) > room_frost + 0.5
+                                       and (manual_detected or
+                                            (tracker_phase == 'manual' and
+                                             tracker_until > as_timestamp(now()))) }}
+                              - if:
+                                  - condition: template
+                                    value_template: "{{ manual_detected }}"
+                                then:
+                                  - action: input_text.set_value
+                                    target:
+                                      entity_id: "{{ room_manual_helper }}"
+                                    data:
+                                      value: >-
+                                        {{ tracker_mode }}|{{ tracker_temp }}|{{ tracker_written | int }}|
+                                        {{ (as_timestamp(now()) + manual_hold_minutes | float(0) * 60) | int }}|manual
+                              - variables:
                                   desired_off: >-
                                     {{ summer_active_for_trv or
                                        (desired_profile == 'window' and room_window_strategy == 'off') or
                                        (desired_profile == 'vacation' and vacation_strategy_value == 'off') }}
-                                  effective_profile: "{{ 'summer' if summer_active_for_trv else desired_profile }}"
+                                  effective_profile: >-
+                                    {{ 'manual' if manual_override_active else
+                                       ('summer' if summer_active_for_trv else desired_profile) }}
                                   frost_needed: >-
                                     {{ desired_off and
                                        (current_room_temp | float(999) == 999 or
                                         current_room_temp | float(999) <= room_frost + 0.5) }}
                                   proposed_mode: >-
-                                    {% if desired_off and not frost_needed and 'off' in supported_modes %}
+                                    {% if manual_override_active %}
+                                      {{ states(thermostat) }}
+                                    {% elif desired_off and not frost_needed and 'off' in supported_modes %}
                                       off
                                     {% elif desired_off and 'heat' in supported_modes %}
                                       heat
@@ -659,7 +711,9 @@ actions:
                                       unsupported
                                     {% endif %}
                                   bounded_room_target: >-
-                                    {{ room_frost if desired_off else [room_frost, profile_temp | float(room_eco)] | max }}
+                                    {{ state_attr(thermostat, 'temperature') | float(room_frost)
+                                       if manual_override_active else
+                                       (room_frost if desired_off else [room_frost, profile_temp | float(room_eco)] | max) }}
                               - if:
                                   - condition: template
                                     value_template: "{{ proposed_mode != 'unsupported' }}"
@@ -677,14 +731,34 @@ actions:
                                       trv_max: "{{ state_attr(thermostat, 'max_temp') | float(35) }}"
                                   - variables:
                                       new_temperature: >-
-                                        {% set temp = bounded_room_target | float + adjustment | float %}
-                                        {{ [trv_max, [trv_min, room_frost, temp] | max] | min | round(1) }}
+                                        {% if manual_override_active %}
+                                          {{ state_attr(thermostat, 'temperature') | float(room_frost) }}
+                                        {% else %}
+                                          {% set temp = bounded_room_target | float + adjustment | float %}
+                                          {{ [trv_max, [trv_min, room_frost, temp] | max] | min | round(1) }}
+                                        {% endif %}
                                       mode_change: "{{ states(thermostat) != proposed_mode }}"
                                       temperature_change: >-
                                         {{ proposed_mode != 'off' and
                                            (state_attr(thermostat, 'temperature') is none or
                                             ((state_attr(thermostat, 'temperature') | float(0) -
                                               new_temperature | float) | abs) >= 0.2) }}
+                                  - if:
+                                      - condition: template
+                                        value_template: >-
+                                          {{ tracking_ready and not manual_override_active and
+                                             not (mode_change or temperature_change) and
+                                             (not tracker_ok or tracker_phase != 'confirmed' or
+                                              tracker_mode != proposed_mode or
+                                              (proposed_mode != 'off' and
+                                               (tracker_temp - new_temperature | float) | abs >= 0.2)) }}
+                                    then:
+                                      - action: input_text.set_value
+                                        target:
+                                          entity_id: "{{ room_manual_helper }}"
+                                        data:
+                                          value: >-
+                                            {{ proposed_mode }}|{{ new_temperature }}|{{ as_timestamp(now()) | int }}|0|confirmed
                                   - if:
                                       - condition: template
                                         value_template: "{{ mode_change or temperature_change }}"
@@ -707,6 +781,16 @@ actions:
                                                         {{ effective_profile }} / {{ proposed_mode }} /
                                                         {{ new_temperature }} °C
                                         default:
+                                          - if:
+                                              - condition: template
+                                                value_template: "{{ tracking_ready }}"
+                                            then:
+                                              - action: input_text.set_value
+                                                target:
+                                                  entity_id: "{{ room_manual_helper }}"
+                                                data:
+                                                  value: >-
+                                                    {{ proposed_mode }}|{{ new_temperature }}|{{ as_timestamp(now()) | int }}|0|pending
                                           - if:
                                               - condition: template
                                                 value_template: "{{ mode_change }}"
