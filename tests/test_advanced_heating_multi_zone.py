@@ -2,6 +2,7 @@
 from pathlib import Path
 import re
 import unittest
+from types import SimpleNamespace
 
 import jinja2
 import yaml
@@ -78,8 +79,9 @@ class HeatingMultiZoneTests(unittest.TestCase):
         self.assertEqual(metadata["domain"], "automation")
         self.assertEqual(metadata["homeassistant"]["min_version"], "2026.10.1")
         self.assertEqual(list(self.sections), ["rooms_section", "general_section",
-                                              "vacation_section", "diagnostics_section"])
-        self.assertIn("Räume", self.sections["rooms_section"]["name"])
+                                              "summer_section", "vacation_section", "diagnostics_section"])
+        self.assertIn("Rooms", self.sections["rooms_section"]["name"])
+        self.assertNotIn("Räume", self.text)
         room_selector = self.inputs["room_entries"]["selector"]["object"]
         self.assertTrue(room_selector["multiple"])
         self.assertEqual(room_selector["label_field"], "name")
@@ -92,13 +94,23 @@ class HeatingMultiZoneTests(unittest.TestCase):
 
     def test_room_controls_in_one_section_and_globals_separate(self):
         fields = self.inputs["room_entries"]["selector"]["object"]["fields"]
-        required = {"name", "thermostats", "temperature_sensor", "windows", "window_delay",
-                    "window_strategy", "schedule", "motion", "comfort_temperature",
+        required = {"name", "thermostats", "temperature_sensor", "windows", "window_open_seconds",
+                    "window_strategy", "schedule", "comfort_temperature",
                     "eco_temperature", "vacation_temperature", "frost_temperature",
                     "hvac_mode", "pause_entity", "calibrate_generic"}
         self.assertTrue(required.issubset(fields))
-        self.assertTrue({"people", "guest_entity", "party_entity", "after_change_actions",
+        self.assertNotIn("motion", fields)
+        self.assertNotIn("window_delay", fields)
+        self.assertEqual(fields["window_open_seconds"]["selector"]["number"]["unit_of_measurement"], "s")
+        self.assertEqual(fields["window_open_seconds"]["selector"]["number"]["max"], 7200)
+        self.assertTrue({"people", "apartment_presence_sensors", "apartment_presence_hold_minutes",
+                         "guest_entity", "party_entity", "after_change_actions",
                          "safety_conditions"}.issubset(self.sections["general_section"]["input"]))
+        self.assertTrue({"summer_enabled", "outdoor_temperature_sensor",
+                         "summer_cutoff_temperature", "summer_resume_temperature"}
+                        .issubset(self.sections["summer_section"]["input"]))
+        self.assertFalse(self.inputs["summer_enabled"]["default"])
+        self.assertEqual(self.inputs["apartment_presence_hold_minutes"]["default"], 120)
         self.assertEqual(set(self.sections["vacation_section"]["input"]),
                          {"vacation_switch", "vacation_strategy"})
         self.assertNotIn("thermostat_section", self.sections)
@@ -126,7 +138,7 @@ class HeatingMultiZoneTests(unittest.TestCase):
             return states.get(key) == value
         base = dict(is_state=is_state, windows_open_long=False, vacation_active=False,
                     party_active=False, anybody_home=True, guest_active=False,
-                    room_schedule="", room_motion="", unscheduled_value="comfort")
+                    room_schedule="", unscheduled_value="comfort")
         def result(**kwargs):
             return tmpl.render(**(base | kwargs)).strip()
         self.assertEqual(result(), "comfort")
@@ -135,12 +147,81 @@ class HeatingMultiZoneTests(unittest.TestCase):
         self.assertEqual(result(anybody_home=False), "eco")
         self.assertEqual(result(anybody_home=False, guest_active=True), "comfort")
         self.assertEqual(result(room_schedule="schedule.test"), "eco")
-        self.assertEqual(result(room_motion="binary_sensor.test"), "eco")
         states["schedule.test"] = "on"
-        states["binary_sensor.test"] = "on"
-        self.assertEqual(result(room_schedule="schedule.test",
-                                room_motion="binary_sensor.test"), "comfort")
+        self.assertEqual(result(room_schedule="schedule.test"), "comfort")
         self.assertEqual(result(unscheduled_value="eco"), "eco")
+
+
+    def test_apartment_occupancy_hold_and_trackers(self):
+        tmpl = self.env.from_string(find_variable(self.data["actions"], "anybody_home"))
+        state_map = {}
+        def expand(entities):
+            return [state_map[e] for e in entities if e in state_map]
+        base = dict(people_ids=[], apartment_presence_ids=[],
+                    apartment_hold_minutes=120, expand=expand,
+                    now=lambda: 10000, as_timestamp=lambda v, default=0: float(v))
+        def result(**kwargs):
+            return tmpl.render(**(base | kwargs)).strip()
+        self.assertEqual(result(), "True")  # no sources means no automatic away setback
+        base["people_ids"] = ["person.a"]
+        state_map["person.a"] = SimpleNamespace(state="not_home", last_changed=8000)
+        self.assertEqual(result(), "False")
+        state_map["person.a"] = SimpleNamespace(state="home", last_changed=8000)
+        self.assertEqual(result(), "True")
+        state_map["person.a"] = SimpleNamespace(state="not_home", last_changed=8000)
+        base["apartment_presence_ids"] = ["binary_sensor.hall", "binary_sensor.living"]
+        state_map["binary_sensor.hall"] = SimpleNamespace(state="off", last_changed=9500)
+        state_map["binary_sensor.living"] = SimpleNamespace(state="off", last_changed=1000)
+        self.assertEqual(result(), "True")  # last off 500 seconds ago
+        state_map["binary_sensor.hall"] = SimpleNamespace(state="off", last_changed=1000)
+        self.assertEqual(result(), "False")
+        state_map["binary_sensor.hall"] = SimpleNamespace(state="on", last_changed=1000)
+        self.assertEqual(result(), "True")
+        state_map["binary_sensor.hall"] = SimpleNamespace(state="unavailable", last_changed=9999)
+        self.assertEqual(result(), "False")
+        state_map["binary_sensor.hall"] = SimpleNamespace(state="off", last_changed=9500)
+        self.assertEqual(result(apartment_hold_minutes=0), "False")
+
+    def test_window_seconds_and_minute_migration(self):
+        tmpl = self.env.from_string(find_variable(self.data["actions"], "room_window_seconds"))
+        self.assertEqual(float(tmpl.render(room={"window_delay": 2}).strip()), 120)
+        self.assertEqual(float(tmpl.render(room={"window_delay": 2, "window_open_seconds": 30}).strip()), 30)
+        self.assertEqual(float(tmpl.render(room={"window_open_seconds": 90}).strip()), 90)
+        self.assertEqual(float(tmpl.render(room={}).strip()), 0)
+        self.assertIn(">= (room_window_seconds | float(0))", self.text)
+        self.assertNotIn("room_window_delay * 60", self.text)
+
+    def test_summer_cutoff_and_hysteresis(self):
+        tmpl = self.env.from_string(find_variable(self.data["actions"], "summer_active_for_trv"))
+        outdoor = {"sensor.outdoor": "21"}
+        state = {"climate.test": "heat"}
+        targets = {"climate.test": 21}
+        ctx = dict(
+            states=lambda e: outdoor.get(e, "unknown"),
+            state_attr=lambda e, a: targets.get(e) if a == "temperature" else None,
+            is_state=lambda e, v: state.get(e) == v,
+            is_number=lambda x: str(x).replace(".", "", 1).replace("-", "", 1).isdigit(),
+            outdoor_sensor_id="sensor.outdoor", summer_enabled_value=True,
+            summer_start_temperature=20, summer_resume_temperature=17,
+            thermostat="climate.test", room_frost=7, desired_profile="comfort")
+        def result(**updates):
+            return tmpl.render(**(ctx | updates)).strip()
+        self.assertEqual(result(), "True")
+        outdoor["sensor.outdoor"] = "18"
+        self.assertEqual(result(), "False")  # warm band: heating stays enabled
+        state["climate.test"] = "off"
+        self.assertEqual(result(), "True")  # warm band: previously off stays off
+        state["climate.test"] = "heat"
+        targets["climate.test"] = 7
+        self.assertEqual(result(), "True")  # frost-only target maintains summer
+        outdoor["sensor.outdoor"] = "16.9"
+        self.assertEqual(result(), "False")  # cold: resume normal heating
+        outdoor["sensor.outdoor"] = "22"
+        self.assertEqual(result(desired_profile="window"), "False")  # window priority
+        self.assertEqual(result(summer_enabled_value=False), "False")
+        self.assertEqual(result(summer_start_temperature=16), "False")  # invalid threshold order
+        outdoor["sensor.outdoor"] = "unavailable"
+        self.assertEqual(result(), "False")
 
     def test_frost_protection_when_off_is_requested(self):
         tmpl = self.env.from_string(find_variable(self.data["actions"], "frost_needed"))
