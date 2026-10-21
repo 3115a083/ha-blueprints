@@ -223,6 +223,17 @@ class HeatingMultiZoneTests(unittest.TestCase):
         outdoor["sensor.outdoor"] = "unavailable"
         self.assertEqual(result(), "False")
 
+    def test_summer_off_fallback_never_selects_auto_cooling(self):
+        tmpl = self.env.from_string(find_variable(self.data["actions"], "proposed_mode"))
+        def result(modes, desired_off=True, frost_needed=True, preferred="auto"):
+            return tmpl.render(desired_off=desired_off, frost_needed=frost_needed,
+                               supported_modes=modes, room_hvac_mode=preferred).strip()
+        self.assertEqual(result(["heat", "auto"]), "heat")
+        self.assertEqual(result(["auto"]), "unsupported")
+        self.assertEqual(result(["off", "auto"]), "unsupported")
+        self.assertEqual(result(["off", "heat"], frost_needed=False), "off")
+        self.assertEqual(result(["heat", "auto"], desired_off=False), "auto")
+
     def test_frost_protection_when_off_is_requested(self):
         tmpl = self.env.from_string(find_variable(self.data["actions"], "frost_needed"))
         def result(temp):
