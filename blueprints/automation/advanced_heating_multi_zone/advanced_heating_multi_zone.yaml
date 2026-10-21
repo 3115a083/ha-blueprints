@@ -653,9 +653,11 @@ actions:
                               - variables:
                                   manual_detected: >-
                                     {{ tracking_ready and tracker_ok and tracker_phase == 'confirmed'
-                                       and as_timestamp(now()) - tracker_written > 90
                                        and desired_profile != 'window' and not summer_active_for_trv
                                        and current_room_temp | float(999) > room_frost + 0.5
+                                       and (states(thermostat) == 'off' or
+                                            (state_attr(thermostat, 'temperature') is not none and
+                                             state_attr(thermostat, 'temperature') | float(0) >= room_frost))
                                        and (states(thermostat) != tracker_mode or
                                          (states(thermostat) != 'off' and
                                           state_attr(thermostat, 'temperature') is not none and
