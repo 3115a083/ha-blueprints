@@ -90,6 +90,7 @@ The blueprint's canonical `source_url` points to the same `main` YAML file. If y
 ## Safety, testing and migration
 
 - Start with Preview mode and test under one room with a safe thermostat. Review the target and HVAC mode in the trace before activating physical heating writes.
+- In a test installation, exercise Comfort, Eco, vacation ON/OFF, window-open protection, unavailable window/schedule sensors, an independently paused room, and a Home Assistant restart. Check that a broken room does not stop the remaining zones.
 - Presence trackers and window contacts can be wrong or unavailable. Review heating fallback behaviour in your own environment, including freezing conditions and Home Assistant restarts.
 - OFF is opt-in because it can stop heat. Selecting an OFF policy without a valid temperature measurement falls back to frost heating.
 - No access to the user's Home Assistant hardware or room configuration was available during development. Repository CI tests check code and schema, **not physical thermostat behaviour**.
