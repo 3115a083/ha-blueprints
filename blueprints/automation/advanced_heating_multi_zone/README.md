@@ -52,7 +52,7 @@ Summer mode is optional and disabled by default. Enable it only with a valid out
 | Stop normal heating at or above | 20 °C outside |
 | Resume normal heating below | 17 °C outside |
 
-At or above 20 °C, a thermostat capable of HVAC OFF is turned off when the room is safely warmer than its frost minimum; otherwise it uses frost-only heating. Between 17 °C and 20 °C, each thermostat **keeps its prior OFF or frost-only state**, using its HVAC mode/setpoint as a simple hysteresis memory. Below 17 °C normal heating resumes. Configure the resume threshold lower than the cutoff.
+At or above 20 °C, a thermostat capable of HVAC OFF is turned off when the room is safely warmer than its frost minimum; otherwise it uses frost-only heating **if it supports HEAT mode**. Thermostats supporting only AUTO and no safe HEAT mode are skipped for this OFF/frost operation, since setting a low AUTO target might activate cooling. Between 17 °C and 20 °C, each thermostat **keeps its prior OFF or frost-only state**, using its HVAC mode/setpoint as a simple hysteresis memory. Below 17 °C normal heating resumes. Configure the resume threshold lower than the cutoff.
 
 A missing, unavailable or nonnumeric outdoor reading means normal rules apply rather than falsely assuming summer. If room temperature is unknown or near the frost minimum, a safe OFF request becomes frost heating instead. Window protection takes precedence over summer. Summer suppresses normal, party and vacation heating when it applies.
 
