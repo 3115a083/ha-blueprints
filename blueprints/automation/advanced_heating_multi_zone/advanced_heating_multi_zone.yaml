@@ -571,6 +571,10 @@ actions:
                                   proposed_mode: >-
                                     {% if desired_off and not frost_needed and 'off' in supported_modes %}
                                       off
+                                    {% elif desired_off and 'heat' in supported_modes %}
+                                      heat
+                                    {% elif desired_off %}
+                                      unsupported
                                     {% elif room_hvac_mode in supported_modes %}
                                       {{ room_hvac_mode }}
                                     {% elif 'heat' in supported_modes %}
