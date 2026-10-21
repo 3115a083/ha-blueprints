@@ -93,7 +93,6 @@ blueprint:
                         - domain: binary_sensor
                 window_open_seconds:
                   label: "Window must remain open for (seconds)"
-                  description: "Optional. Leave empty for immediate response. Old minute values are read as a backward-compatible fallback."
                   required: false
                   selector:
                     number:
