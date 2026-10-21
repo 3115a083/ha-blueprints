@@ -97,7 +97,7 @@ class HeatingMultiZoneTests(unittest.TestCase):
         required = {"name", "thermostats", "temperature_sensor", "windows", "window_open_seconds",
                     "window_strategy", "schedule", "comfort_temperature",
                     "eco_temperature", "vacation_temperature", "frost_temperature",
-                    "hvac_mode", "pause_entity", "calibrate_generic"}
+                    "hvac_mode", "pause_entity", "calibrate_generic", "manual_override_state_helper"}
         self.assertTrue(required.issubset(fields))
         self.assertNotIn("motion", fields)
         self.assertNotIn("window_delay", fields)
@@ -105,11 +105,17 @@ class HeatingMultiZoneTests(unittest.TestCase):
         self.assertEqual(fields["window_open_seconds"]["selector"]["number"]["max"], 7200)
         self.assertTrue({"people", "apartment_presence_sensors", "apartment_presence_hold_minutes",
                          "guest_entity", "party_entity", "after_change_actions",
-                         "safety_conditions"}.issubset(self.sections["general_section"]["input"]))
+                         "safety_conditions", "manual_override_minutes"}.issubset(self.sections["general_section"]["input"]))
         self.assertTrue({"summer_enabled", "outdoor_temperature_sensor",
                          "summer_cutoff_temperature", "summer_resume_temperature"}
                         .issubset(self.sections["summer_section"]["input"]))
         self.assertFalse(self.inputs["summer_enabled"]["default"])
+        self.assertEqual(self.inputs["manual_override_minutes"]["default"], 0)
+        self.assertFalse(self.inputs["fault_notifications"]["default"])
+        self.assertEqual(self.inputs["command_verify_seconds"]["default"], 15)
+        self.assertEqual(
+            fields["manual_override_state_helper"]["selector"]["entity"]["filter"],
+            [{"domain": "input_text"}])
         self.assertEqual(self.inputs["apartment_presence_hold_minutes"]["default"], 120)
         self.assertEqual(set(self.sections["vacation_section"]["input"]),
                          {"vacation_switch", "vacation_strategy"})
@@ -249,6 +255,62 @@ class HeatingMultiZoneTests(unittest.TestCase):
         self.assertEqual(result(["off", "auto"]), "unsupported")
         self.assertEqual(result(["off", "heat"], frost_needed=False), "off")
         self.assertEqual(result(["heat", "auto"], desired_off=False), "auto")
+
+    def test_manual_adjustment_detection_and_time_bound(self):
+        tmpl = self.env.from_string(find_variable(self.data["actions"], "manual_detected"))
+        base = dict(tracking_ready=True, tracker_ok=True, tracker_phase="confirmed",
+                    tracker_written=1000, desired_profile="vacation",
+                    summer_active_for_trv=False, current_room_temp=19.0, room_frost=7,
+                    now=lambda: 2000, as_timestamp=lambda x: x,
+                    thermostat="climate.bedroom", tracker_mode="heat", tracker_temp=14,
+                    states=lambda e: "heat", state_attr=lambda e, a: 18)
+        def result(**kw):
+            return tmpl.render(**(base | kw)).strip()
+        self.assertEqual(result(), "True")  # the thermostat dial was changed
+        self.assertEqual(result(tracker_written=1950), "False")  # suppress slow self-echo
+        self.assertEqual(result(tracker_phase="pending"), "False")
+        self.assertEqual(result(tracking_ready=False), "False")
+        self.assertEqual(result(desired_profile="window"), "False")
+        self.assertEqual(result(summer_active_for_trv=True), "False")
+        self.assertEqual(result(current_room_temp=7.2), "False")
+        self.assertEqual(result(state_attr=lambda e, a: 14), "False")
+
+        hold = self.env.from_string(find_variable(self.data["actions"], "manual_override_active"))
+        hold_base = dict(tracking_ready=True, desired_profile="vacation",
+                         summer_active_for_trv=False, current_room_temp=19, room_frost=7,
+                         manual_detected=False, tracker_phase="manual", tracker_until=2200,
+                         now=lambda: 2000, as_timestamp=lambda x: x)
+        def hold_result(**kw):
+            return hold.render(**(hold_base | kw)).strip()
+        self.assertEqual(hold_result(), "True")
+        self.assertEqual(hold_result(tracker_until=1999), "False")
+        self.assertEqual(hold_result(desired_profile="window"), "False")
+        self.assertEqual(hold_result(summer_active_for_trv=True), "False")
+        self.assertEqual(hold_result(current_room_temp=7.1), "False")
+
+    def test_notifications_and_verification_require_confirmation(self):
+        steps = list(self._walk(self.data["actions"]))
+        notifications = [x for x in steps if x.get("action") == "persistent_notification.create"]
+        self.assertGreaterEqual(len(notifications), 3)
+        self.assertTrue(all("notification_id" in x["data"] for x in notifications))
+        services = [x for x in steps if x.get("action", "").startswith("climate.")]
+        self.assertEqual({x["action"] for x in services},
+                         {"climate.set_temperature", "climate.set_hvac_mode"})
+        self.assertTrue(all(x.get("continue_on_error") for x in services))
+        self.assertEqual(len([x for x in steps if "wait_template" in x]), 1)
+        self.assertIn("wait.completed", self.text)
+        self.assertIn("then: !input after_change_actions", self.text)
+        self.assertIn("value_template: \"{{ wait.completed }}\"", self.text)
+
+    @staticmethod
+    def _walk(node):
+        if isinstance(node, dict):
+            yield node
+            for x in node.values():
+                yield from HeatingMultiZoneTests._walk(x)
+        elif isinstance(node, list):
+            for x in node:
+                yield from HeatingMultiZoneTests._walk(x)
 
     def test_frost_protection_when_off_is_requested(self):
         tmpl = self.env.from_string(find_variable(self.data["actions"], "frost_needed"))
