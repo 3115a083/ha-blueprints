@@ -480,10 +480,10 @@ actions:
                                     {% endif %}
                                   bounded_room_target: "{{ [room_frost, profile_temp | float(room_eco)] | max }}"
                               - if:
-                              - condition: template
+                                  - condition: template
                                     value_template: "{{ proposed_mode != 'unsupported' }}"
-                                    then:
-                              - variables:
+                                then:
+                                  - variables:
                                       adjustment: >-
                                         {% if room_calibrate and room_sensor not in ['', none] and
                                               sensor_temperature | float(999) != 999 and
