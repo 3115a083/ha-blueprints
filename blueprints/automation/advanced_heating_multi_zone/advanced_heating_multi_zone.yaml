@@ -491,7 +491,7 @@ actions:
                     schedule_valid: "{{ room_schedule in ['', none] or has_value(room_schedule) }}"
                 - if:
                     - condition: template
-                      value_template: "{{ not window_unknown and schedule_valid }}"
+                      value_template: "{{ not window_unknown and (vacation_active or schedule_valid) }}"
                   then:
                     - variables:
                         desired_profile: >-

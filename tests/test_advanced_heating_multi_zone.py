@@ -131,6 +131,22 @@ class HeatingMultiZoneTests(unittest.TestCase):
                          {"time_pattern", "homeassistant", "state"})
         self.assertEqual(triggers[0]["minutes"], "/1")
 
+    def test_vacation_works_when_schedule_sensor_is_unavailable(self):
+        """Vacation overrides scheduling even when a schedule is unknown/unavailable."""
+        candidates = [t for t in templates(self.data["actions"])
+                      if "window_unknown" in t and "schedule_valid" in t
+                      and "vacation_active" in t]
+        self.assertEqual(len(candidates), 1)
+        guard = self.env.from_string(candidates[0])
+        def permitted(vacation, schedule, window_unknown=False):
+            return guard.render(vacation_active=vacation, schedule_valid=schedule,
+                                window_unknown=window_unknown).strip() == "True"
+        self.assertTrue(permitted(True, False))
+        self.assertTrue(permitted(True, True))
+        self.assertFalse(permitted(False, False))
+        self.assertTrue(permitted(False, True))
+        self.assertFalse(permitted(True, False, window_unknown=True))
+
     def test_priority_table(self):
         tmpl = self.env.from_string(find_variable(self.data["actions"], "desired_profile"))
         states = {}
