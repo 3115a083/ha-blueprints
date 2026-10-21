@@ -796,6 +796,7 @@ actions:
                                                 value_template: "{{ mode_change }}"
                                             then:
                                               - action: climate.set_hvac_mode
+                                                continue_on_error: true
                                                 target:
                                                   entity_id: "{{ thermostat }}"
                                                 data:
@@ -807,12 +808,49 @@ actions:
                                                 value_template: "{{ temperature_change }}"
                                             then:
                                               - action: climate.set_temperature
+                                                continue_on_error: true
                                                 target:
                                                   entity_id: "{{ thermostat }}"
                                                 data:
                                                   temperature: "{{ new_temperature | float }}"
                                               - delay:
                                                   seconds: "{{ call_delay }}"
+                                          - wait_template: >-
+                                              {{ has_value(thermostat) and
+                                                 is_state(thermostat, proposed_mode) and
+                                                 (proposed_mode == 'off' or
+                                                  (state_attr(thermostat, 'temperature') is not none and
+                                                   ((state_attr(thermostat, 'temperature') | float(999) -
+                                                     new_temperature | float) | abs) < 0.4)) }}
+                                            timeout:
+                                              seconds: "{{ verify_seconds }}"
+                                            continue_on_timeout: true
+                                          - if:
+                                              - condition: template
+                                                value_template: "{{ tracking_ready and wait.completed }}"
+                                            then:
+                                              - action: input_text.set_value
+                                                target:
+                                                  entity_id: "{{ room_manual_helper }}"
+                                                data:
+                                                  value: >-
+                                                    {{ proposed_mode }}|{{ new_temperature }}|{{ as_timestamp(now()) | int }}|0|confirmed
+                                          - if:
+                                              - condition: template
+                                                value_template: "{{ notify_enabled and not wait.completed }}"
+                                            then:
+                                              - action: persistent_notification.create
+                                                data:
+                                                  title: "Heating: thermostat did not accept target"
+                                                  notification_id: "{{ 'ahc_target_' ~ (thermostat | replace('.', '_')) }}"
+                                                  message: >-
+                                                    {{ room_name }} / {{ thermostat }} did not report the requested
+                                                    {{ proposed_mode }} HVAC mode and {{ new_temperature }} °C
+                                                    target within {{ verify_seconds }} seconds.
+                                                    Current mode: {{ states(thermostat) }};
+                                                    current target: {{ state_attr(thermostat, 'temperature') }}.
+                                                    Check thermostat connectivity, supported setpoints and
+                                                    competing automations.
                                           - if:
                                               - condition: template
                                                 value_template: "{{ log_changes_value }}"
@@ -822,13 +860,30 @@ actions:
                                                   logger: blueprints.advanced_heating_multi_zone
                                                   level: info
                                                   message: >-
-                                                    Updated {{ room_name }} ({{ thermostat }}):
+                                                    {{ 'Confirmed' if wait.completed else 'Unconfirmed' }} {{ room_name }} ({{ thermostat }}):
                                                     {{ effective_profile }} / {{ proposed_mode }} /
                                                     {{ new_temperature }} °C
                                           - if:
                                               - condition: template
-                                                value_template: "{{ true }}"
+                                                value_template: "{{ wait.completed }}"
                                             then: !input after_change_actions
+
+                            else:
+                              - if:
+                                  - condition: template
+                                    value_template: >-
+                                      {{ notify_enabled and thermostat is string and
+                                         thermostat.startswith('climate.') and
+                                         (trigger.id == 'home_assistant_start' or now().minute % 30 == 0) }}
+                                then:
+                                  - action: persistent_notification.create
+                                    data:
+                                      title: "Heating: thermostat unavailable"
+                                      notification_id: "{{ 'ahc_unavailable_' ~ (thermostat | replace('.', '_')) }}"
+                                      message: >-
+                                        {{ room_name }}: {{ thermostat }} is unavailable or unknown.
+                                        No heating command was sent. Check the
+                                        thermostat integration and connectivity.
 
 mode: single
 max_exceeded: silent
