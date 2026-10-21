@@ -69,7 +69,7 @@ A missing, unavailable or nonnumeric outdoor reading means normal rules apply ra
 | 7 | Room schedule ON | Comfort in that room |
 | 8 | No room schedule | Global unscheduled Comfort/Eco setting |
 
-Window, room schedule or climate entities that are unavailable are handled conservatively, and an invalid room does not stop the other rooms. The global enable switch pauses writes, not climate operation. Vacation helper unavailability also pauses writes. Heating updates run every minute, on startup, and on vacation switch change.
+Unknown window contacts still block writes for their room; unavailable thermostats are skipped. **Vacation setback does not require a valid room schedule**, because vacation overrides schedules. During normal heating, an unavailable schedule still prevents that room's commands. An invalid room does not stop other rooms. The global enable switch pauses writes, not climate operation. Vacation helper unavailability also pauses writes. Heating updates run every minute, on startup, and on vacation switch change.
 
 The frost temperature is the minimum requested heating setpoint, subject to each physical thermostat's supported range. No hardware response is guaranteed solely because a Home Assistant service call succeeds.
 
@@ -82,6 +82,12 @@ The frost temperature is the minimum requested heating setpoint, subject to each
 | Office | climate.office | schedule.office | 21 | 16 | 12 | 7 |
 
 In General controls you could select `person.resident` plus `binary_sensor.hall_motion` and `binary_sensor.living_presence`, with a 120-minute hold. These are illustrative entity IDs, not defaults in the blueprint.
+
+## Troubleshooting: vacation targets do not change
+
+If Vacation mode is ON with **Setback**, each room normally requests its configured vacation target (14 °C by default), not its Comfort setpoint. Check the climate entity's **target temperature** (`temperature`) separately from its **current measured temperature** (`current_temperature`): a measured room temperature can stay near 19 °C for hours after the target was lowered.
+
+In an automation trace, check `vacation_valid`, `vacation_active`, `window_unknown`, `schedule_valid`, `desired_profile`, `effective_profile`, `proposed_mode`, `new_temperature` and `temperature_change`. Vacation now intentionally overrides unavailable schedules, but not unavailable window contacts. Verify that **Preview only** is OFF, the global enable input is not OFF, and the automation actually runs. With automatic Summer mode ON, warm outdoor temperatures may intentionally choose OFF/frost rather than 14 °C. Other thermostats or automations can overwrite requested targets, so compare the climate entity history with the trace. A change to this repository does not automatically update an already imported local blueprint.
 
 ## Safety and migration checks
 
