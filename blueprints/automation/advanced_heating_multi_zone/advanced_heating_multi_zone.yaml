@@ -512,9 +512,6 @@ actions:
                             {{ unscheduled_value }}
                           {% endif %}
                     - variables:
-                        desired_off: >-
-                          {{ (desired_profile == 'window' and room_window_strategy == 'off')
-                             or (desired_profile == 'vacation' and vacation_strategy_value == 'off') }}
                         profile_temp: >-
                           {% if desired_profile == 'window' %}
                             {{ room_frost }}
@@ -551,6 +548,23 @@ actions:
                                   sensor_temperature: "{{ states(room_sensor) | float(999) if room_sensor not in ['', none] else 999 }}"
                                   thermostat_temperature: "{{ state_attr(thermostat, 'current_temperature') | float(999) }}"
                               - variables:
+                                  summer_active_for_trv: >-
+                                    {% set outdoor = states(outdoor_sensor_id) if outdoor_sensor_id not in ['', none] else 'unknown' %}
+                                    {% set outdoor_c = outdoor | float(999) %}
+                                    {% set target = state_attr(thermostat, 'temperature') %}
+                                    {% set held_back = is_state(thermostat, 'off') or
+                                      (target is not none and (target | float(999) - room_frost | float) | abs < 0.2) %}
+                                    {{ summer_enabled_value and is_number(outdoor) and
+                                       summer_start_temperature | float(20) > summer_resume_temperature | float(17) and
+                                       desired_profile != 'window' and
+                                       (outdoor_c >= summer_start_temperature | float(20) or
+                                        (outdoor_c > summer_resume_temperature | float(17) and held_back)) }}
+                              - variables:
+                                  desired_off: >-
+                                    {{ summer_active_for_trv or
+                                       (desired_profile == 'window' and room_window_strategy == 'off') or
+                                       (desired_profile == 'vacation' and vacation_strategy_value == 'off') }}
+                                  effective_profile: "{{ 'summer' if summer_active_for_trv else desired_profile }}"
                                   frost_needed: >-
                                     {{ desired_off and
                                        (current_room_temp | float(999) == 999 or
@@ -567,7 +581,8 @@ actions:
                                     {% else %}
                                       unsupported
                                     {% endif %}
-                                  bounded_room_target: "{{ [room_frost, profile_temp | float(room_eco)] | max }}"
+                                  bounded_room_target: >-
+                                    {{ room_frost if desired_off else [room_frost, profile_temp | float(room_eco)] | max }}
                               - if:
                                   - condition: template
                                     value_template: "{{ proposed_mode != 'unsupported' }}"
@@ -586,7 +601,7 @@ actions:
                                   - variables:
                                       new_temperature: >-
                                         {% set temp = bounded_room_target | float + adjustment | float %}
-                                        {{ [trv_max, [trv_min, temp] | max] | min | round(1) }}
+                                        {{ [trv_max, [trv_min, room_frost, temp] | max] | min | round(1) }}
                                       mode_change: "{{ states(thermostat) != proposed_mode }}"
                                       temperature_change: >-
                                         {{ proposed_mode != 'off' and
@@ -612,7 +627,7 @@ actions:
                                                       level: info
                                                       message: >-
                                                         Preview {{ room_name }} ({{ thermostat }}):
-                                                        {{ desired_profile }} / {{ proposed_mode }} /
+                                                        {{ effective_profile }} / {{ proposed_mode }} /
                                                         {{ new_temperature }} °C
                                         default:
                                           - if:
@@ -647,7 +662,7 @@ actions:
                                                   level: info
                                                   message: >-
                                                     Updated {{ room_name }} ({{ thermostat }}):
-                                                    {{ desired_profile }} / {{ proposed_mode }} /
+                                                    {{ effective_profile }} / {{ proposed_mode }} /
                                                     {{ new_temperature }} °C
                                           - if:
                                               - condition: template
