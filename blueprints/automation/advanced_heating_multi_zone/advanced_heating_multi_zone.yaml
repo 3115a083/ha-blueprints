@@ -4,10 +4,11 @@ blueprint:
   description: >-
     Control any number of independent heating zones with one automation.
     Configure thermostats, room sensors, windows, schedules and temperatures
-    together under Räume (Rooms). Shared occupancy, guest and party controls
-    apply to all zones. A dedicated vacation helper takes precedence over
-    ordinary scheduling, presence and party mode. Window protection and frost
-    protection still take precedence over the vacation setpoint.
+    together under Rooms. Shared people trackers and apartment-wide presence
+    sensors determine occupancy, with a configurable activity hold period.
+    Room motion does not directly change room heating. Summer cutoff reduces
+    heating when it is warm outdoors. Vacation overrides normal schedules,
+    party and presence; window and frost protection remain in force.
 
     Based on the awesome blueprint by panhans:
     https://community.home-assistant.io/t/advanced-heating-control/469873
@@ -23,7 +24,7 @@ blueprint:
   source_url: https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/advanced_heating_multi_zone/advanced_heating_multi_zone.yaml
   input:
     rooms_section:
-      name: "🏠 01 | Räume"
+      name: "🏠 01 | Rooms"
       icon: mdi:home-thermometer-outline
       description: >-
         Add one entry per heating zone. Each room owns its thermostat(s),
@@ -90,16 +91,17 @@ blueprint:
                       multiple: true
                       filter:
                         - domain: binary_sensor
-                window_delay:
-                  label: "Window must stay open for (minutes)"
-                  default: 0
+                window_open_seconds:
+                  label: "Window must remain open for (seconds)"
+                  description: "Optional. Leave empty for immediate response. Old minute values are read as a backward-compatible fallback."
+                  required: false
                   selector:
                     number:
                       min: 0
-                      max: 120
+                      max: 7200
                       step: 1
                       mode: box
-                      unit_of_measurement: min
+                      unit_of_measurement: s
                 window_strategy:
                   label: "When a window is open"
                   default: frost
@@ -118,13 +120,6 @@ blueprint:
                       filter:
                         - domain: schedule
                         - domain: input_boolean
-                        - domain: binary_sensor
-                motion:
-                  label: "Optional room occupancy sensor (ON = occupied)"
-                  required: false
-                  selector:
-                    entity:
-                      filter:
                         - domain: binary_sensor
                 comfort_temperature:
                   label: "Comfort temperature"
@@ -180,8 +175,9 @@ blueprint:
       name: "⚙️ 02 | General controls and actions"
       icon: mdi:tune-variant
       description: >-
-        These settings apply to all rooms. Windows, sensors, individual
-        schedules and temperatures are configured exclusively under Räume.
+        These settings apply to the entire apartment. Presence and people
+        trackers are apartment-wide. Individual room sensors, windows,
+        schedules and temperatures are configured exclusively under Rooms.
       input:
         enable_entity:
           name: "Optional global enable switch (OFF = pause all writes)"
@@ -194,10 +190,11 @@ blueprint:
         people:
           name: "People / trackers at home (optional)"
           description: >-
-            When any selected person or tracker is home, normal room rules
-            apply. When all are away, every room uses Eco unless guest mode
-            is active. With no entries, absence does not affect heating.
-            Unknown/unavailable person states never count as home.
+            Any home person keeps normal schedules active. If all selected
+            people are away, apartment presence sensors can still mark the
+            apartment as occupied for a configurable hold time. Only after
+            all evidence expires does the apartment use Eco. If neither
+            people nor apartment sensors are set, occupancy cannot force Eco.
           default: []
           selector:
             entity:
@@ -205,6 +202,34 @@ blueprint:
               filter:
                 - domain: person
                 - domain: device_tracker
+        apartment_presence_sensors:
+          name: "Apartment presence sensors (optional; select multiple)"
+          description: >-
+            Combine motion, occupancy or presence binary sensors from anywhere
+            in the apartment. ON marks the whole apartment occupied; an OFF
+            sensor preserves occupancy for the hold period after its last
+            activation. No room's setpoint changes on individual room entry.
+            Unknown/unavailable sensor states do not count as occupancy.
+          default: []
+          selector:
+            entity:
+              multiple: true
+              filter:
+                - domain: binary_sensor
+        apartment_presence_hold_minutes:
+          name: "Keep apartment occupied after last activity (minutes)"
+          description: >-
+            After the last apartment presence sensor goes OFF, keep normal
+            room schedules active for this long, even if all tracked people
+            are away. Prefer sustained occupancy detection over PIR alone.
+          default: 120
+          selector:
+            number:
+              min: 0
+              max: 1440
+              step: 1
+              mode: box
+              unit_of_measurement: min
         guest_entity:
           name: "Optional guest mode (ON = do not lower heat due to nobody home)"
           default: ""
@@ -222,7 +247,7 @@ blueprint:
                 - domain: input_boolean
                 - domain: binary_sensor
         unscheduled_mode:
-          name: "Room without schedule or motion sensor"
+          name: "Room without a schedule"
           default: comfort
           selector:
             select:
@@ -258,8 +283,55 @@ blueprint:
           default: []
           selector:
             action: {}
+    summer_section:
+      name: "☀️ 03 | Summer mode"
+      icon: mdi:weather-sunny
+      description: >-
+        Automatically suppress unnecessary heating at high outdoor
+        temperatures. A lower restart threshold prevents short cycles.
+        Each thermostat maintains its own hysteresis via its current
+        HVAC mode or frost-only setpoint. Without a valid outdoor reading,
+        ordinary heating rules apply. Window and frost protection still apply.
+      input:
+        summer_enabled:
+          name: "Enable automatic summer heating cutoff"
+          description: "Disabled by default; requires an outdoor temperature sensor."
+          default: false
+          selector:
+            boolean: {}
+        outdoor_temperature_sensor:
+          name: "Outdoor temperature sensor"
+          default: ""
+          selector:
+            entity:
+              filter:
+                - domain: sensor
+                  device_class: temperature
+        summer_cutoff_temperature:
+          name: "Stop normal heating at or above this outdoor temperature (°C)"
+          default: 20
+          selector:
+            number:
+              min: 0
+              max: 40
+              step: 0.5
+              mode: box
+              unit_of_measurement: "°C"
+        summer_resume_temperature:
+          name: "Resume normal heating below this outdoor temperature (°C)"
+          description: >-
+            Set this lower than the cutoff. With the default values,
+            summer suppression begins at 20 °C and stops at 17 °C.
+          default: 17
+          selector:
+            number:
+              min: -10
+              max: 39
+              step: 0.5
+              mode: box
+              unit_of_measurement: "°C"
     vacation_section:
-      name: "🏖️ 03 | Vacation mode"
+      name: "🏖️ 04 | Vacation mode"
       icon: mdi:beach
       description: >-
         Vacation is independent of normal home/away and holiday schedules.
@@ -290,7 +362,7 @@ blueprint:
                 - label: "Off: only when safe and supported, otherwise frost protection"
                   value: "off"
     diagnostics_section:
-      name: "🩺 04 | Preview and diagnostics"
+      name: "🩺 05 | Preview and diagnostics"
       icon: mdi:shield-search
       collapsed: true
       input:
@@ -317,6 +389,12 @@ variables:
   vacation_strategy_value: !input vacation_strategy
   enable_id: !input enable_entity
   people_ids: !input people
+  apartment_presence_ids: !input apartment_presence_sensors
+  apartment_hold_minutes: !input apartment_presence_hold_minutes
+  summer_enabled_value: !input summer_enabled
+  outdoor_sensor_id: !input outdoor_temperature_sensor
+  summer_start_temperature: !input summer_cutoff_temperature
+  summer_resume_temperature: !input summer_resume_temperature
   guest_id: !input guest_entity
   party_id: !input party_entity
   unscheduled_value: !input unscheduled_mode
