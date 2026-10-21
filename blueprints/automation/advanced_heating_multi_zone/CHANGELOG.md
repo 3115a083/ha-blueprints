@@ -1,5 +1,12 @@
 # Release notes
 
+## v0.2.1, vacation schedule availability fix (2026-10-21)
+
+- **Vacation mode no longer depends on room schedule availability.** An unknown or unavailable room schedule cannot prevent a valid Vacation setback from sending commands. This fixes one possible cause of unchanged thermostat setpoints during vacation.
+- **Window sensor safety unchanged.** Unknown or unavailable room window sensors continue to prevent heating writes for that room until their status is reliable.
+- Added regression coverage for vacation precedence, invalid schedules, and window sensor protection.
+- Documentation distinguishes thermostat targets from current room temperatures and lists relevant Home Assistant trace variables for diagnosis.
+
 ## v0.2.0, apartment occupancy and automatic summer cutoff (2026-10-21)
 
 ### Improvements
