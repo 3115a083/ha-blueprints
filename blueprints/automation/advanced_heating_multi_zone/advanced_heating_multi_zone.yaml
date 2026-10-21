@@ -1,0 +1,569 @@
+blueprint:
+  name: "🔥 Advanced Heating Control | Multi-Zone"
+  author: "3115a083"
+  description: >-
+    Control any number of independent heating zones with one automation.
+    Configure thermostats, room sensors, windows, schedules and temperatures
+    together under Räume (Rooms). Shared occupancy, guest and party controls
+    apply to all zones. A dedicated vacation helper takes precedence over
+    ordinary scheduling, presence and party mode. Window protection and frost
+    protection still take precedence over the vacation setpoint.
+
+    Based on the awesome blueprint by panhans:
+    https://community.home-assistant.io/t/advanced-heating-control/469873
+
+    This is a focused, independently implemented multi-zone variant, not a
+    feature-complete replacement for Advanced Heating Control V5. Please read
+    the included README before migrating an existing automation.
+
+    Start in preview mode. Heating commands affect physical devices.
+  domain: automation
+  homeassistant:
+    min_version: "2026.10.1"
+  source_url: https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/advanced_heating_multi_zone/advanced_heating_multi_zone.yaml
+  input:
+    rooms_section:
+      name: "🏠 01 | Räume"
+      icon: mdi:home-thermometer-outline
+      description: >-
+        Add one entry per heating zone. Each room owns its thermostat(s),
+        sensor, schedule, window contacts and setpoints. No room-specific
+        setting needs to be configured elsewhere. A thermostat may only
+        belong to one room in this automation.
+      input:
+        room_entries:
+          name: "Rooms / heating zones (add as many as needed)"
+          description: >-
+            Click Add to configure each room. Thermostats must support
+            heat or auto. Select the same climate entity only once across rooms.
+            No YAML editing is needed for room settings.
+          default: []
+          selector:
+            object:
+              multiple: true
+              label_field: name
+              fields:
+                name:
+                  label: "Room name"
+                  required: true
+                  selector:
+                    text: {}
+                thermostats:
+                  label: "Thermostats / climates in this room"
+                  required: true
+                  selector:
+                    entity:
+                      multiple: true
+                      filter:
+                        - domain: climate
+                enabled:
+                  label: "Enable this room"
+                  default: true
+                  selector:
+                    boolean: {}
+                pause_entity:
+                  label: "Optional manual room pause switch (ON means pause)"
+                  required: false
+                  selector:
+                    entity:
+                      filter:
+                        - domain: input_boolean
+                        - domain: binary_sensor
+                temperature_sensor:
+                  label: "Optional external room temperature sensor"
+                  required: false
+                  selector:
+                    entity:
+                      filter:
+                        - domain: sensor
+                          device_class: temperature
+                calibrate_generic:
+                  label: "Adjust thermostat target using external temperature sensor (generic)"
+                  default: false
+                  selector:
+                    boolean: {}
+                windows:
+                  label: "Window and door contacts (optional)"
+                  default: []
+                  selector:
+                    entity:
+                      multiple: true
+                      filter:
+                        - domain: binary_sensor
+                window_delay:
+                  label: "Window must stay open for (minutes)"
+                  default: 0
+                  selector:
+                    number:
+                      min: 0
+                      max: 120
+                      step: 1
+                      mode: box
+                      unit_of_measurement: min
+                window_strategy:
+                  label: "When a window is open"
+                  default: frost
+                  selector:
+                    select:
+                      options:
+                        - label: "Set frost-protection temperature"
+                          value: frost
+                        - label: "Turn off if safe and supported, otherwise frost protection"
+                          value: "off"
+                schedule:
+                  label: "Optional room schedule / binary helper (ON = comfort)"
+                  required: false
+                  selector:
+                    entity:
+                      filter:
+                        - domain: schedule
+                        - domain: input_boolean
+                        - domain: binary_sensor
+                motion:
+                  label: "Optional room occupancy sensor (ON = occupied)"
+                  required: false
+                  selector:
+                    entity:
+                      filter:
+                        - domain: binary_sensor
+                comfort_temperature:
+                  label: "Comfort temperature"
+                  default: 21
+                  selector:
+                    number:
+                      min: 5
+                      max: 35
+                      step: 0.5
+                      unit_of_measurement: "°C"
+                      mode: box
+                eco_temperature:
+                  label: "Eco / away temperature"
+                  default: 17
+                  selector:
+                    number:
+                      min: 5
+                      max: 35
+                      step: 0.5
+                      unit_of_measurement: "°C"
+                      mode: box
+                vacation_temperature:
+                  label: "Vacation setback temperature (when strategy is Setback)"
+                  default: 14
+                  selector:
+                    number:
+                      min: 5
+                      max: 35
+                      step: 0.5
+                      unit_of_measurement: "°C"
+                      mode: box
+                frost_temperature:
+                  label: "Minimum / frost-protection temperature"
+                  default: 7
+                  selector:
+                    number:
+                      min: 5
+                      max: 20
+                      step: 0.5
+                      unit_of_measurement: "°C"
+                      mode: box
+                hvac_mode:
+                  label: "Normal heating HVAC mode"
+                  default: heat
+                  selector:
+                    select:
+                      options:
+                        - label: "Heat"
+                          value: heat
+                        - label: "Auto (only if supported by your thermostat)"
+                          value: auto
+    general_section:
+      name: "⚙️ 02 | General controls and actions"
+      icon: mdi:tune-variant
+      description: >-
+        These settings apply to all rooms. Windows, sensors, individual
+        schedules and temperatures are configured exclusively under Räume.
+      input:
+        enable_entity:
+          name: "Optional global enable switch (OFF = pause all writes)"
+          default: ""
+          selector:
+            entity:
+              filter:
+                - domain: input_boolean
+                - domain: binary_sensor
+        people:
+          name: "People / trackers at home (optional)"
+          description: >-
+            When any selected person or tracker is home, normal room rules
+            apply. When all are away, every room uses Eco unless guest mode
+            is active. With no entries, absence does not affect heating.
+            Unknown/unavailable person states never count as home.
+          default: []
+          selector:
+            entity:
+              multiple: true
+              filter:
+                - domain: person
+                - domain: device_tracker
+        guest_entity:
+          name: "Optional guest mode (ON = do not lower heat due to nobody home)"
+          default: ""
+          selector:
+            entity:
+              filter:
+                - domain: input_boolean
+                - domain: binary_sensor
+        party_entity:
+          name: "Optional party mode (ON = comfort in all rooms)"
+          default: ""
+          selector:
+            entity:
+              filter:
+                - domain: input_boolean
+                - domain: binary_sensor
+        unscheduled_mode:
+          name: "Room without schedule or motion sensor"
+          default: comfort
+          selector:
+            select:
+              options:
+                - label: "Comfort while someone is home"
+                  value: comfort
+                - label: "Eco unless party mode is active"
+                  value: eco
+        safety_conditions:
+          name: "Always-required global conditions"
+          description: >-
+            Use the standard condition editor. These conditions gate every
+            heating command, including vacation and frost protection.
+            Leave empty to use the standard checks.
+          default: []
+          selector:
+            condition: {}
+        action_delay:
+          name: "Wait between thermostat commands (seconds)"
+          default: 1
+          selector:
+            number:
+              min: 0
+              max: 30
+              step: 1
+              mode: box
+              unit_of_measurement: s
+        after_change_actions:
+          name: "Optional global actions after each thermostat update"
+          description: >-
+            Common actions only. Runs after successful service calls when
+            preview mode is disabled. May run once for each changed thermostat.
+          default: []
+          selector:
+            action: {}
+    vacation_section:
+      name: "🏖️ 03 | Vacation mode"
+      icon: mdi:beach
+      description: >-
+        Vacation is independent of normal home/away and holiday schedules.
+        When ON it overrides party mode, presence and room schedules.
+        Open windows still apply their own protection first. Frost protection
+        is never disabled by a temperature-setting strategy.
+      input:
+        vacation_switch:
+          name: "Vacation mode helper (required; ON = vacation)"
+          description: >-
+            Create a dedicated Input Boolean helper. This switch is the one
+            clear source of truth for vacation mode. Unavailable helper
+            states pause writes instead of silently leaving vacation mode.
+          selector:
+            entity:
+              filter:
+                - domain: input_boolean
+        vacation_strategy:
+          name: "What to do while on vacation"
+          default: setback
+          selector:
+            select:
+              options:
+                - label: "Setback: use each room's vacation temperature (recommended)"
+                  value: setback
+                - label: "Eco: use each room's eco temperature"
+                  value: eco
+                - label: "Off: only when safe and supported, otherwise frost protection"
+                  value: "off"
+    diagnostics_section:
+      name: "🩺 04 | Preview and diagnostics"
+      icon: mdi:shield-search
+      collapsed: true
+      input:
+        preview_only:
+          name: "Preview only (do not change physical thermostats)"
+          description: >-
+            On by default. Inspect the automation trace to see each room's
+            computed mode and target. Enable logging below if needed.
+          default: true
+          selector:
+            boolean: {}
+        log_changes:
+          name: "Log planned changes (preview) or successful commands"
+          description: >-
+            Writes a system log line only when a command is needed. In
+            preview mode the same planned change may be logged each minute.
+          default: false
+          selector:
+            boolean: {}
+
+variables:
+  configured_rooms: !input room_entries
+  vacation_switch_id: !input vacation_switch
+  vacation_strategy_value: !input vacation_strategy
+  enable_id: !input enable_entity
+  people_ids: !input people
+  guest_id: !input guest_entity
+  party_id: !input party_entity
+  unscheduled_value: !input unscheduled_mode
+  preview_value: !input preview_only
+  log_changes_value: !input log_changes
+  call_delay: !input action_delay
+
+triggers:
+  - trigger: time_pattern
+    minutes: "/1"
+    id: minute_check
+  - trigger: homeassistant
+    event: start
+    id: home_assistant_start
+  - trigger: state
+    entity_id: !input vacation_switch
+    id: vacation_toggled
+
+conditions: !input safety_conditions
+
+actions:
+  - variables:
+      vacation_valid: "{{ has_value(vacation_switch_id) }}"
+      vacation_active: "{{ is_state(vacation_switch_id, 'on') }}"
+      enabled_global: "{{ enable_id in ['', none] or is_state(enable_id, 'on') }}"
+      guest_active: "{{ guest_id not in ['', none] and is_state(guest_id, 'on') }}"
+      party_active: "{{ party_id not in ['', none] and is_state(party_id, 'on') }}"
+      anybody_home: >-
+        {{ people_ids | count == 0 or
+           expand(people_ids) | selectattr('state', 'eq', 'home') | list | count > 0 }}
+  - condition: template
+    value_template: "{{ vacation_valid and enabled_global }}"
+  - repeat:
+      for_each: "{{ configured_rooms | default([], true) }}"
+      sequence:
+        - variables:
+            room: "{{ repeat.item }}"
+        - variables:
+            room_name: "{{ room.get('name', 'Unnamed room') }}"
+            room_enabled: "{{ room.get('enabled', true) }}"
+            room_paused_id: "{{ room.get('pause_entity', '') | default('', true) }}"
+            room_trvs: "{{ room.get('thermostats', []) | default([], true) }}"
+            room_windows: "{{ room.get('windows', []) | default([], true) }}"
+            room_window_delay: "{{ room.get('window_delay', 0) | float(0) }}"
+            room_schedule: "{{ room.get('schedule', '') | default('', true) }}"
+            room_motion: "{{ room.get('motion', '') | default('', true) }}"
+            room_sensor: "{{ room.get('temperature_sensor', '') | default('', true) }}"
+            room_calibrate: "{{ room.get('calibrate_generic', false) }}"
+            room_hvac_mode: "{{ room.get('hvac_mode', 'heat') }}"
+            room_comfort: "{{ room.get('comfort_temperature', 21) | float(21) }}"
+            room_eco: "{{ room.get('eco_temperature', 17) | float(17) }}"
+            room_vacation: "{{ room.get('vacation_temperature', 14) | float(14) }}"
+            room_frost: "{{ room.get('frost_temperature', 7) | float(7) }}"
+            room_window_strategy: "{{ room.get('window_strategy', 'frost') }}"
+        - if:
+            - condition: template
+              value_template: >-
+                {{ room is mapping and room_enabled and
+                   (room_paused_id in ['', none] or
+                    (has_value(room_paused_id) and is_state(room_paused_id, 'off'))) }}
+          then:
+            - if:
+                - condition: template
+                  value_template: >-
+                    {{ room_trvs is sequence and room_trvs is not string and room_trvs | count > 0 }}
+              then:
+                - variables:
+                    window_unknown: >-
+                      {{ room_windows | count > 0 and
+                         (expand(room_windows) | count != room_windows | count or
+                          expand(room_windows) | selectattr('state', 'in', ['unavailable','unknown']) | list | count > 0) }}
+                    windows_open_long: >-
+                      {% set ns = namespace(open=false) %}
+                      {% for window in expand(room_windows) %}
+                        {% if window.state in ['on', 'open', 'tilted'] and
+                              as_timestamp(now()) - as_timestamp(window.last_changed, 0) >= room_window_delay * 60 %}
+                          {% set ns.open = true %}
+                        {% endif %}
+                      {% endfor %}
+                      {{ ns.open }}
+                    schedule_valid: "{{ room_schedule in ['', none] or has_value(room_schedule) }}"
+                    motion_valid: "{{ room_motion in ['', none] or has_value(room_motion) }}"
+                - if:
+                    - condition: template
+                      value_template: "{{ not window_unknown and schedule_valid and motion_valid }}"
+                  then:
+                    - variables:
+                        desired_profile: >-
+                          {% if windows_open_long %}
+                            window
+                          {% elif vacation_active %}
+                            vacation
+                          {% elif party_active %}
+                            comfort
+                          {% elif not anybody_home and not guest_active %}
+                            eco
+                          {% elif room_schedule not in ['', none] and not is_state(room_schedule, 'on') %}
+                            eco
+                          {% elif room_motion not in ['', none] and not is_state(room_motion, 'on') %}
+                            eco
+                          {% elif room_schedule not in ['', none] or room_motion not in ['', none] %}
+                            comfort
+                          {% else %}
+                            {{ unscheduled_value }}
+                          {% endif %}
+                    - variables:
+                        desired_off: >-
+                          {{ (desired_profile == 'window' and room_window_strategy == 'off')
+                             or (desired_profile == 'vacation' and vacation_strategy_value == 'off') }}
+                        profile_temp: >-
+                          {% if desired_profile == 'window' %}
+                            {{ room_frost }}
+                          {% elif desired_profile == 'vacation' %}
+                            {% if vacation_strategy_value == 'eco' %}
+                              {{ room_eco }}
+                            {% else %}
+                              {{ room_vacation }}
+                            {% endif %}
+                          {% elif desired_profile == 'comfort' %}
+                            {{ room_comfort }}
+                          {% else %}
+                            {{ room_eco }}
+                          {% endif %}
+                    - repeat:
+                        for_each: "{{ room_trvs }}"
+                        sequence:
+                          - variables:
+                              thermostat: "{{ repeat.item }}"
+                          - if:
+                              - condition: template
+                                value_template: >-
+                                  {{ thermostat is string and thermostat.startswith('climate.') and
+                                     has_value(thermostat) }}
+                            then:
+                              - variables:
+                                  supported_modes: "{{ state_attr(thermostat, 'hvac_modes') | default([], true) }}"
+                                  current_room_temp: >-
+                                    {% if room_sensor not in ['', none] and has_value(room_sensor) %}
+                                      {{ states(room_sensor) | float(999) }}
+                                    {% else %}
+                                      {{ state_attr(thermostat, 'current_temperature') | float(999) }}
+                                    {% endif %}
+                                  sensor_temperature: "{{ states(room_sensor) | float(999) if room_sensor not in ['', none] else 999 }}"
+                                  thermostat_temperature: "{{ state_attr(thermostat, 'current_temperature') | float(999) }}"
+                              - variables:
+                                  frost_needed: >-
+                                    {{ desired_off and
+                                       (current_room_temp | float(999) == 999 or
+                                        current_room_temp | float(999) <= room_frost + 0.5) }}
+                                  proposed_mode: >-
+                                    {% if desired_off and not frost_needed and 'off' in supported_modes %}
+                                      off
+                                    {% elif room_hvac_mode in supported_modes %}
+                                      {{ room_hvac_mode }}
+                                    {% elif 'heat' in supported_modes %}
+                                      heat
+                                    {% elif 'auto' in supported_modes %}
+                                      auto
+                                    {% else %}
+                                      unsupported
+                                    {% endif %}
+                                  bounded_room_target: "{{ [room_frost, profile_temp | float(room_eco)] | max }}"
+                              - if:
+                                  - condition: template
+                                    value_template: "{{ proposed_mode != 'unsupported' }}"
+                                then:
+                                  - variables:
+                                      adjustment: >-
+                                        {% if room_calibrate and room_sensor not in ['', none] and
+                                              sensor_temperature | float(999) != 999 and
+                                              thermostat_temperature | float(999) != 999 %}
+                                          {{ [3, [-3, thermostat_temperature | float - sensor_temperature | float] | max] | min }}
+                                        {% else %}
+                                          0
+                                        {% endif %}
+                                      trv_min: "{{ state_attr(thermostat, 'min_temp') | float(5) }}"
+                                      trv_max: "{{ state_attr(thermostat, 'max_temp') | float(35) }}"
+                                  - variables:
+                                      new_temperature: >-
+                                        {% set temp = bounded_room_target | float + adjustment | float %}
+                                        {{ [trv_max, [trv_min, temp] | max] | min | round(1) }}
+                                      mode_change: "{{ states(thermostat) != proposed_mode }}"
+                                      temperature_change: >-
+                                        {{ proposed_mode != 'off' and
+                                           (state_attr(thermostat, 'temperature') is none or
+                                            ((state_attr(thermostat, 'temperature') | float(0) -
+                                              new_temperature | float) | abs) >= 0.2) }}
+                                  - if:
+                                      - condition: template
+                                        value_template: "{{ mode_change or temperature_change }}"
+                                    then:
+                                      - choose:
+                                          - conditions:
+                                              - condition: template
+                                                value_template: "{{ preview_value }}"
+                                            sequence:
+                                              - if:
+                                                  - condition: template
+                                                    value_template: "{{ log_changes_value }}"
+                                                then:
+                                                  - action: system_log.write
+                                                    data:
+                                                      logger: blueprints.advanced_heating_multi_zone
+                                                      level: info
+                                                      message: >-
+                                                        Preview {{ room_name }} ({{ thermostat }}):
+                                                        {{ desired_profile }} / {{ proposed_mode }} /
+                                                        {{ new_temperature }} °C
+                                        default:
+                                          - if:
+                                              - condition: template
+                                                value_template: "{{ mode_change }}"
+                                            then:
+                                              - action: climate.set_hvac_mode
+                                                target:
+                                                  entity_id: "{{ thermostat }}"
+                                                data:
+                                                  hvac_mode: "{{ proposed_mode }}"
+                                              - delay:
+                                                  seconds: "{{ call_delay }}"
+                                          - if:
+                                              - condition: template
+                                                value_template: "{{ temperature_change }}"
+                                            then:
+                                              - action: climate.set_temperature
+                                                target:
+                                                  entity_id: "{{ thermostat }}"
+                                                data:
+                                                  temperature: "{{ new_temperature | float }}"
+                                              - delay:
+                                                  seconds: "{{ call_delay }}"
+                                          - if:
+                                              - condition: template
+                                                value_template: "{{ log_changes_value }}"
+                                            then:
+                                              - action: system_log.write
+                                                data:
+                                                  logger: blueprints.advanced_heating_multi_zone
+                                                  level: info
+                                                  message: >-
+                                                    Updated {{ room_name }} ({{ thermostat }}):
+                                                    {{ desired_profile }} / {{ proposed_mode }} /
+                                                    {{ new_temperature }} °C
+                                          - if:
+                                              - condition: template
+                                                value_template: "{{ true }}"
+                                            then: !input after_change_actions
+
+mode: single
+max_exceeded: silent
