@@ -1,5 +1,20 @@
 # Release notes
 
+## v0.3.0, fault notifications and manual thermostat hold (2026-10-21)
+
+### Changes
+
+- **Optional persistent fault notifications (default OFF).** Alert about unavailable room window contacts, offline climate entities, and thermostat mode/target commands not confirmed within a configurable 5–60-second timeout (default 15). Reused notification IDs avoid duplicate cards and ongoing device availability reminders are throttled.
+- **Thermostat acknowledgement and independent rooms.** Validate Home Assistant's reported HVAC mode and requested target (0.4 °C tolerance) after each command. Service errors no longer cancel other rooms; global after-change actions require a confirmed state. This does not constitute a physical valve acknowledgement.
+- **Optional manual hold (default OFF).** One dedicated Input Text helper per single-thermostat room stores the blueprint's last confirmed command and override deadline. A later manual setpoint change from the dial or HA UI holds the new setting for the configured 0–1440-minute duration, then restores currently applicable rules.
+- **Safety and compatibility.** Window and summer protection and frost requirements always outrank a manual hold. A settling guard prevents immediate state echoes from being mistaken for user changes. Existing blueprints without manual helpers continue their normal temperature regulation.
+- **English UI and docs.** All new controls, messages, setup steps and release notes remain in English.
+- **Regression tests** cover manual detection, hold expiry, window/summer/frost precedence, service verification and stable notification IDs.
+
+### Migration
+
+No new helpers are needed for the existing automatic heating behavior. For manual override, create a distinct Input Text helper (at least 100 characters maximum, no forced initial value) per room with **one** thermostat and configure the room helper + global duration. Enable persistent fault notifications separately. Imported Home Assistant blueprints must be updated locally after pulling this change.
+
 ## v0.2.1, vacation schedule availability fix (2026-10-21)
 
 - **Vacation mode no longer depends on room schedule availability.** An unknown or unavailable room schedule cannot prevent a valid Vacation setback from sending commands. This fixes one possible cause of unchanged thermostat setpoints during vacation.
