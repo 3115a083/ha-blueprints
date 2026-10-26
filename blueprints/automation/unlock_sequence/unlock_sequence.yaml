@@ -1,5 +1,5 @@
 blueprint:
-  name: "Unlock Sequence | Ordered multi-trigger access"
+  name: "🔐 Unlock Sequence | Ordered multi-trigger access"
   description: >-
     Detect one ordered sequence of 1–16 inputs with independent whole-sequence and
     per-step deadlines, optional persistent failure lockout, independent safety
@@ -13,7 +13,7 @@ blueprint:
     min_version: "2026.10.0"
   input:
     sequence:
-      name: "01 | Input source and sequence"
+      name: "01 | 🔢 Input source and sequence"
       input:
         configuration_mode:
           name: "Configuration mode"
@@ -56,7 +56,7 @@ blueprint:
           selector:
             text: {}
     timing:
-      name: "02 | Timing and error handling"
+      name: "02 | ⏱️ Timing and error handling"
       input:
         total_timeout:
           name: "Whole sequence time limit (seconds; 0 disables)"
@@ -107,7 +107,7 @@ blueprint:
           selector:
             boolean: {}
     guards:
-      name: "03 | Authorization"
+      name: "03 | 🛡️ Authorization"
       input:
         start_conditions:
           name: "Conditions required to begin"
@@ -120,7 +120,7 @@ blueprint:
           selector:
             condition: {}
     protection:
-      name: "04 | Optional persistent failed-attempt lockout"
+      name: "04 | 🔒 Optional persistent failed-attempt lockout"
       input:
         protection_enabled:
           name: "Enable failed-attempt lockout"
@@ -226,7 +226,7 @@ blueprint:
                 - label: "After successful action and optional confirmation"
                   value: confirmed
     confirmation:
-      name: "05 | Optional result confirmation"
+      name: "05 | 🔍 Optional result confirmation"
       input:
         verify_enabled:
           name: "Verify that the desired result was reached"
@@ -255,30 +255,30 @@ blueprint:
               step: 1
               mode: box
     responses:
-      name: "06 | Actions"
+      name: "06 | ⚙️ Actions"
       input:
         success_actions:
-          name: "Actions after a valid and authorized sequence"
+          name: "✅ Actions after a valid and authorized sequence"
           default: []
           selector:
             action: {}
         failure_actions:
-          name: "Actions on failed attempt"
+          name: "❌ Actions on failed attempt"
           default: []
           selector:
             action: {}
         lock_started_actions:
-          name: "Actions when failed-attempt lockout starts"
+          name: "🔒 Actions when failed-attempt lockout starts"
           default: []
           selector:
             action: {}
         lock_ended_actions:
-          name: "Actions when failed-attempt lockout ends"
+          name: "🔓 Actions when failed-attempt lockout ends"
           default: []
           selector:
             action: {}
         error_actions:
-          name: "Actions on missing result confirmation"
+          name: "⚠️ Actions on missing result confirmation"
           description: >-
             Called after an unconfirmed result. Home Assistant cannot reliably catch
             arbitrary service-call exceptions inside user-provided action lists;
