@@ -1,10 +1,10 @@
-# Unlock Sequence
+# 🔐 Unlock Sequence
 
 An event-driven Home Assistant automation blueprint for ordered button, bell, state, device, MQTT and event inputs. It can recognize **1–16 activations**, optionally lock out repeated failures, check independent authorization conditions, and perform user-configured actions only once.
 
 **This is not a security-rated access-control system.** Door locks and alarm disarming require a separate trustworthy authorization factor, such as a physical access controller or explicitly verified local presence. Wireless buttons, doorbells, ordinary HA events, webhooks, and unauthenticated MQTT messages must **not** be treated as secrets.
 
-## Import
+## 📥 Import
 
 Use **Settings → Automations & scenes → Blueprints → Import blueprint**:
 
@@ -16,7 +16,7 @@ https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/unlock
 
 Home Assistant **2026.10 or newer** is required. This blueprint uses merged trigger selector lists, action/condition selectors, limited-template time triggers, and a single running automation.
 
-## First-run setup
+## ⚙️ First-run setup
 
 1. Create an automation from the blueprint.
 2. Choose exactly one input mode:
@@ -58,7 +58,7 @@ Set the advanced code to `ABBA`. Each distinct incoming event advances **at most
 - Successful action: initially a notification, **not a lock command**.
 - Enable failed-attempt protection for a production installation, e.g. 3 failures within a fixed 15-minute window, followed by 5-minute lockout.
 
-## Persistent helpers and setup
+## 💾 Persistent helpers and setup
 
 Home Assistant blueprints cannot create helpers automatically. Create the following **dedicated helpers for each automation**, either using **Settings → Devices & services → Helpers → Create helper** or the optional [sample package](helpers-package.example.yml). Never share counters or deadline helpers between two automations.
 
@@ -75,7 +75,7 @@ For package-based setup, add `homeassistant: packages: !include_dir_named packag
 
 The **fixed** failure window starts on the first failure and does not slide with every failed attempt. For example, with 15 minutes configured, a failure at 12:00 starts a period ending at 12:15; the next failure after the period starts a new period. A successfully completed attempt can clear the counter either after final authorization or after an optional result confirmation. Failure-lock deadlines and success cooldown deadlines survive restarts when the helpers restore successfully. **Any incomplete code input is discarded** if Home Assistant or the automation restarts.
 
-## Events, timeouts and action execution
+## ⏱️ Events, timeouts and action execution
 
 - Wrong inputs can be ignored or counted as a failed attempt with reset. When reset is selected, a wrong input matching the first code symbol can optionally be reused to begin a fresh attempt. It still counts as a failure.
 - Unrelated Home Assistant events that do **not** match configured source triggers are invisible to the blueprint. Only events from the selected trigger bank can be classified as wrong.
@@ -87,7 +87,7 @@ The **fixed** failure window starts on the first failure and does not slide with
 - Home Assistant **cannot reliably catch arbitrary exceptions raised within a user-provided action sequence** to run another action. Such an exception stops the run and appears in HA traces/logs. The configured error action is specifically for confirmation timeout. Where a device can silently fail, enable result confirmation.
 - A lock-expiry time trigger and a startup reconciliation clear expired failed-attempt lockouts and call `lock_ended_actions` once when the persisted count indicates a completed lockout. The success cooldown expires by deadline comparison, without polling. Deadline writes use timestamps rounded up to a whole second so a short duration is not truncated by formatting. Local datetime helper restoration during an ambiguous DST hour and abrupt wall-clock changes remain HA storage/time limitations; use an independent authorization mechanism.
 
-### Limitations and security notes
+### ⚠️ Limitations and security notes
 
 - **Trigger spoofing:** use ACL-protected authenticated MQTT topics, trusted local integrations, and independent presence/authorization checks. No amount of button timing makes a doorbell code a strong credential.
 - **Automation settings are trusted:** anyone who can edit this automation or selected helpers can bypass the protection. Protect Home Assistant administrator access and devices.
@@ -97,11 +97,11 @@ The **fixed** failure window starts on the first failure and does not slide with
 - **Missed events and reloads:** ongoing sequences and waits do not resume on automation reload or HA restart; that is intentional. A lock-expiry notification missed during downtime is reconciled at startup only if helper values are available; if storage is unavailable then, a later eligible event can reconcile.
 - **Physical safety:** Home Assistant scripts are not a failsafe or life-safety access controller. Validate on a test entity first. Add a physical/manual entry method and independent safeguards for real doors, garage actuators and alarms.
 
-## Updating
+## 🔄 Updating
 
 Keep the canonical `blueprint.source_url` when importing. If you use [Blueprints Updater](https://github.com/luuquangvu/blueprints-updater), reload it with **Developer Tools → Actions → `blueprints_updater.reload`** after importing. Review changes before applying them to any live lock or alarm configuration.
 
 
-## Security regression coverage
+## 🧪 Security regression coverage
 
 The October 2026 hardening adds tests for invalid and fractional counters, helper loss during an active sequence, overlapping inputs, ignored wrong inputs and gap deadlines, lock persistence before failing notification hooks, and extra input during confirmation. The real Home Assistant suite runs in repository CI; static tests alone do not establish device safety. See [CHANGELOG](CHANGELOG.md). No physical lock or alarm has been operated or certified by these tests.
