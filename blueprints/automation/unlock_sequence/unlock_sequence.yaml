@@ -533,14 +533,14 @@ actions:
                                             entity_id: "{{ _lock_helper }}"
                                           data:
                                             datetime: "{{ (now() + timedelta(seconds=_lock_seconds | int(300))).strftime('%Y-%m-%d %H:%M:%S') }}"
+                                        - choose:
+                                            - conditions: "{{ true }}"
+                                              sequence: !input lock_started_actions
                                     - action: input_number.set_value
                                       target:
                                         entity_id: "{{ _count_helper }}"
                                       data:
                                         value: "{{ _next_failure_count | int }}"
-                                      - choose:
-                                            - conditions: "{{ true }}"
-                                              sequence: !input lock_started_actions
                             - choose:
                                 - conditions: "{{ true }}"
                                   sequence: !input failure_actions
@@ -586,14 +586,14 @@ actions:
                       entity_id: "{{ _lock_helper }}"
                     data:
                       datetime: "{{ (now() + timedelta(seconds=_lock_seconds | int(300))).strftime('%Y-%m-%d %H:%M:%S') }}"
+                  - choose:
+                      - conditions: "{{ true }}"
+                        sequence: !input lock_started_actions
               - action: input_number.set_value
                 target:
                   entity_id: "{{ _count_helper }}"
                 data:
                   value: "{{ _next_failure_count | int }}"
-                - choose:
-                      - conditions: "{{ true }}"
-                        sequence: !input lock_started_actions
       - choose:
           - conditions: "{{ true }}"
             sequence: !input failure_actions
@@ -644,14 +644,14 @@ actions:
                           entity_id: "{{ _lock_helper }}"
                         data:
                           datetime: "{{ (now() + timedelta(seconds=_lock_seconds | int(300))).strftime('%Y-%m-%d %H:%M:%S') }}"
+                      - choose:
+                          - conditions: "{{ true }}"
+                            sequence: !input lock_started_actions
                   - action: input_number.set_value
                     target:
                       entity_id: "{{ _count_helper }}"
                     data:
                       value: "{{ _next_failure_count | int }}"
-                    - choose:
-                          - conditions: "{{ true }}"
-                            sequence: !input lock_started_actions
           - choose:
               - conditions: "{{ true }}"
                 sequence: !input failure_actions
