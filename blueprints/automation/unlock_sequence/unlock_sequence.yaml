@@ -430,8 +430,7 @@ actions:
     if:
       - condition: template
         value_template: >-
-          {{ (_protect and states(_count_helper) | int(0) >= _maximum_failures | int(1)
-             and as_timestamp(states(_lock_helper), default=0) > as_timestamp(now()))
+          {{ (_protect and as_timestamp(states(_lock_helper), default=0) > as_timestamp(now()))
              or (_cooldown_seconds | int(0) > 0
              and as_timestamp(states(_cooldown_helper), default=0) > as_timestamp(now())) }}
     then:
@@ -447,6 +446,7 @@ actions:
       _outcome: running
       _event_symbol: ""
       _restart_allowed: false
+      _failure_recorded: false
   - alias: "Only the first symbol may start an attempt"
     if:
       - condition: template
@@ -506,6 +506,7 @@ actions:
                                   {{ _reuse_wrong and _event_symbol == _code[0] }}
                             - variables:
                                 _outcome: failed
+                                _failure_recorded: true
                             # A wrong input is a completed failed attempt.
                             - choose:
                                 - conditions: "{{ _protect }}"
@@ -525,11 +526,6 @@ actions:
                                             entity_id: "{{ _window_helper }}"
                                           data:
                                             datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
-                                    - action: input_number.set_value
-                                      target:
-                                        entity_id: "{{ _count_helper }}"
-                                      data:
-                                        value: "{{ _next_failure_count | int }}"
                                     - if: "{{ _next_failure_count | int >= _maximum_failures | int(1) }}"
                                       then:
                                         - action: input_datetime.set_datetime
@@ -537,6 +533,11 @@ actions:
                                             entity_id: "{{ _lock_helper }}"
                                           data:
                                             datetime: "{{ (now() + timedelta(seconds=_lock_seconds | int(300))).strftime('%Y-%m-%d %H:%M:%S') }}"
+                                    - action: input_number.set_value
+                                      target:
+                                        entity_id: "{{ _count_helper }}"
+                                      data:
+                                        value: "{{ _next_failure_count | int }}"
                                         - choose:
                                             - conditions: "{{ true }}"
                                               sequence: !input lock_started_actions
@@ -547,7 +548,8 @@ actions:
                                 - condition: template
                                   value_template: >-
                                     {{ _restart_allowed and (_helpers_valid | bool(false))
-                                       and (not _protect or states(_count_helper) | int(0) < _maximum_failures | int(1)) }}
+                                       and (not _protect or (states(_count_helper) | int(0) < _maximum_failures | int(1)
+                                         and as_timestamp(states(_lock_helper), default=0) <= as_timestamp(now()))) }}
                                 - condition: and
                                   conditions: !input start_conditions
                               then:
@@ -555,8 +557,9 @@ actions:
                                     _progress: 1
                                     _started_at: "{{ _event_at }}"
                                     _outcome: running
+                                    _failure_recorded: false
   - alias: "Handle timeouts (wrong inputs were already recorded)"
-    if: "{{ _outcome == 'failed' and not _restart_allowed }}"
+    if: "{{ _outcome == 'failed' and not _failure_recorded }}"
     then:
       - choose:
           - conditions: "{{ _protect }}"
@@ -576,11 +579,6 @@ actions:
                       entity_id: "{{ _window_helper }}"
                     data:
                       datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
-              - action: input_number.set_value
-                target:
-                  entity_id: "{{ _count_helper }}"
-                data:
-                  value: "{{ _next_failure_count | int }}"
               - if: "{{ _next_failure_count | int >= _maximum_failures | int(1) }}"
                 then:
                   - action: input_datetime.set_datetime
@@ -588,12 +586,19 @@ actions:
                       entity_id: "{{ _lock_helper }}"
                     data:
                       datetime: "{{ (now() + timedelta(seconds=_lock_seconds | int(300))).strftime('%Y-%m-%d %H:%M:%S') }}"
+              - action: input_number.set_value
+                target:
+                  entity_id: "{{ _count_helper }}"
+                data:
+                  value: "{{ _next_failure_count | int }}"
                   - choose:
                       - conditions: "{{ true }}"
                         sequence: !input lock_started_actions
       - choose:
           - conditions: "{{ true }}"
             sequence: !input failure_actions
+  - if: "{{ _outcome == 'failed' }}"
+    then:
       - stop: "Unlock Sequence: attempt failed."
   - alias: "Require completion and valid security state again"
     if: "{{ _progress | int(0) != _code | length or not (_helpers_valid | bool(false)) }}"
@@ -632,11 +637,6 @@ actions:
                           entity_id: "{{ _window_helper }}"
                         data:
                           datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
-                  - action: input_number.set_value
-                    target:
-                      entity_id: "{{ _count_helper }}"
-                    data:
-                      value: "{{ _next_failure_count | int }}"
                   - if: "{{ _next_failure_count | int >= _maximum_failures | int(1) }}"
                     then:
                       - action: input_datetime.set_datetime
@@ -644,6 +644,11 @@ actions:
                           entity_id: "{{ _lock_helper }}"
                         data:
                           datetime: "{{ (now() + timedelta(seconds=_lock_seconds | int(300))).strftime('%Y-%m-%d %H:%M:%S') }}"
+                  - action: input_number.set_value
+                    target:
+                      entity_id: "{{ _count_helper }}"
+                    data:
+                      value: "{{ _next_failure_count | int }}"
                       - choose:
                           - conditions: "{{ true }}"
                             sequence: !input lock_started_actions
