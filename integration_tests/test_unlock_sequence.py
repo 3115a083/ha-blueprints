@@ -3,6 +3,7 @@
 No physical devices are controlled; all service effects are mocked.
 """
 from pathlib import Path
+import asyncio
 
 import pytest
 from homeassistant import loader
@@ -94,6 +95,46 @@ async def test_one_event_can_execute_safe_action_once(tmp_path):
              "trigger": {"id": "0"}},
             Context(),
         )
+        await hass.async_block_till_done()
+        assert seen == [{"title": "Test", "message": "Validated"}]
+    finally:
+        await hass.async_stop()
+
+
+@pytest.mark.asyncio
+async def test_second_input_advances_only_once(tmp_path):
+    """A real event must advance the active wait and execute one safe action."""
+    hass = HomeAssistant(str(tmp_path))
+    hass.config_entries = ConfigEntries(hass, {})
+    loader.async_setup(hass)
+    await trigger_helper.async_setup(hass)
+    seen = []
+
+    async def record(call):
+        seen.append(dict(call.data))
+
+    hass.services.async_register("persistent_notification", "create", record)
+    try:
+        config = substitute(simple_repeats=2, debounce_ms=0)
+        actions = await async_validate_actions_config(
+            hass,
+            cv.SCRIPT_SCHEMA([{"variables": config["variables"]}, *config["actions"]]),
+        )
+        script = Script(
+            hass, actions, "Unlock two-press sequence", "automation",
+            script_mode="single",
+        )
+        task = asyncio.create_task(
+            script.async_run(
+                {"this": {"entity_id": "automation.test_unlock"},
+                 "trigger": {"id": "0"}},
+                Context(),
+            )
+        )
+        await asyncio.sleep(0.05)
+        assert seen == [], "A single input must not unlock a two-input code"
+        hass.bus.async_fire("unlock_test_press")
+        await asyncio.wait_for(task, timeout=3)
         await hass.async_block_till_done()
         assert seen == [{"title": "Test", "message": "Validated"}]
     finally:
