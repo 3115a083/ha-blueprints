@@ -47,7 +47,7 @@ In the advanced trigger editor, configure these as two triggers (IDs must be wri
   id: B
 ```
 
-Set the advanced code to `ABBA`. Each distinct incoming event advances **at most one step**; repeated IDs in the code do not create extra subscriptions. Any duplicate trigger configurations or duplicate/undefined IDs are rejected at preflight. A pair of different, overlapping trigger definitions may still emit independent Home Assistant callbacks; choose disjoint trigger data and retain nonzero debounce. A true physical-event identity cannot be guaranteed for all integrations.
+Set the advanced code to `ABBA`. Each distinct incoming event advances **at most one step**; repeated IDs in the code do not create extra subscriptions. Any duplicate trigger configurations or duplicate/undefined IDs are rejected at preflight. A multi-source bank is accepted only when every pair is provably disjoint: different literal event types, conflicting literal string event-data filters, exact MQTT topics/payloads without value templates, or distinct literal state transitions/entities. Overlaps, wildcard MQTT combinations, dynamic templates in a multi-source bank, and opaque/cross-platform combinations fail closed. For an arbitrary integration trigger, use one reusable source (simple mode or advanced `AAAA`). Trigger-local `variables` and nested trigger lists are rejected. This deliberately conservative rule may reject combinations that are actually disjoint; simplify them or normalize them in a separate trusted automation. No physical-event identity or lossless delivery guarantee is made.
 
 ### Example: doorbell four times in ten seconds
 
@@ -64,12 +64,12 @@ Home Assistant blueprints cannot create helpers automatically. Create the follow
 
 | Helper | Type | Required when |
 | --- | --- | --- |
-| Failed-attempt counter | `input_number` (min 0, max at least 100, step 1) | Failure protection is enabled |
+| Failed-attempt counter | `input_number` (min 0, max at least the selected failure limit, step 1) | Failure protection is enabled |
 | Failure lock deadline | `input_datetime` with **date and time** | Failure protection is enabled |
 | Failure-window start | `input_datetime` with **date and time** | Failure protection is enabled and fixed-window counting is selected |
 | Success cooldown deadline | `input_datetime` with **date and time** | Success cooldown is above zero |
 
-When creating helpers for the first time, initialize the counters to **0** and date/time helpers to a past date such as **2000-01-01 00:00:00** with Developer Tools → Actions (`input_datetime.set_datetime`). **Do not place `initial:` on helpers in the persistent package**, as it can override restored state after restarting. If the helpers show `unknown` or `unavailable`, the automation **fails closed** rather than allowing a success action. The automation does not initialize missing or unavailable protection helpers on its own.
+When creating helpers for the first time, initialize the counters to **0** and date/time helpers to a past date such as **2000-01-01 00:00:00** with Developer Tools → Actions (`input_datetime.set_datetime`). **Do not place `initial:` on helpers in the persistent package**, as it can override restored state after restarting. Counter state must be a nonnegative integer within its configured bounds; its minimum must be 0, maximum must support the selected limit, and step must be 1. All active datetime helpers must be distinct. If a required helper is missing, invalid, `unknown` or `unavailable`, the automation **fails closed**, including when it becomes invalid while waiting for inputs. Live storage is rechecked after waits and immediately before success actions. The automation does not initialize missing or unavailable protection helpers on its own.
 
 For package-based setup, add `homeassistant: packages: !include_dir_named packages` to your HA configuration if not already configured, copy the example to `packages/unlock_sequence.yaml`, and adapt names. Restart/reload Home Assistant according to the normal helper lifecycle, initialize new helpers, and select the resulting entity IDs in the blueprint.
 
@@ -79,20 +79,20 @@ The **fixed** failure window starts on the first failure and does not slide with
 
 - Wrong inputs can be ignored or counted as a failed attempt with reset. When reset is selected, a wrong input matching the first code symbol can optionally be reused to begin a fresh attempt. It still counts as a failure.
 - Unrelated Home Assistant events that do **not** match configured source triggers are invisible to the blueprint. Only events from the selected trigger bank can be classified as wrong.
-- The global debounce applies to physical events received less than the specified number of milliseconds since the last counted event. Very fast signals are discarded without failure.
+- The global debounce applies to physical events received less than the specified number of milliseconds since the last counted event. Very fast signals are discarded without failure. Ignored wrong inputs do not refresh the gap deadline or the timestamp of the last counted input.
 - All starts and subsequent inputs are serialized by `mode: single` plus `wait_for_trigger`. Incoming triggers are ignored while user-defined success actions or result confirmation are in progress. Home Assistant scheduling can lose events in the tiny interval during rearming a wait; this is not a guaranteed lossless security keypad.
 - After a correct sequence, final security conditions are evaluated immediately before the success action. If denied, no success action runs, and counting the rejection as a failure is configurable.
 - Success actions run **once**, without retries. Success cooldown and failure-counter reset each support two timing choices: after successful final authorization, or after action and optional confirmation.
 - Optional result verification requires **at least one confirmation condition** and **at least one trigger** that can change its truth value. The blueprint checks conditions immediately after actions and again on each confirmation trigger until the bounded timeout. If still unconfirmed, it executes `error_actions`. It does not poll.
 - Home Assistant **cannot reliably catch arbitrary exceptions raised within a user-provided action sequence** to run another action. Such an exception stops the run and appears in HA traces/logs. The configured error action is specifically for confirmation timeout. Where a device can silently fail, enable result confirmation.
-- A lock-expiry time trigger and a startup reconciliation clear expired failed-attempt lockouts and call `lock_ended_actions` once when the persisted count indicates a completed lockout. The success cooldown expires by deadline comparison, without polling.
+- A lock-expiry time trigger and a startup reconciliation clear expired failed-attempt lockouts and call `lock_ended_actions` once when the persisted count indicates a completed lockout. The success cooldown expires by deadline comparison, without polling. Deadline writes use timestamps rounded up to a whole second so a short duration is not truncated by formatting. Local datetime helper restoration during an ambiguous DST hour and abrupt wall-clock changes remain HA storage/time limitations; use an independent authorization mechanism.
 
 ### Limitations and security notes
 
 - **Trigger spoofing:** use ACL-protected authenticated MQTT topics, trusted local integrations, and independent presence/authorization checks. No amount of button timing makes a doorbell code a strong credential.
 - **Automation settings are trusted:** anyone who can edit this automation or selected helpers can bypass the protection. Protect Home Assistant administrator access and devices.
 - **Time jumps/DST:** absolute local date-time helpers are converted to timestamps for comparison. Abrupt clock changes may shift wall-clock deadlines. Use reliable time synchronization.
-- **Crash consistency:** writes to different Home Assistant helpers are not atomic. The blueprint writes the lockout deadline **before** raising the persistent failure counter, and refuses a future deadline even when the counter is smaller than the limit. However, a total shutdown during multi-helper writes may leave partly updated records. HA helpers are not an audited security transaction store.
+- **Crash consistency:** writes to different Home Assistant helpers are not atomic. The blueprint writes the lockout deadline **before** raising the persistent failure counter, verifies the stored counter/deadline, and calls lock-start actions only after persistence, and refuses a future deadline even when the counter is smaller than the limit. However, a total shutdown during multi-helper writes may leave partly updated records. HA helpers are not an audited security transaction store.
 - **High-rate inputs:** a 0 ms debounce disables its protection. Some integrations may deliver duplicates or near-simultaneous events independently, which cannot always be correlated. Configure disjoint triggers and a nonzero debounce.
 - **Missed events and reloads:** ongoing sequences and waits do not resume on automation reload or HA restart; that is intentional. A lock-expiry notification missed during downtime is reconciled at startup only if helper values are available; if storage is unavailable then, a later eligible event can reconcile.
 - **Physical safety:** Home Assistant scripts are not a failsafe or life-safety access controller. Validate on a test entity first. Add a physical/manual entry method and independent safeguards for real doors, garage actuators and alarms.
@@ -100,3 +100,8 @@ The **fixed** failure window starts on the first failure and does not slide with
 ## Updating
 
 Keep the canonical `blueprint.source_url` when importing. If you use [Blueprints Updater](https://github.com/luuquangvu/blueprints-updater), reload it with **Developer Tools → Actions → `blueprints_updater.reload`** after importing. Review changes before applying them to any live lock or alarm configuration.
+
+
+## Security regression coverage
+
+The October 2026 hardening adds tests for invalid and fractional counters, helper loss during an active sequence, overlapping inputs, ignored wrong inputs and gap deadlines, lock persistence before failing notification hooks, and extra input during confirmation. The real Home Assistant suite runs in repository CI; static tests alone do not establish device safety. See [CHANGELOG](CHANGELOG.md). No physical lock or alarm has been operated or certified by these tests.

@@ -128,3 +128,5 @@ New automation blueprints belong in `blueprints/automation/<topic>/`; script blu
 ## Validation
 
 Static tests are provided in [tests](tests/) and configured in [GitHub Actions](.github/workflows/validate-blueprints.yml). Static validation does not replace testing on a live Home Assistant instance, particularly for safety-critical actions.
+
+Unlock Sequence includes [security and compatibility details](blueprints/automation/unlock_sequence/README.md) and [release notes](blueprints/automation/unlock_sequence/CHANGELOG.md). Review its conservative trigger rules and persistent-helper requirements before importing.

@@ -361,17 +361,80 @@ variables:
     {% else %}
       {% set ns.ok = false %}
     {% endif %}
+    {# Only accept a multi-source bank when every pair is provably disjoint.
+       Unknown combinations fail closed; a single opaque source remains usable. #}
+    {% set bank = _simple_triggers if _mode == 'simple' else _advanced_triggers %}
+    {% for a in bank %}
+      {% if a is not mapping or 'variables' in a or 'triggers' in a %}
+        {% set ns.ok = false %}
+      {% endif %}
+      {% for b in bank[loop.index:] %}
+        {% set pair = namespace(disjoint=false) %}
+        {% set pa = a.get('trigger', a.get('platform', '')) %}
+        {% set pb = b.get('trigger', b.get('platform', '')) %}
+        {% set dynamic = a | string ~ b | string %}
+        {% if '{{' not in dynamic and '{%' not in dynamic and '{#' not in dynamic %}
+          {% if pa == 'event' and pb == 'event' %}
+            {% set ea = a.get('event_type') %}
+            {% set eb = b.get('event_type') %}
+            {% if ea is string and eb is string and ea != eb %}
+              {% set pair.disjoint = true %}
+            {% elif ea is string and eb is string %}
+              {% set da = a.get('event_data', {}) %}
+              {% set db = b.get('event_data', {}) %}
+              {% if da is mapping and db is mapping %}
+                {% for key, value in da.items() %}
+                  {% if key in db and value is string and db[key] is string and value != db[key] %}
+                    {% set pair.disjoint = true %}
+                  {% endif %}
+                {% endfor %}
+              {% endif %}
+            {% endif %}
+          {% elif pa == 'mqtt' and pb == 'mqtt' and 'value_template' not in a and 'value_template' not in b %}
+            {% set ta = a.get('topic', '') %}
+            {% set tb = b.get('topic', '') %}
+            {% if ta is string and tb is string and '+' not in ta and '#' not in ta and '+' not in tb and '#' not in tb %}
+              {% if ta != tb or (a.get('payload') is string and b.get('payload') is string and a.get('payload') != b.get('payload')) %}
+                {% set pair.disjoint = true %}
+              {% endif %}
+            {% endif %}
+          {% elif pa == 'state' and pb == 'state' %}
+            {% set ea = a.get('entity_id') %}
+            {% set eb = b.get('entity_id') %}
+            {% if ea is string and eb is string %}
+              {% if ea != eb %}
+                {% set pair.disjoint = true %}
+              {% elif a.get('attribute') == b.get('attribute') %}
+                {% for key in ['from', 'to'] %}
+                  {% if a.get(key) is string and b.get(key) is string and a.get(key) != b.get(key) %}
+                    {% set pair.disjoint = true %}
+                  {% endif %}
+                {% endfor %}
+              {% endif %}
+            {% endif %}
+          {% endif %}
+        {% endif %}
+        {% if not pair.disjoint %}{% set ns.ok = false %}{% endif %}
+      {% endfor %}
+    {% endfor %}
     {{ ns.ok }}
-  _helpers_valid: >-
-    {% set ns = namespace(ok=true) %}
+  _helpers_valid: &helpers_valid >-
+    {% set ns = namespace(ok=true, dates=[]) %}
     {% if _protect %}
       {% if not _count_helper.startswith('input_number.') or states(_count_helper) in ['unknown', 'unavailable', 'none']
             or states(_count_helper) | float(-1) < 0
+            or states(_count_helper) | float(-1) != states(_count_helper) | int(-2)
+            or state_attr(_count_helper, 'min') | float(-1) != 0
+            or state_attr(_count_helper, 'max') | float(-1) < _maximum_failures | int(1)
+            or states(_count_helper) | float(-1) > state_attr(_count_helper, 'max') | float(-1)
+            or state_attr(_count_helper, 'step') | float(-1) != 1
             or not _lock_helper.startswith('input_datetime.')
             or not state_attr(_lock_helper, 'has_date') or not state_attr(_lock_helper, 'has_time')
             or as_timestamp(states(_lock_helper), default=none) is none %}
         {% set ns.ok = false %}
       {% endif %}
+      {% set ns.dates = ns.dates + [_lock_helper] %}
+      {% if _window_mode == 'fixed' %}{% set ns.dates = ns.dates + [_window_helper] %}{% endif %}
       {% if _window_mode == 'fixed' and (not _window_helper.startswith('input_datetime.')
           or not state_attr(_window_helper, 'has_date') or not state_attr(_window_helper, 'has_time')
           or as_timestamp(states(_window_helper), default=none) is none) %}
@@ -383,6 +446,8 @@ variables:
           or as_timestamp(states(_cooldown_helper), default=none) is none) %}
       {% set ns.ok = false %}
     {% endif %}
+    {% if _cooldown_seconds | int(0) > 0 %}{% set ns.dates = ns.dates + [_cooldown_helper] %}{% endif %}
+    {% if ns.dates | unique | list | length != ns.dates | length %}{% set ns.ok = false %}{% endif %}
     {% if _verify and (_verify_conditions | length == 0 or _verify_triggers | length == 0) %}
       {% set ns.ok = false %}
     {% endif %}
@@ -459,6 +524,13 @@ actions:
         - condition: template
           value_template: "{{ _outcome == 'running' and _progress | int(0) < _code | length }}"
       sequence:
+        - alias: "Validate live storage before waiting"
+          if:
+            - condition: template
+              value_template: *helpers_valid
+          then: []
+          else:
+            - stop: "Unlock Sequence: protection storage invalid; failing closed."
         - variables:
             _remaining: >-
               {% set n = as_timestamp(now()) %}
@@ -485,6 +557,13 @@ actions:
                     - variables:
                         _outcome: failed
               default:
+                - alias: "Fail closed if storage became invalid during the wait"
+                  if:
+                    - condition: template
+                      value_template: *helpers_valid
+                  then: []
+                  else:
+                    - stop: "Unlock Sequence: protection storage invalid; failing closed."
                 - variables:
                     _event_at: "{{ as_timestamp(now()) }}"
                     _event_symbol: "{{ 'A' if _mode == 'simple' else wait.trigger.id | string }}"
@@ -492,13 +571,12 @@ actions:
                     - conditions: "{{ (_event_at | float(0) - _last_at | float(0)) * 1000 < _debounce_ms | float(0) }}"
                       sequence: []
                   default:
-                    - variables:
-                        _last_at: "{{ _event_at }}"
                     - choose:
                         - conditions: "{{ _event_symbol == _code[_progress | int(0)] }}"
                           sequence:
                             - variables:
                                 _progress: "{{ _progress | int(0) + 1 }}"
+                                _last_at: "{{ _event_at }}"
                         - conditions: "{{ _wrong_policy == 'reset' }}"
                           sequence:
                             - variables:
@@ -532,15 +610,20 @@ actions:
                                           target:
                                             entity_id: "{{ _lock_helper }}"
                                           data:
-                                            datetime: "{{ (now() + timedelta(seconds=_lock_seconds | int(300))).strftime('%Y-%m-%d %H:%M:%S') }}"
-                                        - choose:
-                                            - conditions: "{{ true }}"
-                                              sequence: !input lock_started_actions
+                                            timestamp: "{{ (as_timestamp(now()) + _lock_seconds | int(300)) | round(0, 'ceil') | int }}"
                                     - action: input_number.set_value
                                       target:
                                         entity_id: "{{ _count_helper }}"
                                       data:
                                         value: "{{ _next_failure_count | int }}"
+                                    - condition: template
+                                      value_template: >-
+                                        {{ states(_count_helper) | int(-1) == _next_failure_count | int
+                                           and (_next_failure_count | int < _maximum_failures | int(1)
+                                                or as_timestamp(states(_lock_helper), default=0) > as_timestamp(now())) }}
+                                    - choose:
+                                        - conditions: "{{ _next_failure_count | int >= _maximum_failures | int(1) }}"
+                                          sequence: !input lock_started_actions
                             - choose:
                                 - conditions: "{{ true }}"
                                   sequence: !input failure_actions
@@ -556,8 +639,16 @@ actions:
                                 - variables:
                                     _progress: 1
                                     _started_at: "{{ _event_at }}"
+                                    _last_at: "{{ _event_at }}"
                                     _outcome: running
                                     _failure_recorded: false
+  - alias: "Validate live storage after collection"
+    if:
+      - condition: template
+        value_template: *helpers_valid
+    then: []
+    else:
+      - stop: "Unlock Sequence: protection storage invalid; failing closed."
   - alias: "Handle timeouts (wrong inputs were already recorded)"
     if: "{{ _outcome == 'failed' and not _failure_recorded }}"
     then:
@@ -585,15 +676,20 @@ actions:
                     target:
                       entity_id: "{{ _lock_helper }}"
                     data:
-                      datetime: "{{ (now() + timedelta(seconds=_lock_seconds | int(300))).strftime('%Y-%m-%d %H:%M:%S') }}"
-                  - choose:
-                      - conditions: "{{ true }}"
-                        sequence: !input lock_started_actions
+                      timestamp: "{{ (as_timestamp(now()) + _lock_seconds | int(300)) | round(0, 'ceil') | int }}"
               - action: input_number.set_value
                 target:
                   entity_id: "{{ _count_helper }}"
                 data:
                   value: "{{ _next_failure_count | int }}"
+              - condition: template
+                value_template: >-
+                  {{ states(_count_helper) | int(-1) == _next_failure_count | int
+                     and (_next_failure_count | int < _maximum_failures | int(1)
+                          or as_timestamp(states(_lock_helper), default=0) > as_timestamp(now())) }}
+              - choose:
+                  - conditions: "{{ _next_failure_count | int >= _maximum_failures | int(1) }}"
+                    sequence: !input lock_started_actions
       - choose:
           - conditions: "{{ true }}"
             sequence: !input failure_actions
@@ -604,6 +700,17 @@ actions:
     if: "{{ _progress | int(0) != _code | length or not (_helpers_valid | bool(false)) }}"
     then:
       - stop: "Unlock Sequence: incomplete sequence or helper failure; failing closed."
+  - alias: "Validate live protection state before final authorization"
+    if:
+      - condition: template
+        value_template: *helpers_valid
+    then: []
+    else:
+      - stop: "Unlock Sequence: protection storage invalid; failing closed."
+  - condition: template
+    value_template: >-
+      {{ (not _protect or as_timestamp(states(_lock_helper), default=none) <= as_timestamp(now()))
+         and (_cooldown_seconds | int(0) == 0 or as_timestamp(states(_cooldown_helper), default=none) <= as_timestamp(now())) }}
   - alias: "Check final authorization"
     choose:
       - conditions:
@@ -643,15 +750,20 @@ actions:
                         target:
                           entity_id: "{{ _lock_helper }}"
                         data:
-                          datetime: "{{ (now() + timedelta(seconds=_lock_seconds | int(300))).strftime('%Y-%m-%d %H:%M:%S') }}"
-                      - choose:
-                          - conditions: "{{ true }}"
-                            sequence: !input lock_started_actions
+                          timestamp: "{{ (as_timestamp(now()) + _lock_seconds | int(300)) | round(0, 'ceil') | int }}"
                   - action: input_number.set_value
                     target:
                       entity_id: "{{ _count_helper }}"
                     data:
                       value: "{{ _next_failure_count | int }}"
+                  - condition: template
+                    value_template: >-
+                      {{ states(_count_helper) | int(-1) == _next_failure_count | int
+                         and (_next_failure_count | int < _maximum_failures | int(1)
+                              or as_timestamp(states(_lock_helper), default=0) > as_timestamp(now())) }}
+                  - choose:
+                      - conditions: "{{ _next_failure_count | int >= _maximum_failures | int(1) }}"
+                        sequence: !input lock_started_actions
           - choose:
               - conditions: "{{ true }}"
                 sequence: !input failure_actions
@@ -663,7 +775,7 @@ actions:
         target:
           entity_id: "{{ _cooldown_helper }}"
         data:
-          datetime: "{{ (now() + timedelta(seconds=_cooldown_seconds | int(0))).strftime('%Y-%m-%d %H:%M:%S') }}"
+          timestamp: "{{ (as_timestamp(now()) + _cooldown_seconds | int(0)) | round(0, 'ceil') | int }}"
   - if: "{{ _protect and _reset_on == 'recognition' }}"
     then:
       - action: input_number.set_value
@@ -671,6 +783,18 @@ actions:
           entity_id: "{{ _count_helper }}"
         data:
           value: 0
+  - alias: "Validate live storage immediately before success actions"
+    if:
+      - condition: template
+        value_template: *helpers_valid
+    then: []
+    else:
+      - stop: "Unlock Sequence: protection storage invalid; failing closed."
+  - alias: "Verify recognition cooldown was actually stored"
+    condition: template
+    value_template: >-
+      {{ _cooldown_seconds | int(0) == 0 or _cooldown_on != 'recognition'
+         or as_timestamp(states(_cooldown_helper), default=0) > as_timestamp(now()) }}
   - alias: "Run the authorized user action exactly once"
     choose:
       - conditions: "{{ true }}"
@@ -721,8 +845,12 @@ actions:
   - alias: "Release failure counter only after confirmed completion, when selected"
     if: "{{ _protect and _reset_on == 'confirmed' }}"
     then:
-      - condition: template
-        value_template: "{{ _helpers_valid | bool(false) }}"
+      - if:
+          - condition: template
+            value_template: *helpers_valid
+        then: []
+        else:
+          - stop: "Unlock Sequence: protection storage invalid; failing closed."
       - action: input_number.set_value
         target:
           entity_id: "{{ _count_helper }}"
@@ -731,10 +859,14 @@ actions:
   - alias: "Start success cooldown after completion, when selected"
     if: "{{ _cooldown_seconds | int(0) > 0 and _cooldown_on == 'confirmed' }}"
     then:
-      - condition: template
-        value_template: "{{ _helpers_valid | bool(false) }}"
+      - if:
+          - condition: template
+            value_template: *helpers_valid
+        then: []
+        else:
+          - stop: "Unlock Sequence: protection storage invalid; failing closed."
       - action: input_datetime.set_datetime
         target:
           entity_id: "{{ _cooldown_helper }}"
         data:
-          datetime: "{{ (now() + timedelta(seconds=_cooldown_seconds | int(0))).strftime('%Y-%m-%d %H:%M:%S') }}"
+          timestamp: "{{ (as_timestamp(now()) + _cooldown_seconds | int(0)) | round(0, 'ceil') | int }}"
