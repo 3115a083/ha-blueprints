@@ -10,7 +10,7 @@ from homeassistant.config_entries import ConfigEntries
 from homeassistant.core import Context, HomeAssistant
 from homeassistant.components.blueprint.models import Blueprint, BlueprintInputs
 from homeassistant.components.blueprint.schemas import BLUEPRINT_SCHEMA
-from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import config_validation as cv, trigger as trigger_helper
 from homeassistant.helpers.script import Script, async_validate_actions_config
 from homeassistant.util.yaml import load_yaml
 
@@ -55,6 +55,7 @@ async def test_expanded_unlock_actions_validate_with_real_ha(tmp_path):
     hass = HomeAssistant(str(tmp_path))
     hass.config_entries = ConfigEntries(hass, {})
     loader.async_setup(hass)
+    await trigger_helper.async_setup(hass)
     try:
         config = substitute()
         actions = await async_validate_actions_config(
@@ -71,6 +72,7 @@ async def test_one_event_can_execute_safe_action_once(tmp_path):
     hass = HomeAssistant(str(tmp_path))
     hass.config_entries = ConfigEntries(hass, {})
     loader.async_setup(hass)
+    await trigger_helper.async_setup(hass)
     seen = []
 
     async def record(call):
