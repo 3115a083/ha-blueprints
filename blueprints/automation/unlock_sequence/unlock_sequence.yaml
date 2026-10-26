@@ -1,0 +1,872 @@
+blueprint:
+  name: "Unlock Sequence | Ordered multi-trigger access"
+  description: >-
+    Detect one ordered sequence of 1–16 inputs with independent whole-sequence and
+    per-step deadlines, optional persistent failure lockout, independent safety
+    conditions and one-shot actions. Always use trusted inputs and an additional
+    authorization guard before controlling locks or alarm panels. This is not a
+    certified access-control system. Read the README before use.
+  domain: automation
+  author: "3115a083"
+  source_url: https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/unlock_sequence/unlock_sequence.yaml
+  homeassistant:
+    min_version: "2026.10.0"
+  input:
+    sequence:
+      name: "01 | Input source and sequence"
+      input:
+        configuration_mode:
+          name: "Configuration mode"
+          default: simple
+          selector:
+            select:
+              options:
+                - label: "Simple: repeat one trigger"
+                  value: simple
+                - label: "Advanced: ordered symbols (A–P)"
+                  value: advanced
+        simple_triggers:
+          name: "Simple mode: one trigger"
+          description: "Configure EXACTLY ONE Home Assistant trigger. Repeats are handled without duplicate subscriptions."
+          default: []
+          selector:
+            trigger: {}
+        simple_repeats:
+          name: "Simple mode: number of activations"
+          default: 4
+          selector:
+            number:
+              min: 1
+              max: 16
+              step: 1
+              mode: box
+        advanced_triggers:
+          name: "Advanced mode: named input triggers"
+          description: >-
+            Add 1–16 DISTINCT triggers, each with a unique trigger ID A through P
+            (edit ID in the trigger editor/YAML). Define each physical input only
+            once; sequence letters may be reused. An unset/duplicate ID is rejected.
+          default: []
+          selector:
+            trigger: {}
+        advanced_code:
+          name: "Advanced mode: ordered sequence"
+          description: "Example: ABCD for four buttons, AAAA for four activations of A; length 1–16."
+          default: ABCD
+          selector:
+            text: {}
+    timing:
+      name: "02 | Timing and error handling"
+      input:
+        total_timeout:
+          name: "Whole sequence time limit (seconds; 0 disables)"
+          default: 30
+          selector:
+            number:
+              min: 0
+              max: 3600
+              step: 1
+              mode: box
+        step_timeout:
+          name: "Maximum gap between inputs (seconds; 0 disables)"
+          default: 10
+          selector:
+            number:
+              min: 0
+              max: 3600
+              step: 1
+              mode: box
+        debounce_ms:
+          name: "Minimum interval between counted inputs (milliseconds)"
+          default: 300
+          selector:
+            number:
+              min: 0
+              max: 5000
+              step: 10
+              mode: box
+        wrong_input_policy:
+          name: "Wrong inputs"
+          default: reset
+          selector:
+            select:
+              options:
+                - label: "Reset and count a failure"
+                  value: reset
+                - label: "Ignore and continue waiting"
+                  value: ignore
+        reuse_wrong_first:
+          name: "Reuse a wrong input as the first step of a new attempt"
+          description: "Only meaningful with Reset; disabled by default for security."
+          default: false
+          selector:
+            boolean: {}
+        denied_conditions_are_failure:
+          name: "Count denied final safety conditions as a failed attempt"
+          default: true
+          selector:
+            boolean: {}
+    guards:
+      name: "03 | Authorization"
+      input:
+        start_conditions:
+          name: "Conditions required to begin"
+          default: []
+          selector:
+            condition: {}
+        success_conditions:
+          name: "Conditions required again immediately before the success action"
+          default: []
+          selector:
+            condition: {}
+    protection:
+      name: "04 | Optional persistent failed-attempt lockout"
+      input:
+        protection_enabled:
+          name: "Enable failed-attempt lockout"
+          default: false
+          selector:
+            boolean: {}
+        max_failures:
+          name: "Failed attempts before lockout"
+          default: 3
+          selector:
+            number:
+              min: 1
+              max: 100
+              step: 1
+              mode: box
+        failure_lock_seconds:
+          name: "Lockout duration (seconds)"
+          default: 300
+          selector:
+            number:
+              min: 1
+              max: 86400
+              step: 1
+              mode: box
+        failure_count:
+          name: "Persistent failed-attempt counter"
+          description: "Required only when lockout is enabled; use a dedicated input_number with min 0, max >= 100, step 1."
+          default: ""
+          selector:
+            entity:
+              filter:
+                domain: input_number
+        failure_lock_until:
+          name: "Persistent lockout deadline"
+          description: "Required only when lockout is enabled; dedicated input_datetime with date AND time."
+          default: ""
+          selector:
+            entity:
+              filter:
+                domain: input_datetime
+        failure_window_mode:
+          name: "Failed-attempt counting window"
+          default: cumulative
+          selector:
+            select:
+              options:
+                - label: "Accumulate until successful or lockout ends"
+                  value: cumulative
+                - label: "Fixed window starting at first failed attempt"
+                  value: fixed
+        failure_window_seconds:
+          name: "Fixed failed-attempt window (seconds)"
+          default: 900
+          selector:
+            number:
+              min: 1
+              max: 86400
+              step: 1
+              mode: box
+        failure_window_started:
+          name: "Persistent start of failed-attempt window"
+          description: "Required only for fixed-window lockout; dedicated input_datetime with date AND time."
+          default: ""
+          selector:
+            entity:
+              filter:
+                domain: input_datetime
+        success_cooldown_seconds:
+          name: "Cooldown after a valid sequence (seconds; 0 disables)"
+          default: 30
+          selector:
+            number:
+              min: 0
+              max: 86400
+              step: 1
+              mode: box
+        success_cooldown_until:
+          name: "Persistent success cooldown deadline"
+          description: "Required only if cooldown > 0; dedicated input_datetime with date AND time."
+          default: ""
+          selector:
+            entity:
+              filter:
+                domain: input_datetime
+        success_cooldown_start:
+          name: "When to begin success cooldown"
+          default: recognition
+          selector:
+            select:
+              options:
+                - label: "Immediately after valid code and final authorization"
+                  value: recognition
+                - label: "Only after successful action and optional confirmation"
+                  value: confirmed
+        reset_failures_on:
+          name: "When to clear failed-attempt counter"
+          default: recognition
+          selector:
+            select:
+              options:
+                - label: "After valid code and final authorization"
+                  value: recognition
+                - label: "After successful action and optional confirmation"
+                  value: confirmed
+    confirmation:
+      name: "05 | Optional result confirmation"
+      input:
+        verify_enabled:
+          name: "Verify that the desired result was reached"
+          default: false
+          selector:
+            boolean: {}
+        verify_conditions:
+          name: "Conditions indicating the desired result"
+          description: "Must contain at least one condition when verification is enabled."
+          default: []
+          selector:
+            condition: {}
+        verify_triggers:
+          name: "Changes that can make the confirmation true"
+          description: "For event-driven verification, add the relevant state/event triggers. No polling is used."
+          default: []
+          selector:
+            trigger: {}
+        verify_timeout:
+          name: "Confirmation timeout (seconds)"
+          default: 5
+          selector:
+            number:
+              min: 1
+              max: 300
+              step: 1
+              mode: box
+    responses:
+      name: "06 | Actions"
+      input:
+        success_actions:
+          name: "Actions after a valid and authorized sequence"
+          default: []
+          selector:
+            action: {}
+        failure_actions:
+          name: "Actions on failed attempt"
+          default: []
+          selector:
+            action: {}
+        lock_started_actions:
+          name: "Actions when failed-attempt lockout starts"
+          default: []
+          selector:
+            action: {}
+        lock_ended_actions:
+          name: "Actions when failed-attempt lockout ends"
+          default: []
+          selector:
+            action: {}
+        error_actions:
+          name: "Actions on missing result confirmation"
+          description: >-
+            Called after an unconfirmed result. Home Assistant cannot reliably catch
+            arbitrary service-call exceptions inside user-provided action lists;
+            these are logged by Home Assistant and abort the run.
+          default: []
+          selector:
+            action: {}
+
+trigger_variables:
+  _failure_deadline_trigger: !input failure_lock_until
+triggers:
+  - triggers: !input simple_triggers
+  - triggers: !input advanced_triggers
+  - trigger: homeassistant
+    event: start
+    id: "__ha_start"
+  - trigger: time
+    at: "{{ _failure_deadline_trigger if _failure_deadline_trigger else '00:00:00' }}"
+    id: "__lock_expiry"
+
+variables:
+  _mode: !input configuration_mode
+  _simple_triggers: !input simple_triggers
+  _simple_repeats: !input simple_repeats
+  _advanced_triggers: !input advanced_triggers
+  _advanced_code: !input advanced_code
+  _total_timeout: !input total_timeout
+  _step_timeout: !input step_timeout
+  _debounce_ms: !input debounce_ms
+  _wrong_policy: !input wrong_input_policy
+  _reuse_wrong: !input reuse_wrong_first
+  _denied_is_failure: !input denied_conditions_are_failure
+  _protect: !input protection_enabled
+  _maximum_failures: !input max_failures
+  _lock_seconds: !input failure_lock_seconds
+  _count_helper: !input failure_count
+  _lock_helper: !input failure_lock_until
+  _window_mode: !input failure_window_mode
+  _window_seconds: !input failure_window_seconds
+  _window_helper: !input failure_window_started
+  _cooldown_seconds: !input success_cooldown_seconds
+  _cooldown_helper: !input success_cooldown_until
+  _cooldown_on: !input success_cooldown_start
+  _reset_on: !input reset_failures_on
+  _verify: !input verify_enabled
+  _verify_conditions: !input verify_conditions
+  _verify_triggers: !input verify_triggers
+  _verify_timeout: !input verify_timeout
+  _code: >-
+    {{ ('A' * (_simple_repeats | int(0))) if _mode == 'simple'
+       else (_advanced_code | upper | replace(' ', '') | replace('-', '')) }}
+  _configuration_valid: >-
+    {% set c = _code | string %}
+    {% set ns = namespace(ok=true, ids=[], definitions=[]) %}
+    {% if c | length < 1 or c | length > 16 or (_total_timeout | int(0) == 0 and _step_timeout | int(0) == 0) %}
+      {% set ns.ok = false %}
+    {% endif %}
+    {% if _mode == 'simple' %}
+      {% if _simple_triggers | length != 1 or _advanced_triggers | length != 0 %}
+        {% set ns.ok = false %}
+      {% endif %}
+    {% elif _mode == 'advanced' %}
+      {% if _simple_triggers | length != 0 or _advanced_triggers | length < 1 or _advanced_triggers | length > 16 %}
+        {% set ns.ok = false %}
+      {% endif %}
+      {% for item in _advanced_triggers %}
+        {% set name = item.get('id', '') | string %}
+        {% set definition = (item | dictsort | rejectattr(0, 'eq', 'id') | list | string) %}
+        {% if name | length != 1 or name not in 'ABCDEFGHIJKLMNOP' or name in ns.ids or definition in ns.definitions %}
+          {% set ns.ok = false %}
+        {% endif %}
+        {% set ns.ids = ns.ids + [name] %}
+        {% set ns.definitions = ns.definitions + [definition] %}
+      {% endfor %}
+      {% for symbol in c %}
+        {% if symbol not in ns.ids %}
+          {% set ns.ok = false %}
+        {% endif %}
+      {% endfor %}
+    {% else %}
+      {% set ns.ok = false %}
+    {% endif %}
+    {# Only accept a multi-source bank when every pair is provably disjoint.
+       Unknown combinations fail closed; a single opaque source remains usable. #}
+    {% set bank = _simple_triggers if _mode == 'simple' else _advanced_triggers %}
+    {% for a in bank %}
+      {% if a is not mapping or 'variables' in a or 'triggers' in a %}
+        {% set ns.ok = false %}
+      {% endif %}
+      {% for b in bank[loop.index:] %}
+        {% set pair = namespace(disjoint=false) %}
+        {% set pa = a.get('trigger', a.get('platform', '')) %}
+        {% set pb = b.get('trigger', b.get('platform', '')) %}
+        {% set dynamic = a | string ~ b | string %}
+        {% if '{{' not in dynamic and '{%' not in dynamic and '{#' not in dynamic %}
+          {% if pa == 'event' and pb == 'event' %}
+            {% set ea = a.get('event_type') %}
+            {% set eb = b.get('event_type') %}
+            {% if ea is string and eb is string and ea != eb %}
+              {% set pair.disjoint = true %}
+            {% elif ea is string and eb is string %}
+              {% set da = a.get('event_data', {}) %}
+              {% set db = b.get('event_data', {}) %}
+              {% if da is mapping and db is mapping %}
+                {% for key, value in da.items() %}
+                  {% if key in db and value is string and db[key] is string and value != db[key] %}
+                    {% set pair.disjoint = true %}
+                  {% endif %}
+                {% endfor %}
+              {% endif %}
+            {% endif %}
+          {% elif pa == 'mqtt' and pb == 'mqtt' and 'value_template' not in a and 'value_template' not in b %}
+            {% set ta = a.get('topic', '') %}
+            {% set tb = b.get('topic', '') %}
+            {% if ta is string and tb is string and '+' not in ta and '#' not in ta and '+' not in tb and '#' not in tb %}
+              {% if ta != tb or (a.get('payload') is string and b.get('payload') is string and a.get('payload') != b.get('payload')) %}
+                {% set pair.disjoint = true %}
+              {% endif %}
+            {% endif %}
+          {% elif pa == 'state' and pb == 'state' %}
+            {% set ea = a.get('entity_id') %}
+            {% set eb = b.get('entity_id') %}
+            {% if ea is string and eb is string %}
+              {% if ea != eb %}
+                {% set pair.disjoint = true %}
+              {% elif a.get('attribute') == b.get('attribute') %}
+                {% for key in ['from', 'to'] %}
+                  {% if a.get(key) is string and b.get(key) is string and a.get(key) != b.get(key) %}
+                    {% set pair.disjoint = true %}
+                  {% endif %}
+                {% endfor %}
+              {% endif %}
+            {% endif %}
+          {% endif %}
+        {% endif %}
+        {% if not pair.disjoint %}{% set ns.ok = false %}{% endif %}
+      {% endfor %}
+    {% endfor %}
+    {{ ns.ok }}
+  _helpers_valid: &helpers_valid >-
+    {% set ns = namespace(ok=true, dates=[]) %}
+    {% if _protect %}
+      {% if not _count_helper.startswith('input_number.') or states(_count_helper) in ['unknown', 'unavailable', 'none']
+            or states(_count_helper) | float(-1) < 0
+            or states(_count_helper) | float(-1) != states(_count_helper) | int(-2)
+            or state_attr(_count_helper, 'min') | float(-1) != 0
+            or state_attr(_count_helper, 'max') | float(-1) < _maximum_failures | int(1)
+            or states(_count_helper) | float(-1) > state_attr(_count_helper, 'max') | float(-1)
+            or state_attr(_count_helper, 'step') | float(-1) != 1
+            or not _lock_helper.startswith('input_datetime.')
+            or not state_attr(_lock_helper, 'has_date') or not state_attr(_lock_helper, 'has_time')
+            or as_timestamp(states(_lock_helper), default=none) is none %}
+        {% set ns.ok = false %}
+      {% endif %}
+      {% set ns.dates = ns.dates + [_lock_helper] %}
+      {% if _window_mode == 'fixed' %}{% set ns.dates = ns.dates + [_window_helper] %}{% endif %}
+      {% if _window_mode == 'fixed' and (not _window_helper.startswith('input_datetime.')
+          or not state_attr(_window_helper, 'has_date') or not state_attr(_window_helper, 'has_time')
+          or as_timestamp(states(_window_helper), default=none) is none) %}
+        {% set ns.ok = false %}
+      {% endif %}
+    {% endif %}
+    {% if _cooldown_seconds | int(0) > 0 and (not _cooldown_helper.startswith('input_datetime.')
+          or not state_attr(_cooldown_helper, 'has_date') or not state_attr(_cooldown_helper, 'has_time')
+          or as_timestamp(states(_cooldown_helper), default=none) is none) %}
+      {% set ns.ok = false %}
+    {% endif %}
+    {% if _cooldown_seconds | int(0) > 0 %}{% set ns.dates = ns.dates + [_cooldown_helper] %}{% endif %}
+    {% if ns.dates | unique | list | length != ns.dates | length %}{% set ns.ok = false %}{% endif %}
+    {% if _verify and (_verify_conditions | length == 0 or _verify_triggers | length == 0) %}
+      {% set ns.ok = false %}
+    {% endif %}
+    {{ ns.ok }}
+
+mode: single
+max_exceeded: silent
+actions:
+  - alias: "Refuse invalid configuration or unavailable protection storage"
+    if:
+      - condition: template
+        value_template: "{{ not (_configuration_valid | bool(false)) or not (_helpers_valid | bool(false)) }}"
+    then:
+      - stop: "Unlock Sequence: invalid configuration or required helper unavailable; failing closed."
+  - alias: "Reconcile expired persistent failure lockout (including after restart)"
+    if:
+      - condition: template
+        value_template: >-
+          {{ _protect and states(_count_helper) | int(0) >= _maximum_failures | int(1)
+             and as_timestamp(states(_lock_helper), default=0) <= as_timestamp(now()) }}
+    then:
+      - action: input_number.set_value
+        target:
+          entity_id: "{{ _count_helper }}"
+        data:
+          value: 0
+      - choose:
+          - conditions: "{{ _window_mode == 'fixed' }}"
+            sequence:
+              - action: input_datetime.set_datetime
+                target:
+                  entity_id: "{{ _window_helper }}"
+                data:
+                  datetime: "1970-01-01 00:00:00"
+      - choose:
+          - conditions: "{{ true }}"
+            sequence: !input lock_ended_actions
+  - alias: "Infrastructure triggers never start an access attempt"
+    if:
+      - condition: template
+        value_template: "{{ trigger.id in ['__ha_start', '__lock_expiry'] }}"
+    then:
+      - stop: "Unlock Sequence: reconciliation only."
+  - alias: "Reject a still-active persistent lockout or cooldown"
+    if:
+      - condition: template
+        value_template: >-
+          {{ (_protect and as_timestamp(states(_lock_helper), default=0) > as_timestamp(now()))
+             or (_cooldown_seconds | int(0) > 0
+             and as_timestamp(states(_cooldown_helper), default=0) > as_timestamp(now())) }}
+    then:
+      - stop: "Unlock Sequence: lockout or success cooldown active."
+  - alias: "Check start authorization"
+    condition: and
+    conditions: !input start_conditions
+  - variables:
+      _first_symbol: "{{ 'A' if _mode == 'simple' else trigger.id | string }}"
+      _started_at: "{{ as_timestamp(now()) }}"
+      _last_at: "{{ as_timestamp(now()) }}"
+      _progress: 1
+      _outcome: running
+      _event_symbol: ""
+      _restart_allowed: false
+      _failure_recorded: false
+  - alias: "Only the first symbol may start an attempt"
+    if:
+      - condition: template
+        value_template: "{{ _first_symbol != _code[0] }}"
+    then:
+      - stop: "Unlock Sequence: ignored non-starting input."
+  - alias: "Wait for remaining ordered inputs without polling"
+    repeat:
+      while:
+        - condition: template
+          value_template: "{{ _outcome == 'running' and _progress | int(0) < _code | length }}"
+      sequence:
+        - alias: "Validate live storage before waiting"
+          if:
+            - condition: template
+              value_template: *helpers_valid
+          then: []
+          else:
+            - stop: "Unlock Sequence: protection storage invalid; failing closed."
+        - variables:
+            _remaining: >-
+              {% set n = as_timestamp(now()) %}
+              {% set total = (_total_timeout | float(0) - (n - _started_at | float(0)))
+                             if _total_timeout | float(0) > 0 else 3601 %}
+              {% set gap = (_step_timeout | float(0) - (n - _last_at | float(0)))
+                           if _step_timeout | float(0) > 0 else 3601 %}
+              {{ [total, gap] | min }}
+        - choose:
+            - conditions: "{{ _remaining | float(-1) <= 0 }}"
+              sequence:
+                - variables:
+                    _outcome: failed
+          default:
+            - wait_for_trigger:
+                - triggers: !input simple_triggers
+                - triggers: !input advanced_triggers
+              timeout:
+                seconds: "{{ _remaining | float(0) }}"
+              continue_on_timeout: true
+            - choose:
+                - conditions: "{{ not wait.completed }}"
+                  sequence:
+                    - variables:
+                        _outcome: failed
+              default:
+                - alias: "Fail closed if storage became invalid during the wait"
+                  if:
+                    - condition: template
+                      value_template: *helpers_valid
+                  then: []
+                  else:
+                    - stop: "Unlock Sequence: protection storage invalid; failing closed."
+                - variables:
+                    _event_at: "{{ as_timestamp(now()) }}"
+                    _event_symbol: "{{ 'A' if _mode == 'simple' else wait.trigger.id | string }}"
+                - choose:
+                    - conditions: "{{ (_event_at | float(0) - _last_at | float(0)) * 1000 < _debounce_ms | float(0) }}"
+                      sequence: []
+                  default:
+                    - choose:
+                        - conditions: "{{ _event_symbol == _code[_progress | int(0)] }}"
+                          sequence:
+                            - variables:
+                                _progress: "{{ _progress | int(0) + 1 }}"
+                                _last_at: "{{ _event_at }}"
+                        - conditions: "{{ _wrong_policy == 'reset' }}"
+                          sequence:
+                            - variables:
+                                _restart_allowed: >-
+                                  {{ _reuse_wrong and _event_symbol == _code[0] }}
+                            - variables:
+                                _outcome: failed
+                                _failure_recorded: true
+                            # A wrong input is a completed failed attempt.
+                            - choose:
+                                - conditions: "{{ _protect }}"
+                                  sequence:
+                                    - variables:
+                                        _window_expired: >-
+                                          {{ _window_mode == 'fixed' and
+                                             (states(_count_helper) | int(0) == 0 or
+                                              as_timestamp(now()) - as_timestamp(states(_window_helper), default=0)
+                                              >= _window_seconds | float(900)) }}
+                                        _next_failure_count: >-
+                                          {{ 1 if _window_expired else states(_count_helper) | int(0) + 1 }}
+                                    - if: "{{ _window_mode == 'fixed' and _window_expired }}"
+                                      then:
+                                        - action: input_datetime.set_datetime
+                                          target:
+                                            entity_id: "{{ _window_helper }}"
+                                          data:
+                                            datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+                                    - if: "{{ _next_failure_count | int >= _maximum_failures | int(1) }}"
+                                      then:
+                                        - action: input_datetime.set_datetime
+                                          target:
+                                            entity_id: "{{ _lock_helper }}"
+                                          data:
+                                            timestamp: "{{ (as_timestamp(now()) + _lock_seconds | int(300)) | round(0, 'ceil') | int }}"
+                                    - action: input_number.set_value
+                                      target:
+                                        entity_id: "{{ _count_helper }}"
+                                      data:
+                                        value: "{{ _next_failure_count | int }}"
+                                    - condition: template
+                                      value_template: >-
+                                        {{ states(_count_helper) | int(-1) == _next_failure_count | int
+                                           and (_next_failure_count | int < _maximum_failures | int(1)
+                                                or as_timestamp(states(_lock_helper), default=0) > as_timestamp(now())) }}
+                                    - choose:
+                                        - conditions: "{{ _next_failure_count | int >= _maximum_failures | int(1) }}"
+                                          sequence: !input lock_started_actions
+                            - choose:
+                                - conditions: "{{ true }}"
+                                  sequence: !input failure_actions
+                            - if:
+                                - condition: template
+                                  value_template: >-
+                                    {{ _restart_allowed and (_helpers_valid | bool(false))
+                                       and (not _protect or (states(_count_helper) | int(0) < _maximum_failures | int(1)
+                                         and as_timestamp(states(_lock_helper), default=0) <= as_timestamp(now()))) }}
+                                - condition: and
+                                  conditions: !input start_conditions
+                              then:
+                                - variables:
+                                    _progress: 1
+                                    _started_at: "{{ _event_at }}"
+                                    _last_at: "{{ _event_at }}"
+                                    _outcome: running
+                                    _failure_recorded: false
+  - alias: "Validate live storage after collection"
+    if:
+      - condition: template
+        value_template: *helpers_valid
+    then: []
+    else:
+      - stop: "Unlock Sequence: protection storage invalid; failing closed."
+  - alias: "Handle timeouts (wrong inputs were already recorded)"
+    if: "{{ _outcome == 'failed' and not _failure_recorded }}"
+    then:
+      - choose:
+          - conditions: "{{ _protect }}"
+            sequence:
+              - variables:
+                  _window_expired: >-
+                    {{ _window_mode == 'fixed' and
+                       (states(_count_helper) | int(0) == 0 or
+                        as_timestamp(now()) - as_timestamp(states(_window_helper), default=0)
+                        >= _window_seconds | float(900)) }}
+                  _next_failure_count: >-
+                    {{ 1 if _window_expired else states(_count_helper) | int(0) + 1 }}
+              - if: "{{ _window_mode == 'fixed' and _window_expired }}"
+                then:
+                  - action: input_datetime.set_datetime
+                    target:
+                      entity_id: "{{ _window_helper }}"
+                    data:
+                      datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+              - if: "{{ _next_failure_count | int >= _maximum_failures | int(1) }}"
+                then:
+                  - action: input_datetime.set_datetime
+                    target:
+                      entity_id: "{{ _lock_helper }}"
+                    data:
+                      timestamp: "{{ (as_timestamp(now()) + _lock_seconds | int(300)) | round(0, 'ceil') | int }}"
+              - action: input_number.set_value
+                target:
+                  entity_id: "{{ _count_helper }}"
+                data:
+                  value: "{{ _next_failure_count | int }}"
+              - condition: template
+                value_template: >-
+                  {{ states(_count_helper) | int(-1) == _next_failure_count | int
+                     and (_next_failure_count | int < _maximum_failures | int(1)
+                          or as_timestamp(states(_lock_helper), default=0) > as_timestamp(now())) }}
+              - choose:
+                  - conditions: "{{ _next_failure_count | int >= _maximum_failures | int(1) }}"
+                    sequence: !input lock_started_actions
+      - choose:
+          - conditions: "{{ true }}"
+            sequence: !input failure_actions
+  - if: "{{ _outcome == 'failed' }}"
+    then:
+      - stop: "Unlock Sequence: attempt failed."
+  - alias: "Require completion and valid security state again"
+    if: "{{ _progress | int(0) != _code | length or not (_helpers_valid | bool(false)) }}"
+    then:
+      - stop: "Unlock Sequence: incomplete sequence or helper failure; failing closed."
+  - alias: "Validate live protection state before final authorization"
+    if:
+      - condition: template
+        value_template: *helpers_valid
+    then: []
+    else:
+      - stop: "Unlock Sequence: protection storage invalid; failing closed."
+  - condition: template
+    value_template: >-
+      {{ (not _protect or as_timestamp(states(_lock_helper), default=none) <= as_timestamp(now()))
+         and (_cooldown_seconds | int(0) == 0 or as_timestamp(states(_cooldown_helper), default=none) <= as_timestamp(now())) }}
+  - alias: "Check final authorization"
+    choose:
+      - conditions:
+          - condition: and
+            conditions: !input success_conditions
+        sequence:
+          - variables:
+              _authorized: true
+    default:
+      - variables:
+          _authorized: false
+  - if: "{{ not _authorized }}"
+    then:
+      - if: "{{ _denied_is_failure }}"
+        then:
+          - choose:
+              - conditions: "{{ _protect }}"
+                sequence:
+                  - variables:
+                      _window_expired: >-
+                        {{ _window_mode == 'fixed' and
+                           (states(_count_helper) | int(0) == 0 or
+                            as_timestamp(now()) - as_timestamp(states(_window_helper), default=0)
+                            >= _window_seconds | float(900)) }}
+                      _next_failure_count: >-
+                        {{ 1 if _window_expired else states(_count_helper) | int(0) + 1 }}
+                  - if: "{{ _window_mode == 'fixed' and _window_expired }}"
+                    then:
+                      - action: input_datetime.set_datetime
+                        target:
+                          entity_id: "{{ _window_helper }}"
+                        data:
+                          datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+                  - if: "{{ _next_failure_count | int >= _maximum_failures | int(1) }}"
+                    then:
+                      - action: input_datetime.set_datetime
+                        target:
+                          entity_id: "{{ _lock_helper }}"
+                        data:
+                          timestamp: "{{ (as_timestamp(now()) + _lock_seconds | int(300)) | round(0, 'ceil') | int }}"
+                  - action: input_number.set_value
+                    target:
+                      entity_id: "{{ _count_helper }}"
+                    data:
+                      value: "{{ _next_failure_count | int }}"
+                  - condition: template
+                    value_template: >-
+                      {{ states(_count_helper) | int(-1) == _next_failure_count | int
+                         and (_next_failure_count | int < _maximum_failures | int(1)
+                              or as_timestamp(states(_lock_helper), default=0) > as_timestamp(now())) }}
+                  - choose:
+                      - conditions: "{{ _next_failure_count | int >= _maximum_failures | int(1) }}"
+                        sequence: !input lock_started_actions
+          - choose:
+              - conditions: "{{ true }}"
+                sequence: !input failure_actions
+      - stop: "Unlock Sequence: final authorization denied."
+  - alias: "Start protection BEFORE any externally visible success action"
+    if: "{{ _cooldown_seconds | int(0) > 0 and _cooldown_on == 'recognition' }}"
+    then:
+      - action: input_datetime.set_datetime
+        target:
+          entity_id: "{{ _cooldown_helper }}"
+        data:
+          timestamp: "{{ (as_timestamp(now()) + _cooldown_seconds | int(0)) | round(0, 'ceil') | int }}"
+  - if: "{{ _protect and _reset_on == 'recognition' }}"
+    then:
+      - action: input_number.set_value
+        target:
+          entity_id: "{{ _count_helper }}"
+        data:
+          value: 0
+  - alias: "Validate live storage immediately before success actions"
+    if:
+      - condition: template
+        value_template: *helpers_valid
+    then: []
+    else:
+      - stop: "Unlock Sequence: protection storage invalid; failing closed."
+  - alias: "Verify recognition cooldown was actually stored"
+    condition: template
+    value_template: >-
+      {{ _cooldown_seconds | int(0) == 0 or _cooldown_on != 'recognition'
+         or as_timestamp(states(_cooldown_helper), default=0) > as_timestamp(now()) }}
+  - alias: "Run the authorized user action exactly once"
+    choose:
+      - conditions: "{{ true }}"
+        sequence: !input success_actions
+  - alias: "Optional event-driven result confirmation"
+    if: "{{ _verify }}"
+    then:
+      - variables:
+          _confirmation_deadline: "{{ as_timestamp(now()) + _verify_timeout | float(5) }}"
+          _confirmed: false
+          _verification_timed_out: false
+      - repeat:
+          sequence:
+            - choose:
+                - conditions:
+                    - condition: and
+                      conditions: !input verify_conditions
+                  sequence:
+                    - variables:
+                        _confirmed: true
+            - if: "{{ not _confirmed }}"
+              then:
+                - variables:
+                    _verify_remaining: "{{ _confirmation_deadline | float(0) - as_timestamp(now()) }}"
+                - if: "{{ _verify_remaining | float(0) <= 0 }}"
+                  then:
+                    - variables:
+                        _verification_timed_out: true
+                  else:
+                    - wait_for_trigger:
+                        - triggers: !input verify_triggers
+                      timeout:
+                        seconds: "{{ _verify_remaining | float(0) }}"
+                      continue_on_timeout: true
+                    - if: "{{ not wait.completed }}"
+                      then:
+                        - variables:
+                            _verification_timed_out: true
+          until:
+            - condition: template
+              value_template: "{{ _confirmed or _verification_timed_out }}"
+      - if: "{{ not _confirmed }}"
+        then:
+          - choose:
+              - conditions: "{{ true }}"
+                sequence: !input error_actions
+          - stop: "Unlock Sequence: result confirmation timed out; no retries."
+  - alias: "Release failure counter only after confirmed completion, when selected"
+    if: "{{ _protect and _reset_on == 'confirmed' }}"
+    then:
+      - if:
+          - condition: template
+            value_template: *helpers_valid
+        then: []
+        else:
+          - stop: "Unlock Sequence: protection storage invalid; failing closed."
+      - action: input_number.set_value
+        target:
+          entity_id: "{{ _count_helper }}"
+        data:
+          value: 0
+  - alias: "Start success cooldown after completion, when selected"
+    if: "{{ _cooldown_seconds | int(0) > 0 and _cooldown_on == 'confirmed' }}"
+    then:
+      - if:
+          - condition: template
+            value_template: *helpers_valid
+        then: []
+        else:
+          - stop: "Unlock Sequence: protection storage invalid; failing closed."
+      - action: input_datetime.set_datetime
+        target:
+          entity_id: "{{ _cooldown_helper }}"
+        data:
+          timestamp: "{{ (as_timestamp(now()) + _cooldown_seconds | int(0)) | round(0, 'ceil') | int }}"
