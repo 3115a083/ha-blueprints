@@ -300,17 +300,55 @@ class BlueprintTests(unittest.TestCase):
         visit(self.data["actions"])
         self.assertEqual(invalid, [])
 
+    def timed_dispatcher(self):
+        return next(
+            action for action in self.data["actions"]
+            if action.get("alias") == "Process all independent restart-resilient timed actions"
+        )
+
+    def test_reconciliation_does_not_swallow_vacancy_or_arrival(self):
+        """Reconcile must process timers and still reach the occupancy transitions."""
+        actions = self.data["actions"]
+        dispatcher = self.timed_dispatcher()
+        self.assertIs(actions[-2], dispatcher)
+        self.assertIs(actions[-1], next(a for a in actions if "choose" in a))
+        self.assertEqual(set(dispatcher), {"alias", "if", "then"})
+        self.assertIn("'reconcile'", dispatcher["if"][0]["value_template"])
+        self.assertEqual(len(dispatcher["then"][0]["parallel"]), 3)
+        main = actions[-1]["choose"]
+        self.assertNotIn("Process all independent", [b.get("alias", "") for b in main])
+        self.assertIn("Automatic arrival", [b["alias"] for b in main])
+        self.assertIn("Automatic vacancy with safety checks", [b["alias"] for b in main])
+        vacancy = next(b for b in main
+                       if b["alias"] == "Automatic vacancy with safety checks")
+        self.assertIn("'reconcile'", vacancy["conditions"][1]["value_template"])
+        context = self.evaluate(
+            trackers={"person.a": ("not_home", 30)},
+            activity={"binary_sensor.motion": ("off", 35)},
+            guest="off", trigger="reconcile",
+        )
+        for check in vacancy["conditions"][:-1]:
+            template = check["value_template"]
+            with self.subTest(guard=template[:80]):
+                self.assertTrue(
+                    self.true(self.env.from_string(template).render(**context)),
+                    f"Reconciled vacancy unexpectedly blocked: {template}",
+                )
+        context["states"].entities["input_boolean.guests"].state = "on"
+        self.assertFalse(self.true(
+            self.env.from_string(vacancy["conditions"][3]["value_template"]).render(**context)
+        ))
+
     def test_persistent_timer_due_guard(self):
         """Each deadline is evaluated independently against its own helpers."""
         import types
 
-        main = self.data["actions"][-1]["choose"]
-        due = next(b for b in main if b["alias"].startswith("Process all independent"))
-        self.assertIn("temporary_1_due", due["conditions"][0]["value_template"])
-        self.assertIn("temporary_2_due", due["conditions"][0]["value_template"])
-        self.assertIn("temporary_3_due", due["conditions"][0]["value_template"])
-        self.assertIn("reconcile", due["conditions"][0]["value_template"])
-        branches = due["sequence"][0]["parallel"]
+        due = self.timed_dispatcher()
+        self.assertIn("temporary_1_due", due["if"][0]["value_template"])
+        self.assertIn("temporary_2_due", due["if"][0]["value_template"])
+        self.assertIn("temporary_3_due", due["if"][0]["value_template"])
+        self.assertIn("reconcile", due["if"][0]["value_template"])
+        branches = due["then"][0]["parallel"]
         self.assertEqual(len(branches), 3)
         now = dt.datetime(2026, 10, 8, 8, 0, tzinfo=dt.timezone.utc)
 
@@ -354,8 +392,8 @@ class BlueprintTests(unittest.TestCase):
     def test_independent_timed_arrival_slots(self):
         """One arrival runs up to three isolated routines, with their own durations."""
         main = self.data["actions"][-1]["choose"]
-        due = next(b for b in main if b["alias"].startswith("Process all independent"))
-        branches = due["sequence"][0]["parallel"]
+        due = self.timed_dispatcher()
+        branches = due["then"][0]["parallel"]
         arrival = next(b for b in main if b["alias"] == "Occupancy changed to occupied")
         parallel = next(action["parallel"] for action in arrival["sequence"] if "parallel" in action)
         self.assertEqual(len(parallel), 4)  # Home actions + 3 independent timer paths
@@ -406,10 +444,9 @@ class BlueprintTests(unittest.TestCase):
         self.assertNotIn("temporary_tick", trigger_ids)
         for index in range(1, 4):
             self.assertIn(f"temporary_{index}_due", trigger_ids)
-        due = next(b for b in self.data["actions"][-1]["choose"]
-                   if b["alias"].startswith("Process all independent"))
-        self.assertIn("parallel", due["sequence"][0])
-        for branch in due["sequence"][0]["parallel"]:
+        due = self.timed_dispatcher()
+        self.assertIn("parallel", due["then"][0])
+        for branch in due["then"][0]["parallel"]:
             sequence = branch["sequence"]
             self.assertLess(str(sequence).find("input_boolean.turn_off"),
                             str(sequence).find("end_actions"))
@@ -463,9 +500,8 @@ class BlueprintTests(unittest.TestCase):
         self.assertIn("_blockers", release[0]["value_template"])
 
     def test_native_timer_dispatch_does_not_fire_others(self):
-        dispatcher = next(b for b in self.data["actions"][-1]["choose"]
-                          if b["alias"].startswith("Process all independent"))
-        for i, branch in enumerate(dispatcher["sequence"][0]["parallel"], start=1):
+        dispatcher = self.timed_dispatcher()
+        for i, branch in enumerate(dispatcher["then"][0]["parallel"], start=1):
             guard = branch["sequence"][0]["value_template"]
             self.assertIn(f"temporary_{i}_due", guard)
             self.assertIn("'reconcile'", guard)
