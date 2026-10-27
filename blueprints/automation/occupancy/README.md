@@ -99,7 +99,7 @@ A guest-presence helper and a sleep-mode helper are optional `input_boolean` swi
 
 Additional ON-state presence-protection sensors (for example, bed occupancy) also restore occupied status. Only select sensors where ON truly means detected presence.
 
-When these protections turn off, a configured occupancy switch can be reconciled **immediately** by the new guard-release template trigger, without waiting for a periodic scan. The standard five-minute fallback still handles cases in which an away/inactivity period has not finished or another custom condition becomes valid. One-shot door or custom triggers are not retained indefinitely and need to fire again if an earlier attempt was blocked.
+When these protections turn off, a configured occupancy switch is re-evaluated by the guard-release template trigger and can become vacant **as soon as all other guards and minimum-away/inactivity durations are satisfied**. The five-minute fallback also rechecks missed transitions. The timed follow-up routines run independently and no longer consume these reconciliation events. One-shot door or custom triggers are not retained indefinitely and need to fire again if an earlier attempt was blocked.
 
 ## 📍 08 | Optional occupancy status output
 
@@ -123,6 +123,22 @@ Optionally enable diagnostics in section **09 | Optional diagnostics and debug**
 
 Optional logging writes blocked vacancy attempts to the system log. Missing or unavailable diagnostic text helpers are skipped and do not stop occupancy processing. User-provided extra conditions are checked after the standard sensor guards and are not individually explained by the diagnostic line.
 
+## Troubleshooting: vacancy actions did not run
+
+If all residents leave and Guest mode is OFF but an Away action does not execute, review the following in the *automation instance*, not only in the blueprint YAML:
+
+1. In **08 | Optional occupancy status output**, check whether **Published occupancy switch** is configured. For apartments with motion sensors, Guest/Sleep helpers, or other blockers, use a dedicated `input_boolean`. In direct tracker mode, an attempt blocked when the person left is **not queued for retry**. With the helper, reconciliation can retry once the blockers clear.
+2. Check the tracker entity states and **Minimum away time**. All configured trackers must be away, with no unknown/unavailable states. With **ALL** evidence policy, every configured motion/presence sensor must additionally be OFF for **Minimum inactivity**. Even with **ANY**, an active or unavailable presence sensor or tracker still blocks vacancy.
+3. Check **Guest mode**, **Sleep mode**, **Additional presence protection sensors**, and **Additional conditions for automatic vacancy**. A guest switch showing OFF does not guarantee that the other guards were clear **at the original trigger time**. If a condition was false, a direct-mode Away action can be lost.
+4. Open **Settings → Automations & scenes → your Area Occupancy Manager → Traces**. Check the event trigger ID (`tracker_away`, `activity_away`, `reconcile` or `became_away`) and the variables `all_trackers_away_stable`, `all_activity_quiet_stable`, `known_trackers_safe`, `activity_clear`, `blockers_clear`, `sleep_clear`, `absence_evidence_ok`. The automation can have run without ultimately choosing the vacancy branch.
+5. With the published helper selected, confirm that it changed from ON to OFF. Vacancy actions are intentionally linked to that state change, **not** to every five-minute recheck while already OFF. An error in a user-defined action or an external automation toggling that helper can still affect the observed result.
+
+**Fix released in this version:** Previously, every `reconcile` trigger matched the *first* `choose` branch, which was dedicated to independent timed actions. Because a Home Assistant `choose` runs only its first matching branch, the later automatic vacancy/arrival branches could never run on a reconciliation event. Timed follow-ups now execute as a separate action **before** occupancy decision-making. The change preserves their deadline and safety checks and does not start previously blocked one-shot custom triggers.
+
+### Practical diagnostics
+
+You can enable **09 | Optional diagnostics and debug** and select a dedicated Input Text helper to see vacancy blockers. For troubleshooting, keep a relevant automation trace from the moment the person left and one from after the minimum away/inactivity time. If using a published helper, keep a trace from the next five-minute reconciliation.
+
 ## Efficiency and event-driven scheduling
 
 The previous blueprint had two unconditional clock triggers:
@@ -139,7 +155,7 @@ The old baseline was **1,728** scheduled automation starts per day even with no 
 
 ## Reliability, safety and tests
 
-The blueprint reconciles current signals after Home Assistant starts, whenever automations reload, when guest/sleep/presence blockers clear, and every five minutes **only when the published occupancy switch is configured**. Direct person/tracker mode does not run the periodic reconciliation. State-change timestamps are used for conservative stability checks. A fresh sensor state after a restart can restart the minimum waiting period. Template-trigger `for` timers themselves do not persist across a restart; the five-minute fallback is retained as a deliberate reliability trade-off for helper-based installations.
+With a published occupancy switch, the blueprint reconciles current signals after Home Assistant starts, whenever automations reload, when guest/sleep/presence blockers clear, and every five minutes. **The separate timed-action dispatcher no longer prevents reconciliation from setting the occupancy switch ON/OFF.** Direct person/tracker mode does not run periodic reconciliation. State-change timestamps are used for conservative stability checks. A fresh sensor state after a restart can restart the minimum waiting period. Template-trigger `for` timers themselves do not persist across a restart; the five-minute fallback is retained as a deliberate reliability trade-off for helper-based installations.
 
 Concurrent triggers may overlap due to the parallel automation mode. Place safety-critical checks in the final actions and devices. Status and dashboard text are informative, not a safety certification.
 
