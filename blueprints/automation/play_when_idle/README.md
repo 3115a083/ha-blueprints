@@ -63,7 +63,7 @@ Use **04 | Fallback action** to select one of:
 - **Standard media:** `media_player.play_media` with a URL/media ID and the configured content type. Works with compatible HA players; the player must support the content.
 - **Custom actions:** Build any Home Assistant actions, such as `script.turn_on`, `scene.turn_on`, a notification, or a selected playlist service call. The variable `play_target_player` identifies the eligible player, so custom actions can target `{{ play_target_player }}`. For safety, the same player-state and optional queue checks gate every custom action.
 
-If a configured station/media ID is blank, or MA radio mode is selected without a Music Assistant entity, no media command is made. The optional **Log each executed fallback** setting adds an informational log on eligible attempts. **Duplicate-press cooldown** defaults to 3 seconds. Long-running custom actions and multiple independent HA event requests may still need their own de-duplication.
+If a configured station/media ID is blank, or MA radio mode is selected without a Music Assistant entity, no media command is made. The optional **Log each eligible fallback attempt** setting adds an informational log on eligible attempts. **Duplicate-press cooldown** defaults to 3 seconds. Long-running custom actions and multiple independent HA event requests may still need their own de-duplication.
 
 ## Testing checklist
 
