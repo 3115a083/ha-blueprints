@@ -46,10 +46,16 @@ async def env(tmp_path, *, living_state="idle", kitchen_state="idle",
         hass.states.async_set(entity, state, {"mass_player_type": "player"})
 
     async def record(call):
-        calls.append((f"{call.domain}.{call.service}", dict(call.data)))
+        payload = dict(call.data)
+        if isinstance(payload.get("entity_id"), list) and len(payload["entity_id"]) == 1:
+            payload["entity_id"] = payload["entity_id"][0]
+        calls.append((f"{call.domain}.{call.service}", payload))
 
     async def get_queue(call):
-        return {call.data.get("entity_id", LIVING): {"items": ma_items}}
+        target = call.data.get("entity_id", LIVING)
+        if isinstance(target, list):
+            target = target[0]
+        return {target: {"items": ma_items}}
 
     hass.services.async_register("music_assistant", "play_media", record)
     hass.services.async_register("music_assistant", "get_queue", get_queue,
@@ -104,6 +110,19 @@ async def test_strict_ma_queue_requires_zero_items(tmp_path):
     try:
         await run()
         assert [call for call in calls if call[0] == "music_assistant.play_media"] == []
+    finally:
+        await hass.async_stop()
+
+
+@pytest.mark.asyncio
+async def test_strict_ma_empty_queue_allows_radio(tmp_path):
+    hass, calls, run = await env(tmp_path, ma_items=0, idle_check="ma_empty")
+    try:
+        await run()
+        assert calls == [("music_assistant.play_media", {
+            "entity_id": LIVING, "media_id": "Test Radio",
+            "media_type": "radio", "enqueue": "replace"
+        })]
     finally:
         await hass.async_stop()
 
