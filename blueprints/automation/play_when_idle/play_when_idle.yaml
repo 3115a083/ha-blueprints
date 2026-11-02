@@ -1,0 +1,304 @@
+blueprint:
+  name: "Play When Idle | Speaker Fallback Actions"
+  description: >-
+    Respond to an observable Play request on one or more media players only when
+    playback is idle. Resume normal paused playback without interference.
+    Start a Music Assistant radio station, play a regular media URL, or run any
+    Home Assistant actions. Works with observable Home Assistant Play service
+    calls, plus optional button/event/device triggers exposed by integrations.
+
+    IMPORTANT: The native Sonos integration does not expose physical
+    Play-button presses as a general Home Assistant event. If a hardware press
+    produces neither an event nor a detectable service call, it cannot start
+    this automation. No background autoplay on ordinary idle transitions.
+    An idle state alone does not prove that the player's queue is empty.
+  domain: automation
+  author: "3115a083"
+  source_url: https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/play_when_idle/play_when_idle.yaml
+  homeassistant:
+    min_version: "2025.7.0"
+  input:
+    players_section:
+      name: "01 | Players"
+      icon: mdi:speaker-multiple
+      input:
+        monitored_players:
+          name: "Speakers to watch"
+          description: >-
+            Select one or more media_player entities. For Music Assistant radio,
+            choose the Music Assistant media_player entity, not the duplicate
+            native Sonos entity. A recognized Play request targets only
+            the matching selected player.
+          selector:
+            entity:
+              multiple: true
+              filter:
+                domain: media_player
+        custom_trigger_player:
+          name: "Fallback speaker for custom triggers (optional)"
+          description: >-
+            When a custom trigger has no matching media_player entity_id,
+            use this player. If you select only one speaker above, it is used
+            automatically. With several speakers and no match/fallback,
+            custom triggers do nothing to avoid playing on unintended devices.
+          default: ""
+          selector:
+            entity:
+              filter:
+                domain: media_player
+    triggers_section:
+      name: "02 | Play detection"
+      icon: mdi:gesture-tap-button
+      input:
+        detect_ha_play:
+          name: "Watch Play requests from the Home Assistant UI"
+          description: >-
+            Listen for media_player.media_play and media_player.media_play_pause
+            service calls. The event must explicitly name a selected player.
+            Also reacts to scripts calling these actions; it is NOT a native
+            hardware-button event.
+          default: true
+          selector:
+            boolean: {}
+        additional_play_triggers:
+          name: "Additional button or event triggers (optional)"
+          description: >-
+            Add Home Assistant device, event-entity, event-bus, or other
+            observable Play-button triggers. Only use triggers that identify
+            a Play request. With multiple speakers, map a trigger to its
+            media_player entity or set Fallback speaker above. Native Sonos
+            hardware button presses cannot be inferred if no event is exposed.
+          default: []
+          selector:
+            trigger: {}
+        cooldown_seconds:
+          name: "Duplicate-press cooldown (seconds)"
+          default: 3
+          selector:
+            number:
+              min: 0
+              max: 30
+              step: 1
+              unit_of_measurement: s
+              mode: box
+    eligibility_section:
+      name: "03 | Playback and queue safety"
+      icon: mdi:playlist-check
+      input:
+        idle_check:
+          name: "When is a fallback allowed?"
+          description: >-
+            Idle only: recommended for stopped Music Assistant playback.
+            Idle and no media attributes: stricter, but some players retain
+            old metadata. Music Assistant empty queue: requires MA integration
+            and a queue with zero items. Unknown, unavailable, playing,
+            buffering, off, and paused never qualify. Some MA versions turn
+            a long pause into idle, so only a real queue check distinguishes
+            that case.
+          default: idle
+          selector:
+            select:
+              options:
+                - label: "Player is idle (recommended)"
+                  value: idle
+                - label: "Idle and no media metadata is loaded"
+                  value: no_media
+                - label: "Idle and Music Assistant queue has zero items"
+                  value: ma_empty
+    actions_section:
+      name: "04 | Fallback action"
+      icon: mdi:play-circle-outline
+      input:
+        fallback_mode:
+          name: "What should happen after an eligible Play press?"
+          default: music_assistant_radio
+          selector:
+            select:
+              options:
+                - label: "Play a Music Assistant radio station"
+                  value: music_assistant_radio
+                - label: "Play a URL or media ID using the selected player"
+                  value: standard_media
+                - label: "Run my own Home Assistant actions"
+                  value: custom
+        ma_radio_id:
+          name: "Music Assistant radio station name or URI"
+          description: >-
+            Enter the exact station name from your MA library or its URI.
+            Only used in Music Assistant radio mode; requires a Music
+            Assistant player with the mass_player_type attribute.
+          default: ""
+          selector:
+            text: {}
+        media_content_id:
+          name: "Generic media URL or media content ID"
+          description: "Used only when the standard media action is selected."
+          default: ""
+          selector:
+            text: {}
+        media_content_type:
+          name: "Generic media content type"
+          description: "For a direct audio stream, 'music' often works."
+          default: music
+          selector:
+            text: {}
+        custom_actions:
+          name: "Custom fallback actions"
+          description: >-
+            Runs only in custom mode. The template variable
+            play_target_player contains the selected media_player entity ID.
+            All actions run for this single eligible player.
+          default: []
+          selector:
+            action: {}
+    diagnostics_section:
+      name: "05 | Diagnostics"
+      icon: mdi:bug-check-outline
+      collapsed: true
+      input:
+        log_fallback:
+          name: "Log each executed fallback"
+          default: false
+          selector:
+            boolean: {}
+
+trigger_variables:
+  _detect_ha_play: !input detect_ha_play
+
+triggers:
+  - trigger: event
+    event_type: call_service
+    event_data:
+      domain: media_player
+      service: media_play
+    id: ha_media_play
+    enabled: "{{ _detect_ha_play }}"
+  - trigger: event
+    event_type: call_service
+    event_data:
+      domain: media_player
+      service: media_play_pause
+    id: ha_media_play_pause
+    enabled: "{{ _detect_ha_play }}"
+  - triggers: !input additional_play_triggers
+
+variables:
+  selected_players: !input monitored_players
+  custom_trigger_player: !input custom_trigger_player
+  idle_policy: !input idle_check
+  fallback_mode_value: !input fallback_mode
+  ma_radio_id_value: !input ma_radio_id
+  media_id_value: !input media_content_id
+  media_type_value: !input media_content_type
+  log_enabled: !input log_fallback
+
+conditions: []
+
+actions:
+  - variables:
+      candidate_players: >-
+        {% set ns = namespace(ids=[]) %}
+        {% set source = trigger.get('id', '') %}
+        {% if source in ['ha_media_play', 'ha_media_play_pause'] %}
+          {% set event = trigger.get('event') %}
+          {% set service_data = event.data.get('service_data', {}) if event is not none else {} %}
+          {% set raw = service_data.get('entity_id', []) %}
+          {% set requested = [raw] if raw is string else (raw if raw is sequence else []) %}
+          {% set ns.ids = selected_players | select('in', requested) | list %}
+        {% else %}
+          {% set raw = trigger.get('entity_id', '') %}
+          {% if raw == '' and trigger.get('event') is not none %}
+            {% set raw = trigger.event.data.get('entity_id', '') %}
+          {% endif %}
+          {% if raw is string and raw in selected_players %}
+            {% set ns.ids = [raw] %}
+          {% elif custom_trigger_player in selected_players %}
+            {% set ns.ids = [custom_trigger_player] %}
+          {% elif selected_players | count == 1 %}
+            {% set ns.ids = selected_players %}
+          {% endif %}
+        {% endif %}
+        {{ ns.ids }}
+  - repeat:
+      for_each: "{{ candidate_players }}"
+      sequence:
+        - variables:
+            play_target_player: "{{ repeat.item }}"
+            playback_idle: "{{ is_state(play_target_player, 'idle') }}"
+            no_media_loaded: >-
+              {{ state_attr(play_target_player, 'media_content_id') in ['', none] and
+                 state_attr(play_target_player, 'media_title') in ['', none] }}
+            is_ma_player: "{{ state_attr(play_target_player, 'mass_player_type') is not none }}"
+        - if:
+            - condition: template
+              value_template: >-
+                {{ playback_idle and
+                   (idle_policy != 'no_media' or no_media_loaded) }}
+          then:
+            - variables:
+                queue_allowed: "{{ idle_policy != 'ma_empty' }}"
+            - if:
+                - condition: template
+                  value_template: "{{ idle_policy == 'ma_empty' and is_ma_player }}"
+              then:
+                - action: music_assistant.get_queue
+                  target:
+                    entity_id: "{{ play_target_player }}"
+                  response_variable: ma_queue_info
+                  continue_on_error: true
+                - variables:
+                    queue_allowed: >-
+                      {% set info = ma_queue_info.get(play_target_player, {}) if
+                         ma_queue_info is defined and ma_queue_info is mapping else {} %}
+                      {{ info is mapping and info.get('items', -1) | int(-1) == 0 }}
+            - if:
+                - condition: template
+                  value_template: "{{ queue_allowed }}"
+              then:
+                - choose:
+                    - conditions:
+                        - condition: template
+                          value_template: >-
+                            {{ fallback_mode_value == 'music_assistant_radio' and
+                               is_ma_player and ma_radio_id_value | trim != '' }}
+                      sequence:
+                        - action: music_assistant.play_media
+                          target:
+                            entity_id: "{{ play_target_player }}"
+                          data:
+                            media_id: "{{ ma_radio_id_value }}"
+                            media_type: radio
+                            enqueue: replace
+                    - conditions:
+                        - condition: template
+                          value_template: >-
+                            {{ fallback_mode_value == 'standard_media' and
+                               media_id_value | trim != '' and media_type_value | trim != '' }}
+                      sequence:
+                        - action: media_player.play_media
+                          target:
+                            entity_id: "{{ play_target_player }}"
+                          data:
+                            media_content_id: "{{ media_id_value }}"
+                            media_content_type: "{{ media_type_value }}"
+                    - conditions:
+                        - condition: template
+                          value_template: "{{ fallback_mode_value == 'custom' }}"
+                      sequence: !input custom_actions
+                - if:
+                    - condition: template
+                      value_template: "{{ log_enabled }}"
+                  then:
+                    - action: system_log.write
+                      data:
+                        logger: blueprints.play_when_idle
+                        level: info
+                        message: >-
+                          Fallback evaluated for {{ play_target_player }};
+                          mode={{ fallback_mode_value }}; trigger={{ trigger.id }};
+                          idle_policy={{ idle_policy }}.
+  - delay:
+      seconds: !input cooldown_seconds
+
+mode: single
+max_exceeded: silent
