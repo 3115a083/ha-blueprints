@@ -157,7 +157,7 @@ blueprint:
       collapsed: true
       input:
         log_fallback:
-          name: "Log each executed fallback"
+          name: "Log each eligible fallback attempt"
           default: false
           selector:
             boolean: {}
@@ -251,9 +251,16 @@ actions:
                       {% set info = ma_queue_info.get(play_target_player, {}) if
                          ma_queue_info is defined and ma_queue_info is mapping else {} %}
                       {{ info is mapping and info.get('items', -1) | int(-1) == 0 }}
+            - variables:
+                configured_action: >-
+                  {{ (fallback_mode_value == 'music_assistant_radio' and
+                      is_ma_player and ma_radio_id_value | trim != '') or
+                     (fallback_mode_value == 'standard_media' and
+                      media_id_value | trim != '' and media_type_value | trim != '') or
+                     fallback_mode_value == 'custom' }}
             - if:
                 - condition: template
-                  value_template: "{{ queue_allowed }}"
+                  value_template: "{{ queue_allowed and configured_action }}"
               then:
                 - choose:
                     - conditions:
