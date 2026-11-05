@@ -200,11 +200,11 @@ class MultiZoneMotionLightsTests(unittest.TestCase):
     def test_missing_and_unavailable_motion_fails_closed(self):
         template = self.env.from_string(find_variable(self.config["actions"], "motion_valid"))
         states = {}
-        def expand(entities):
-            return [states[x] for x in entities if x in states]
         base = ["binary_sensor.motion_a", "binary_sensor.motion_b"]
+        def is_state(entity_id, expected):
+            return entity_id in states and states[entity_id].state == expected
         def ok():
-            return template.render(zone_motion=base, expand=expand).strip() == "True"
+            return template.render(zone_motion=base, is_state=is_state).strip() == "True"
         self.assertFalse(ok())
         states[base[0]] = SimpleNamespace(state="off")
         self.assertFalse(ok())
@@ -219,7 +219,8 @@ class MultiZoneMotionLightsTests(unittest.TestCase):
         template = self.env.from_string(find_variable(self.config["actions"], "linked_clear"))
         states = {"binary_sensor.bath": SimpleNamespace(state="unknown")}
         result = template.render(zone_linked=["binary_sensor.bath"],
-                                 expand=lambda xs: [states[x] for x in xs if x in states])
+                                 is_state=lambda entity, expected:
+                                     entity in states and states[entity].state == expected)
         self.assertEqual(result.strip(), "False")
 
     def test_unregistered_warning_is_diagnostic_only(self):
