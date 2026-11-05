@@ -7,10 +7,13 @@ blueprint:
     activate lights, switches, groups, scenes or scripts, with optional
     lux, sun, time and blocking conditions.
 
-    Cross-room occupancy holds another zone's lights ON while the
-    linked area is occupied, plus an optional grace period after it
-    clears. This prevents unnecessary light cycling when visiting
-    an adjacent room and coming back.
+    Cross-room presence is configured in the zone whose lights should
+    stay ON. Example: edit the HALLWAY zone and select BATHROOM and
+    KITCHEN occupancy sensors there. Do NOT select the hallway sensors
+    in those zones unless you also want their lights held ON. The
+    hallway stays lit while either linked room is occupied, plus
+    the configured grace time after both become vacant. This
+    prevents unnecessary light cycling on the way back.
 
     For immediate, resource-efficient motion triggers, register all
     motion entities once under Sensor monitoring, then assign them
@@ -63,18 +66,25 @@ blueprint:
       name: "💡 02 | Lighting zones"
       icon: mdi:lightbulb-group-outline
       description: >-
-        Add a separate entry for each independent lighting zone. Put the
-        hallway's bathroom presence sensor in the HALLWAY entry under
-        Cross-room presence, not the bathroom entry. Each zone has its
-        own motion sensors, targets and timeout. A manually switched
-        light is not always distinguishable without an ownership helper.
+        Add one entry per lighting zone. IMPORTANT: Cross-room presence
+        belongs to the zone whose LIGHTS should stay ON, not the room
+        providing the presence signal. Example: in the HALLWAY entry,
+        select the BATHROOM and KITCHEN occupancy sensors. When either
+        room is occupied, the HALLWAY lights stay ON. You do not need
+        to configure the hallway inside the bathroom or kitchen entries.
+        Each zone has its own motion sensors, lights, and timeout.
       input:
         lighting_zones:
           name: "Lighting zones (add as many as you need)"
           description: >-
-            Click Add to configure each area. Do not assign the same
-            switch-off entity to multiple zones unless you intentionally
-            want either zone to control it. Keep names unique.
+            Click Add for each room, hallway, or lighting area.
+            Cross-room example: edit the HALLWAY row and select the
+            BATHROOM and KITCHEN presence entities under Hold THIS zone
+            ON. This protects the hallway lights, not the bathroom or
+            kitchen lights. If you also want to hold another room's
+            lights, configure that room's row separately.
+            Keep zone names unique and do not unintentionally share
+            switch-off entities between zones.
           default: []
           selector:
             object:
@@ -134,7 +144,7 @@ blueprint:
                       unit_of_measurement: s
                       mode: box
                 linked_presence:
-                  label: "Cross-room presence: keep this zone ON while occupied"
+                  label: "Hold THIS zone's lights ON: presence sensors in OTHER rooms"
                   required: false
                   default: []
                   selector:
@@ -145,7 +155,7 @@ blueprint:
                         - domain: input_boolean
                         - domain: group
                 cross_room_grace_seconds:
-                  label: "Additional hold AFTER linked presence clears (seconds)"
+                  label: "Keep THIS zone lit after ALL linked rooms become vacant (seconds)"
                   default: 180
                   selector:
                     number:

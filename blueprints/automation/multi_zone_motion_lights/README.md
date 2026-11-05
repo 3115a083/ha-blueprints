@@ -11,10 +11,26 @@ Minimum Home Assistant: **2026.10.1**. Inspired by [freakshock88's original moti
 1. Import the blueprint, then create ONE automation.
 2. In **01 | Sensor monitoring**, choose **all motion entities used in any zone**. This is a one-time registration of sensors for immediate, entity-filtered ON triggers.
 3. In **02 | Lighting zones**, click Add for every room or hallway. Select motion sensors (from the registered list), activation entities, and the independent off delay.
-4. For a hallway adjoining a bathroom, configure the bathroom presence sensor in the **hallway** zone's Cross-room presence field.
+4. To keep the **hallway lights** ON while someone uses the bathroom or kitchen, edit the **Hallway** row and select the **Bathroom** and **Kitchen** occupancy sensors under **Hold THIS zone's lights ON: presence sensors in OTHER rooms**. Do **not** put the hallway sensor into the bathroom/kitchen rows unless you also want their lights held ON.
 5. Save and test each zone, first without cross-room presence, then with it.
 
 The form supports adding any number of zones. Each zone sensor is assigned again within its zone after being registered at the top. This is necessary because Home Assistant blueprints cannot dynamically create entity-filtered state triggers from repeatable form entries. Duplicating that selection is preferable to listening for every state change in Home Assistant.
+
+## Which zone gets the other room's presence sensor?
+
+**Configure the rule on the zone whose LIGHTS you want to protect.** Cross-room presence uses sensors from OTHER rooms to delay that zone's automatic switch-off.
+
+| You want to keep these lights ON | Edit this lighting zone | Select these OTHER rooms' occupancy sensors |
+| --- | --- | --- |
+| Hallway lights while somebody is in the bathroom or kitchen | **Hallway** | **Bathroom**, **Kitchen** |
+| Bathroom lights while somebody is in the hallway (only if desired) | **Bathroom** | **Hallway** |
+| Kitchen lights while somebody is in the hallway (only if desired) | **Kitchen** | **Hallway** |
+
+For the usual hallway use case, **only the first row applies**. You do not configure the hallway in the bathroom or kitchen zones.
+
+When either Bathroom **or** Kitchen occupancy is ON, the Hallway lights remain ON. Only when **all** selected linked rooms become vacant does the configured extra grace period begin. The hold **does not switch the hallway lights ON** by itself. Hallway motion must first activate the lights.
+
+This is a one-way relationship unless you deliberately configure the opposite direction in another zone. The field uses **presence entities** (binary sensors, occupancy helpers or compatible groups), **not** zone names or light entities.
 
 ## Hallway and bathroom example
 
@@ -23,12 +39,12 @@ The form supports adding any number of zones. Each zone sensor is assigned again
 | Motion sensors | Hall motion | Bath motion |
 | Turn ON | Hall lights | Bath lights |
 | Off delay | 90 seconds | 180 seconds |
-| Cross-room presence | Bath occupancy sensor | None |
+| Hold THIS zone's lights ON: OTHER rooms | Bath occupancy sensor (also Kitchen if wanted) | None |
 | Grace after presence clears | 180 seconds | Not used |
 
 Both motion sensors must also appear in the top-level monitoring list.
 
-When someone enters the hallway, its light starts immediately. After they enter the bathroom, the bathroom occupancy sensor holds the hallway light ON even after the hallway's ordinary motion timer expires. When bathroom presence becomes OFF, the hallway remains lit for another 180 seconds. New hallway motion postpones the deadline again.
+When someone enters the hallway, its light starts immediately. After they enter the bathroom, the bathroom occupancy sensor holds the hallway light ON even after the hallway's ordinary motion timer expires. When bathroom presence becomes OFF and every other linked room is also vacant, the hallway remains lit for another 180 seconds. New hallway motion postpones the deadline again.
 
 **Use reliable occupancy:** A PIR in the bathroom may go OFF while someone is motionless. For long visits, prefer a mmWave presence sensor, a sustained occupancy helper, or a suitable room occupancy entity. Cross-room sensors do not independently switch ON the hallway: they only delay its switch-off.
 
