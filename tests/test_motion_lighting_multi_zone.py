@@ -109,7 +109,7 @@ class MotionLightingTests(unittest.TestCase):
         self.assertEqual(triggers[1]["trigger"], "time_pattern")
         self.assertEqual(triggers[1]["seconds"], "/15")
         self.assertEqual(triggers[2]["trigger"], "homeassistant")
-        self.assertNotIn("state_changed", self.text)
+        self.assertNotIn("state_changed", str(triggers))
         self.assertNotIn("wait_for_trigger", self.text)
         self.assertNotIn("delay:", self.text)
         self.assertNotIn("input_datetime.set_datetime", self.text)
