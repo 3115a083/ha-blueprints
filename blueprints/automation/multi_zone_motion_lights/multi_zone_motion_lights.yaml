@@ -1,0 +1,520 @@
+blueprint:
+  name: "💡 Multi-Zone Motion Lights | Cross-Room Presence"
+  author: "3115a083"
+  description: >-
+    One automation for any number of independent motion-light zones.
+    Add a zone in the visual form for each room or hallway. Each zone can
+    activate lights, switches, groups, scenes or scripts, with optional
+    lux, sun, time and blocking conditions.
+
+    Cross-room occupancy holds another zone's lights ON while the
+    linked area is occupied, plus an optional grace period after it
+    clears. This prevents unnecessary light cycling when visiting
+    an adjacent room and coming back.
+
+    For immediate, resource-efficient motion triggers, register all
+    motion entities once under Sensor monitoring, then assign them
+    to their zones below. No broad state_changed event listener or
+    per-second motion polling is used. Off deadlines are reconciled
+    every 15 seconds so zones have independent timers that survive
+    automation reloads and Home Assistant restarts.
+
+    Inspired by freakshock88's motion/illuminance/sun blueprint:
+    https://community.home-assistant.io/t/turn-on-light-switch-scene-script-or-group-based-on-motion-illuminance-sun-more-conditions/257085
+    See README for safety and manual-light behavior.
+  domain: automation
+  homeassistant:
+    min_version: "2026.10.1"
+  source_url: https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/multi_zone_motion_lights/multi_zone_motion_lights.yaml
+  input:
+    sensors_section:
+      name: "📡 01 | Sensor monitoring"
+      icon: mdi:motion-sensor
+      description: >-
+        Register every motion entity used for switching ON, then assign it
+        to one or more zones below. This separate registration is required
+        because Home Assistant cannot dynamically generate state triggers
+        from repeated form rows. It avoids listening to all entity changes.
+      input:
+        monitored_motion_sensors:
+          name: "All motion sensors used by your zones"
+          description: >-
+            Select the complete combined list. Zone motion sensors must also
+            appear here, otherwise ON events for them cannot start a light.
+            A single motion sensor can belong to more than one zone.
+          selector:
+            entity:
+              multiple: true
+              filter:
+                - domain: binary_sensor
+                - domain: group
+        global_enable:
+          name: "Optional master enable switch"
+          description: >-
+            When configured, ON enables new light activations. OFF blocks
+            only new activations; pending automatic switch-offs continue.
+          default: ""
+          selector:
+            entity:
+              filter:
+                - domain: input_boolean
+                - domain: binary_sensor
+    zones_section:
+      name: "💡 02 | Lighting zones"
+      icon: mdi:lightbulb-group-outline
+      description: >-
+        Add a separate entry for each independent lighting zone. Put the
+        hallway's bathroom presence sensor in the HALLWAY entry under
+        Cross-room presence, not the bathroom entry. Each zone has its
+        own motion sensors, targets and timeout. A manually switched
+        light is not always distinguishable without an ownership helper.
+      input:
+        lighting_zones:
+          name: "Lighting zones (add as many as you need)"
+          description: >-
+            Click Add to configure each area. Do not assign the same
+            switch-off entity to multiple zones unless you intentionally
+            want either zone to control it. Keep names unique.
+          default: []
+          selector:
+            object:
+              multiple: true
+              label_field: name
+              fields:
+                name:
+                  label: "Zone name"
+                  required: true
+                  selector:
+                    text: {}
+                enabled:
+                  label: "Enable this zone"
+                  default: true
+                  selector:
+                    boolean: {}
+                motion_sensors:
+                  label: "Motion sensors for this zone"
+                  required: true
+                  selector:
+                    entity:
+                      multiple: true
+                      filter:
+                        - domain: binary_sensor
+                        - domain: group
+                on_entities:
+                  label: "Turn ON: lights, switches, groups, scenes or scripts"
+                  required: true
+                  selector:
+                    entity:
+                      multiple: true
+                      filter:
+                        - domain: light
+                        - domain: switch
+                        - domain: group
+                        - domain: scene
+                        - domain: script
+                off_entities:
+                  label: "Turn OFF: explicit light/switch/group entities (optional)"
+                  required: false
+                  default: []
+                  selector:
+                    entity:
+                      multiple: true
+                      filter:
+                        - domain: light
+                        - domain: switch
+                        - domain: group
+                off_delay_seconds:
+                  label: "Switch off after no motion (seconds; 0 = never)"
+                  default: 120
+                  selector:
+                    number:
+                      min: 0
+                      max: 7200
+                      step: 5
+                      unit_of_measurement: s
+                      mode: box
+                linked_presence:
+                  label: "Cross-room presence: keep this zone ON while occupied"
+                  required: false
+                  default: []
+                  selector:
+                    entity:
+                      multiple: true
+                      filter:
+                        - domain: binary_sensor
+                        - domain: input_boolean
+                        - domain: group
+                cross_room_grace_seconds:
+                  label: "Additional hold AFTER linked presence clears (seconds)"
+                  default: 180
+                  selector:
+                    number:
+                      min: 0
+                      max: 3600
+                      step: 5
+                      unit_of_measurement: s
+                      mode: box
+                lux_sensor:
+                  label: "Optional illuminance sensor"
+                  required: false
+                  selector:
+                    entity:
+                      filter:
+                        - domain: sensor
+                lux_threshold:
+                  label: "Only switch ON at or below this lux level"
+                  default: 80
+                  selector:
+                    number:
+                      min: 0
+                      max: 100000
+                      step: 1
+                      unit_of_measurement: lx
+                      mode: box
+                sun_mode:
+                  label: "Optional sun condition for switching ON"
+                  default: any
+                  selector:
+                    select:
+                      options:
+                        - label: "Any time"
+                          value: any
+                        - label: "Only when the sun is below the horizon"
+                          value: night
+                        - label: "Only when the sun is above the horizon"
+                          value: day
+                start_time:
+                  label: "Allow switching ON from (local time)"
+                  default: "00:00:00"
+                  selector:
+                    time: {}
+                end_time:
+                  label: "Allow switching ON until (local time)"
+                  default: "23:59:59"
+                  selector:
+                    time: {}
+                blocking_entity:
+                  label: "Optional zone blocker (ON blocks new light activations)"
+                  required: false
+                  selector:
+                    entity:
+                      filter:
+                        - domain: input_boolean
+                        - domain: binary_sensor
+                        - domain: switch
+                ownership_helper:
+                  label: "Optional Input Boolean: this automation owns the light"
+                  required: false
+                  selector:
+                    entity:
+                      filter:
+                        - domain: input_boolean
+    diagnostics_section:
+      name: "🛠️ 03 | Diagnostics"
+      icon: mdi:information-outline
+      collapsed: true
+      input:
+        log_commands:
+          name: "Log actual ON/OFF commands"
+          description: >-
+            Writes an informational system-log message only when the
+            automation sends an ON or OFF command, not every 15 seconds.
+          default: false
+          selector:
+            boolean: {}
+        warn_unregistered:
+          name: "Warn if zone sensors are not in the monitoring list"
+          description: >-
+            Checks on Home Assistant start and automation reload; log
+            a warning once for misconfigured sensors.
+          default: true
+          selector:
+            boolean: {}
+
+variables:
+  configured_zones: !input lighting_zones
+  monitored_entities: !input monitored_motion_sensors
+  master_enable_id: !input global_enable
+  log_commands_enabled: !input log_commands
+  warn_unregistered_enabled: !input warn_unregistered
+
+triggers:
+  - trigger: state
+    entity_id: !input monitored_motion_sensors
+    to: "on"
+    id: motion_on
+  - trigger: time_pattern
+    seconds: "/15"
+    id: off_reconcile
+  - trigger: homeassistant
+    event: start
+    id: startup
+  - trigger: event
+    event_type: automation_reloaded
+    id: startup
+
+conditions: []
+
+actions:
+  - choose:
+      - alias: "Handle immediate motion for the matching zone"
+        conditions:
+          - condition: template
+            value_template: "{{ trigger.id == 'motion_on' }}"
+        sequence:
+          - repeat:
+              for_each: "{{ configured_zones | default([], true) }}"
+              sequence:
+                - variables:
+                    zone: "{{ repeat.item }}"
+                - variables:
+                    zone_name: "{{ zone.get('name', 'Unnamed zone') }}"
+                    zone_motion: "{{ zone.get('motion_sensors', []) | default([], true) }}"
+                    zone_on: "{{ zone.get('on_entities', []) | default([], true) }}"
+                    zone_off_explicit: "{{ zone.get('off_entities', []) | default([], true) }}"
+                    zone_blocker: "{{ zone.get('blocking_entity', '') | default('', true) }}"
+                    zone_owner: "{{ zone.get('ownership_helper', '') | default('', true) }}"
+                    zone_lux: "{{ zone.get('lux_sensor', '') | default('', true) }}"
+                    zone_lux_threshold: "{{ zone.get('lux_threshold', 80) | float(80) }}"
+                    zone_sun: "{{ zone.get('sun_mode', 'any') }}"
+                    zone_start: "{{ zone.get('start_time', '00:00:00') | string }}"
+                    zone_end: "{{ zone.get('end_time', '23:59:59') | string }}"
+                - variables:
+                    zone_off: >-
+                      {% if zone_off_explicit | count > 0 %}
+                        {{ zone_off_explicit }}
+                      {% else %}
+                        {% set ns = namespace(ids=[], unsafe=false) %}
+                        {% for eid in zone_on %}
+                          {% if eid is string and eid.split('.')[0] in ['light', 'switch', 'group'] %}
+                            {% set ns.ids = ns.ids + [eid] %}
+                          {% else %}
+                            {% set ns.unsafe = true %}
+                          {% endif %}
+                        {% endfor %}
+                        {{ [] if ns.unsafe else ns.ids }}
+                      {% endif %}
+                    now_local: "{{ now().strftime('%H:%M:%S') }}"
+                - variables:
+                    in_time_window: >-
+                      {{ (zone_start <= zone_end and zone_start <= now_local <= zone_end)
+                         or (zone_start > zone_end and
+                             (now_local >= zone_start or now_local <= zone_end)) }}
+                    lux_ok: >-
+                      {{ zone_lux == '' or
+                         (has_value(zone_lux) and
+                          (states(zone_lux) | float(1000000)) <= zone_lux_threshold) }}
+                    sun_ok: >-
+                      {{ zone_sun == 'any' or
+                         (zone_sun == 'night' and is_state('sun.sun', 'below_horizon')) or
+                         (zone_sun == 'day' and is_state('sun.sun', 'above_horizon')) }}
+                    target_available: >-
+                      {% set ns = namespace(ok=true) %}
+                      {% for eid in zone_off %}
+                        {% if not has_value(eid) %}
+                          {% set ns.ok = false %}
+                        {% endif %}
+                      {% endfor %}
+                      {{ ns.ok }}
+                    target_already_on: >-
+                      {% set ns = namespace(on=false) %}
+                      {% for eid in zone_off %}
+                        {% if is_state(eid, 'on') %}
+                          {% set ns.on = true %}
+                        {% endif %}
+                      {% endfor %}
+                      {{ ns.on }}
+                - if:
+                    - condition: template
+                      value_template: >-
+                        {{ zone is mapping and zone.get('enabled', true) and
+                           trigger.entity_id in zone_motion and
+                           zone_motion | count > 0 and zone_on | count > 0 and
+                           (master_enable_id == '' or is_state(master_enable_id, 'on')) and
+                           (zone_blocker == '' or is_state(zone_blocker, 'off')) and
+                           (zone_owner == '' or is_state(zone_owner, 'off')) and
+                           target_available and not target_already_on and
+                           in_time_window and lux_ok and sun_ok }}
+                  then:
+                    - action: homeassistant.turn_on
+                      target:
+                        entity_id: "{{ zone_on }}"
+                    - if:
+                        - condition: template
+                          value_template: "{{ zone_owner != '' }}"
+                      then:
+                        - action: input_boolean.turn_on
+                          target:
+                            entity_id: "{{ zone_owner }}"
+                    - if:
+                        - condition: template
+                          value_template: "{{ log_commands_enabled }}"
+                      then:
+                        - action: system_log.write
+                          data:
+                            level: info
+                            logger: blueprints.multi_zone_motion_lights
+                            message: "Activated {{ zone_name }} on motion from {{ trigger.entity_id }}."
+      - alias: "Reconcile independent switch-off deadlines"
+        conditions:
+          - condition: template
+            value_template: "{{ trigger.id in ['off_reconcile', 'startup'] }}"
+        sequence:
+          - if:
+              - condition: template
+                value_template: "{{ trigger.id == 'startup' and warn_unregistered_enabled }}"
+            then:
+              - variables:
+                  unregistered: >-
+                    {% set ns = namespace(missing=[]) %}
+                    {% for zone in configured_zones if zone is mapping %}
+                      {% for eid in zone.get('motion_sensors', []) | default([], true) %}
+                        {% if eid not in monitored_entities and eid not in ns.missing %}
+                          {% set ns.missing = ns.missing + [eid] %}
+                        {% endif %}
+                      {% endfor %}
+                    {% endfor %}
+                    {{ ns.missing }}
+              - if:
+                  - condition: template
+                    value_template: "{{ unregistered | count > 0 }}"
+                then:
+                  - action: system_log.write
+                    data:
+                      level: warning
+                      logger: blueprints.multi_zone_motion_lights
+                      message: >-
+                        Motion sensors not registered for instant triggers:
+                        {{ unregistered | join(', ') }}. Add them to Sensor monitoring.
+          - repeat:
+              for_each: "{{ configured_zones | default([], true) }}"
+              sequence:
+                - variables:
+                    zone: "{{ repeat.item }}"
+                - variables:
+                    zone_name: "{{ zone.get('name', 'Unnamed zone') }}"
+                    zone_motion: "{{ zone.get('motion_sensors', []) | default([], true) }}"
+                    zone_linked: "{{ zone.get('linked_presence', []) | default([], true) }}"
+                    zone_on: "{{ zone.get('on_entities', []) | default([], true) }}"
+                    zone_off_explicit: "{{ zone.get('off_entities', []) | default([], true) }}"
+                    zone_delay: "{{ zone.get('off_delay_seconds', 120) | int(120) }}"
+                    zone_grace: "{{ zone.get('cross_room_grace_seconds', 180) | int(180) }}"
+                    zone_owner: "{{ zone.get('ownership_helper', '') | default('', true) }}"
+                - variables:
+                    zone_off: >-
+                      {% if zone_off_explicit | count > 0 %}
+                        {{ zone_off_explicit }}
+                      {% else %}
+                        {% set ns = namespace(ids=[], unsafe=false) %}
+                        {% for eid in zone_on %}
+                          {% if eid is string and eid.split('.')[0] in ['light', 'switch', 'group'] %}
+                            {% set ns.ids = ns.ids + [eid] %}
+                          {% else %}
+                            {% set ns.unsafe = true %}
+                          {% endif %}
+                        {% endfor %}
+                        {{ [] if ns.unsafe else ns.ids }}
+                      {% endif %}
+                    motion_valid: >-
+                      {% set ns = namespace(ok=zone_motion | count > 0) %}
+                      {% for eid in zone_motion %}
+                        {% if not is_state(eid, 'off') %}
+                          {% set ns.ok = false %}
+                        {% endif %}
+                      {% endfor %}
+                      {{ ns.ok }}
+                    linked_clear: >-
+                      {% set ns = namespace(ok=true) %}
+                      {% for eid in zone_linked %}
+                        {% if not is_state(eid, 'off') %}
+                          {% set ns.ok = false %}
+                        {% endif %}
+                      {% endfor %}
+                      {{ ns.ok }}
+                    off_targets_known: >-
+                      {% set ns = namespace(ok=zone_off | count > 0) %}
+                      {% for eid in zone_off %}
+                        {% if not has_value(eid) %}
+                          {% set ns.ok = false %}
+                        {% endif %}
+                      {% endfor %}
+                      {{ ns.ok }}
+                - variables:
+                    last_motion_clear: >-
+                      {% set ns = namespace(ts=0) %}
+                      {% for eid in zone_motion if has_value(eid) %}
+                        {% set ns.ts = [ns.ts, as_timestamp(states[eid].last_changed, 0)] | max %}
+                      {% endfor %}
+                      {{ ns.ts }}
+                    last_linked_clear: >-
+                      {% set ns = namespace(ts=0) %}
+                      {% for eid in zone_linked if has_value(eid) %}
+                        {% set ns.ts = [ns.ts, as_timestamp(states[eid].last_changed, 0)] | max %}
+                      {% endfor %}
+                      {{ ns.ts }}
+                    off_targets_on: >-
+                      {% set ns = namespace(on=false) %}
+                      {% for eid in zone_off %}
+                        {% if is_state(eid, 'on') %}
+                          {% set ns.on = true %}
+                        {% endif %}
+                      {% endfor %}
+                      {{ ns.on }}
+                    new_manual_on: >-
+                      {% set ns = namespace(newer=false) %}
+                      {% set deadline = [
+                           (last_motion_clear | float(0)) + zone_delay,
+                           (last_linked_clear | float(0)) +
+                             (zone_grace if zone_linked | count > 0 else 0)
+                         ] | max %}
+                      {% for eid in zone_off if is_state(eid, 'on') %}
+                        {% if as_timestamp(states[eid].last_changed, 0) > deadline + 2 %}
+                          {% set ns.newer = true %}
+                        {% endif %}
+                      {% endfor %}
+                      {{ ns.newer }}
+                - if:
+                    - condition: template
+                      value_template: >-
+                        {{ zone_owner != '' and is_state(zone_owner, 'on') and
+                           off_targets_known and not off_targets_on }}
+                  then:
+                    - action: input_boolean.turn_off
+                      target:
+                        entity_id: "{{ zone_owner }}"
+                - if:
+                    - condition: template
+                      value_template: >-
+                        {{ zone is mapping and zone.get('enabled', true) and
+                           zone_delay > 0 and zone_off | count > 0 and
+                           motion_valid and linked_clear and off_targets_known and
+                           off_targets_on and not new_manual_on and
+                           (zone_owner == '' or is_state(zone_owner, 'on')) and
+                           as_timestamp(now()) >=
+                              [(last_motion_clear | float(0)) + zone_delay,
+                               (last_linked_clear | float(0)) +
+                                 (zone_grace if zone_linked | count > 0 else 0)] | max }}
+                  then:
+                    - action: homeassistant.turn_off
+                      target:
+                        entity_id: "{{ zone_off }}"
+                    - if:
+                        - condition: template
+                          value_template: "{{ zone_owner != '' }}"
+                      then:
+                        - action: input_boolean.turn_off
+                          target:
+                            entity_id: "{{ zone_owner }}"
+                    - if:
+                        - condition: template
+                          value_template: "{{ log_commands_enabled }}"
+                      then:
+                        - action: system_log.write
+                          data:
+                            level: info
+                            logger: blueprints.multi_zone_motion_lights
+                            message: "Switched off {{ zone_name }} after the inactivity and cross-room hold deadlines."
+
+mode: queued
+max: 50
+max_exceeded: warning
