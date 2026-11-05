@@ -154,3 +154,25 @@ async def test_script_or_scene_with_no_off_target_does_not_send_off(tmp_path):
         assert not any(service == "homeassistant.turn_off" for service, _ in calls)
     finally:
         await hass.async_stop()
+
+
+@pytest.mark.asyncio
+async def test_ownership_helper_protects_preexisting_manual_light(tmp_path):
+    zones = [
+        zone("Hall", "binary_sensor.hall_motion", "light.hall",
+             ownership_helper="input_boolean.hall_owned"),
+    ]
+    hass, calls, trigger = await make_runner(tmp_path, zones)
+    try:
+        hass.states.async_set("input_boolean.hall_owned", "off")
+        hass.states.async_set("light.hall", "on")  # Someone turned it on first
+        await trigger()
+        assert calls == []  # Do not claim or retoggle manually activated lights
+        hass.states.async_set("light.hall", "off")
+        await trigger()
+        assert calls == [
+            ("homeassistant.turn_on", "light.hall"),
+            ("input_boolean.turn_on", "input_boolean.hall_owned"),
+        ]
+    finally:
+        await hass.async_stop()
