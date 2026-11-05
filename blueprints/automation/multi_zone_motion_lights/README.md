@@ -89,6 +89,8 @@ Feature inspiration: [freakshock88's Home Assistant motion, illuminance and sun 
 
 Canonical import URL:
 
+```text
 https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/multi_zone_motion_lights/multi_zone_motion_lights.yaml
+```
 
 Reimport/update the blueprint on your Home Assistant instance after GitHub changes. Updating GitHub does not replace the locally installed file. With the optional Blueprints Updater integration, refresh its registry using the blueprints_updater.reload action.
