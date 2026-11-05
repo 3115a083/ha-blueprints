@@ -111,7 +111,7 @@ class MotionLightingTests(unittest.TestCase):
         self.assertEqual(triggers[2]["trigger"], "homeassistant")
         self.assertNotIn("state_changed", str(triggers))
         self.assertNotIn("wait_for_trigger", self.text)
-        self.assertNotIn("delay:", self.text)
+        self.assertNotIn("delay", [key for action in self.data["actions"] for key in action])
         self.assertNotIn("input_datetime.set_datetime", self.text)
 
     def test_zone_on_and_off_are_guarded(self):
