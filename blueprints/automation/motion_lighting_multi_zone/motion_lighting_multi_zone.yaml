@@ -171,11 +171,6 @@ blueprint:
                     time: {}
                 linked_presence:
                   label: "Presence sensors in neighboring areas (optional)"
-                  description: >-
-                    For example, select the bathroom occupancy helper for your
-                    hallway. ON means someone is still in the linked area.
-                    A sensor reporting unknown/unavailable prevents automatic
-                    off until it is healthy again.
                   required: false
                   default: []
                   selector:
@@ -196,10 +191,6 @@ blueprint:
                           value: extend
                 linked_seconds:
                   label: "Hold grace / extended delay (seconds)"
-                  description: >-
-                    Hold: additional time after the linked area becomes vacant.
-                    Extend: extra time added to the normal no-motion delay while
-                    linked activity is current or recent.
                   default: 120
                   selector:
                     number:
