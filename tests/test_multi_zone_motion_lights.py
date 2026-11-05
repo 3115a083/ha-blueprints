@@ -104,6 +104,23 @@ class MultiZoneMotionLightsTests(unittest.TestCase):
                             compiled += 1
         self.assertGreater(compiled, 20)
 
+    def test_cross_room_form_explains_direction_and_multiple_linked_rooms(self):
+        blueprint = self.config["blueprint"]
+        fields = self.inputs["lighting_zones"]["selector"]["object"]["fields"]
+        linked_label = fields["linked_presence"]["label"]
+        grace_label = fields["cross_room_grace_seconds"]["label"]
+        self.assertIn("THIS zone", linked_label)
+        self.assertIn("OTHER rooms", linked_label)
+        self.assertIn("ALL linked rooms", grace_label)
+        self.assertIn("HALLWAY", blueprint["input"]["zones_section"]["description"])
+        self.assertIn("BATHROOM", blueprint["input"]["zones_section"]["description"])
+        self.assertIn("KITCHEN", blueprint["input"]["zones_section"]["description"])
+        self.assertIn("BATHROOM", self.inputs["lighting_zones"]["description"])
+        self.assertIn("KITCHEN", self.inputs["lighting_zones"]["description"])
+        # Nested object selector fields cannot contain descriptions in HA 2026.10.1.
+        self.assertNotIn("description", fields["linked_presence"])
+        self.assertNotIn("description", fields["cross_room_grace_seconds"])
+
     def test_motion_is_immediate_without_global_state_listener(self):
         triggers = self.config["triggers"]
         self.assertEqual([x["id"] for x in triggers],
@@ -275,6 +292,10 @@ class MultiZoneMotionLightsTests(unittest.TestCase):
     def test_diagnostics_and_docs(self):
         readme = (FILE.parent / "README.md").read_text(encoding="utf-8")
         self.assertIn("Cross-room presence", readme)
+        self.assertIn("Which zone gets the other room's presence sensor?", readme)
+        self.assertIn("only the first row applies", readme)
+        self.assertIn("Bathroom", readme)
+        self.assertIn("Kitchen", readme)
         self.assertIn("ownership helper", readme.lower())
         self.assertIn("15 seconds", readme)
         self.assertIn("freakshock88", readme)
