@@ -309,12 +309,21 @@ actions:
                          (zone_sun == 'night' and is_state('sun.sun', 'below_horizon')) or
                          (zone_sun == 'day' and is_state('sun.sun', 'above_horizon')) }}
                     target_available: >-
-                      {{ zone_off | count == 0 or
-                         (expand(zone_off) | count == zone_off | count and
-                          expand(zone_off) | rejectattr('state', 'in', ['unknown', 'unavailable'])
-                            | list | count == zone_off | count) }}
+                      {% set ns = namespace(ok=true) %}
+                      {% for eid in zone_off %}
+                        {% if not has_value(eid) %}
+                          {% set ns.ok = false %}
+                        {% endif %}
+                      {% endfor %}
+                      {{ ns.ok }}
                     target_already_on: >-
-                      {{ expand(zone_off) | selectattr('state', 'eq', 'on') | list | count > 0 }}
+                      {% set ns = namespace(on=false) %}
+                      {% for eid in zone_off %}
+                        {% if is_state(eid, 'on') %}
+                          {% set ns.on = true %}
+                        {% endif %}
+                      {% endfor %}
+                      {{ ns.on }}
                 - if:
                     - condition: template
                       value_template: >-
@@ -407,39 +416,59 @@ actions:
                         {{ [] if ns.unsafe else ns.ids }}
                       {% endif %}
                     motion_valid: >-
-                      {{ zone_motion | count > 0 and
-                         expand(zone_motion) | count == zone_motion | count and
-                         expand(zone_motion) | selectattr('state', 'eq', 'off') | list | count ==
-                           zone_motion | count }}
+                      {% set ns = namespace(ok=zone_motion | count > 0) %}
+                      {% for eid in zone_motion %}
+                        {% if not is_state(eid, 'off') %}
+                          {% set ns.ok = false %}
+                        {% endif %}
+                      {% endfor %}
+                      {{ ns.ok }}
                     linked_clear: >-
-                      {{ expand(zone_linked) | count == zone_linked | count and
-                         expand(zone_linked) | selectattr('state', 'eq', 'off') | list | count ==
-                           zone_linked | count }}
+                      {% set ns = namespace(ok=true) %}
+                      {% for eid in zone_linked %}
+                        {% if not is_state(eid, 'off') %}
+                          {% set ns.ok = false %}
+                        {% endif %}
+                      {% endfor %}
+                      {{ ns.ok }}
                     off_targets_known: >-
-                      {{ zone_off | count > 0 and
-                         expand(zone_off) | count == zone_off | count and
-                         expand(zone_off) | rejectattr('state', 'in', ['unknown', 'unavailable'])
-                           | list | count == zone_off | count }}
+                      {% set ns = namespace(ok=zone_off | count > 0) %}
+                      {% for eid in zone_off %}
+                        {% if not has_value(eid) %}
+                          {% set ns.ok = false %}
+                        {% endif %}
+                      {% endfor %}
+                      {{ ns.ok }}
                 - variables:
                     last_motion_clear: >-
                       {% set ns = namespace(ts=0) %}
-                      {% for state in expand(zone_motion) %}
-                        {% set ns.ts = [ns.ts, as_timestamp(state.last_changed, 0)] | max %}
+                      {% for eid in zone_motion if has_value(eid) %}
+                        {% set ns.ts = [ns.ts, as_timestamp(states[eid].last_changed, 0)] | max %}
                       {% endfor %}
                       {{ ns.ts }}
                     last_linked_clear: >-
                       {% set ns = namespace(ts=0) %}
-                      {% for state in expand(zone_linked) %}
-                        {% set ns.ts = [ns.ts, as_timestamp(state.last_changed, 0)] | max %}
+                      {% for eid in zone_linked if has_value(eid) %}
+                        {% set ns.ts = [ns.ts, as_timestamp(states[eid].last_changed, 0)] | max %}
                       {% endfor %}
                       {{ ns.ts }}
                     off_targets_on: >-
-                      {{ expand(zone_off) | selectattr('state', 'eq', 'on') | list | count > 0 }}
+                      {% set ns = namespace(on=false) %}
+                      {% for eid in zone_off %}
+                        {% if is_state(eid, 'on') %}
+                          {% set ns.on = true %}
+                        {% endif %}
+                      {% endfor %}
+                      {{ ns.on }}
                     new_manual_on: >-
                       {% set ns = namespace(newer=false) %}
-                      {% for state in expand(zone_off) if state.state == 'on' %}
-                        {% if as_timestamp(state.last_changed, 0) >
-                              (last_motion_clear | float(0)) + 2 %}
+                      {% set deadline = [
+                           (last_motion_clear | float(0)) + zone_delay,
+                           (last_linked_clear | float(0)) +
+                             (zone_grace if zone_linked | count > 0 else 0)
+                         ] | max %}
+                      {% for eid in zone_off if is_state(eid, 'on') %}
+                        {% if as_timestamp(states[eid].last_changed, 0) > deadline + 2 %}
                           {% set ns.newer = true %}
                         {% endif %}
                       {% endfor %}
