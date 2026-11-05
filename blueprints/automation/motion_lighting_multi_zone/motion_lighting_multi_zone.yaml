@@ -1,0 +1,448 @@
+blueprint:
+  name: "💡 Motion Lighting | Multi-Zone with Linked Presence"
+  author: "3115a083"
+  domain: automation
+  description: >-
+    Control any number of independent motion-lighting zones in one automation.
+    Each zone has its own sensors, light/switch/scene/script, illuminance threshold,
+    sun/time rules, and automatic-off delay. Link presence in a neighboring area
+    to keep lights on or extend their off delay (for example: hallway → bathroom).
+    Light-on reacts immediately to state events; a short, nonblocking scheduler
+    checks off deadlines. No wait/delay actions, no additional timer helpers.
+
+    Inspired by freakshock88's original motion + illuminance blueprint:
+    https://community.home-assistant.io/t/turn-on-light-switch-scene-script-or-group-based-on-motion-illuminance-sun-more-conditions/257085
+
+    IMPORTANT: Select all participating motion sensors in section 01, then
+    assign each of them to the matching zone in section 02. This deliberate
+    two-step configuration uses native HA state triggers for fast responses,
+    avoiding a listener on every state_changed event in Home Assistant.
+    This blueprint assumes different zones control distinct light targets.
+  homeassistant:
+    min_version: "2026.10.1"
+  source_url: https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/motion_lighting_multi_zone/motion_lighting_multi_zone.yaml
+  input:
+    motion_section:
+      name: "🚶 01 | Fast motion triggers"
+      icon: mdi:motion-sensor
+      description: >-
+        Select every motion/occupancy sensor used by any zone below. One native
+        state trigger watches these entities, so motion turns lights on without
+        polling. Then assign the sensors to their individual zones in section 02.
+      input:
+        trigger_sensors:
+          name: "All motion sensors (required)"
+          description: >-
+            Select the union of the Motion sensors fields from every enabled
+            zone. A sensor omitted here cannot trigger the light to turn on.
+            Sensors may be motion or occupancy binary sensors.
+          selector:
+            entity:
+              multiple: true
+              filter:
+                - domain: binary_sensor
+    zones_section:
+      name: "💡 02 | Lighting zones (add as many as needed)"
+      icon: mdi:lightbulb-group-outline
+      description: >-
+        Click Add for every independently controlled light zone. Each zone
+        contains its own activation, ambient-light and off-delay settings.
+        Link sensors from other areas to prevent unnecessary off/on cycles.
+        Do not reuse the same physical light in multiple entries.
+      input:
+        zone_entries:
+          name: "Lighting zones"
+          description: >-
+            Add one entry per hallway, room or light group. Each zone owns its
+            motion sensors and output. For scenes/scripts, also select the
+            actual lights/switches to turn off.
+          default: []
+          selector:
+            object:
+              multiple: true
+              label_field: name
+              fields:
+                name:
+                  label: "Zone name"
+                  required: true
+                  selector:
+                    text: {}
+                enabled:
+                  label: "Enable this zone"
+                  default: true
+                  selector:
+                    boolean: {}
+                motion_sensors:
+                  label: "Motion / occupancy sensors in this zone"
+                  required: true
+                  selector:
+                    entity:
+                      multiple: true
+                      filter:
+                        - domain: binary_sensor
+                turn_on_entity:
+                  label: "Turn on light, switch, group, scene or script"
+                  required: true
+                  selector:
+                    entity:
+                      filter:
+                        - domain: light
+                        - domain: switch
+                        - domain: group
+                        - domain: scene
+                        - domain: script
+                turn_off_entities:
+                  label: "Actual lights, switches or groups to turn off (optional)"
+                  required: false
+                  default: []
+                  selector:
+                    entity:
+                      multiple: true
+                      filter:
+                        - domain: light
+                        - domain: switch
+                        - domain: group
+                auto_off:
+                  label: "Automatically turn off after inactivity"
+                  default: true
+                  selector:
+                    boolean: {}
+                off_delay_seconds:
+                  label: "Seconds with no motion before turning off"
+                  default: 120
+                  selector:
+                    number:
+                      min: 0
+                      max: 7200
+                      step: 15
+                      mode: box
+                      unit_of_measurement: s
+                illuminance_sensor:
+                  label: "Optional illuminance sensor"
+                  required: false
+                  selector:
+                    entity:
+                      filter:
+                        - domain: sensor
+                          device_class: illuminance
+                illuminance_below:
+                  label: "Turn on only below this illuminance (lx)"
+                  default: 45
+                  selector:
+                    number:
+                      min: 0
+                      max: 100000
+                      step: 1
+                      mode: box
+                      unit_of_measurement: lx
+                illuminance_cutoff_helper:
+                  label: "Optional dynamic illuminance threshold helper"
+                  required: false
+                  selector:
+                    entity:
+                      filter:
+                        - domain: input_number
+                sun_mode:
+                  label: "Sun condition for turning on"
+                  default: always
+                  selector:
+                    select:
+                      options:
+                        - label: "Always"
+                          value: always
+                        - label: "Only below horizon"
+                          value: below
+                        - label: "Only above horizon"
+                          value: above
+                restrict_time:
+                  label: "Restrict turning on to a time window"
+                  default: false
+                  selector:
+                    boolean: {}
+                time_from:
+                  label: "Allowed time window starts"
+                  default: "00:00:00"
+                  selector:
+                    time: {}
+                time_until:
+                  label: "Allowed time window ends"
+                  default: "00:00:00"
+                  selector:
+                    time: {}
+                linked_presence:
+                  label: "Presence sensors in neighboring areas (optional)"
+                  description: >-
+                    For example, select the bathroom occupancy helper for your
+                    hallway. ON means someone is still in the linked area.
+                    A sensor reporting unknown/unavailable prevents automatic
+                    off until it is healthy again.
+                  required: false
+                  default: []
+                  selector:
+                    entity:
+                      multiple: true
+                      filter:
+                        - domain: binary_sensor
+                        - domain: input_boolean
+                linked_behavior:
+                  label: "Effect of linked-area presence"
+                  default: hold
+                  selector:
+                    select:
+                      options:
+                        - label: "Hold light ON while occupied, then grace period"
+                          value: hold
+                        - label: "Extend normal off delay by configured seconds"
+                          value: extend
+                linked_seconds:
+                  label: "Hold grace / extended delay (seconds)"
+                  description: >-
+                    Hold: additional time after the linked area becomes vacant.
+                    Extend: extra time added to the normal no-motion delay while
+                    linked activity is current or recent.
+                  default: 120
+                  selector:
+                    number:
+                      min: 0
+                      max: 7200
+                      step: 15
+                      mode: box
+                      unit_of_measurement: s
+                on_blocker:
+                  label: "Optional turn-on blocker (ON blocks this zone)"
+                  required: false
+                  selector:
+                    entity:
+                      filter:
+                        - domain: binary_sensor
+                        - domain: input_boolean
+                off_blocker:
+                  label: "Optional turn-off blocker (ON keeps this zone lit)"
+                  required: false
+                  selector:
+                    entity:
+                      filter:
+                        - domain: binary_sensor
+                        - domain: input_boolean
+    global_section:
+      name: "⚙️ 03 | Shared controls"
+      icon: mdi:tune
+      description: >-
+        Optional controls applying to every zone. A missing helper is ignored.
+        Unavailable configured helpers block writes rather than guessing.
+      input:
+        enable_helper:
+          name: "Optional master enable helper (ON = active)"
+          default: ""
+          selector:
+            entity:
+              filter:
+                - domain: input_boolean
+        on_blocker_global:
+          name: "Optional global turn-on blocker (ON = block)"
+          default: ""
+          selector:
+            entity:
+              filter:
+                - domain: binary_sensor
+                - domain: input_boolean
+        off_blocker_global:
+          name: "Optional global turn-off blocker (ON = keep lights)"
+          default: ""
+          selector:
+            entity:
+              filter:
+                - domain: binary_sensor
+                - domain: input_boolean
+        respect_manual_on:
+          name: "Protect lights manually turned on after motion ended"
+          description: >-
+            If a light was switched on after the most recent motion sensor
+            became inactive, do not turn it off automatically until new motion
+            occurs. This uses the entity last_changed timestamp; it is a
+            best-effort safeguard, not guaranteed ownership tracking.
+          default: true
+          selector:
+            boolean: {}
+
+variables:
+  zones: !input zone_entries
+  watched_motion: !input trigger_sensors
+  master_enable_id: !input enable_helper
+  global_on_blocker_id: !input on_blocker_global
+  global_off_blocker_id: !input off_blocker_global
+  protect_manual_on: !input respect_manual_on
+
+triggers:
+  - trigger: state
+    entity_id: !input trigger_sensors
+    to: "on"
+    id: motion_on
+  - trigger: time_pattern
+    seconds: "/15"
+    id: off_check
+  - trigger: homeassistant
+    event: start
+    id: off_check
+
+conditions: []
+
+actions:
+  - condition: template
+    value_template: >-
+      {{ master_enable_id in ['', none] or is_state(master_enable_id, 'on') }}
+  - repeat:
+      for_each: "{{ zones | default([], true) }}"
+      sequence:
+        - variables:
+            zone: "{{ repeat.item }}"
+        - variables:
+            zone_name: "{{ zone.get('name', 'Unnamed zone') }}"
+            zone_enabled: "{{ zone.get('enabled', true) | bool }}"
+            zone_motion: "{{ zone.get('motion_sensors', []) | default([], true) }}"
+            zone_on_entity: "{{ zone.get('turn_on_entity', '') | default('', true) }}"
+            zone_auto_off: "{{ zone.get('auto_off', true) | bool }}"
+            zone_delay: "{{ zone.get('off_delay_seconds', 120) | float(120) }}"
+            zone_presence: "{{ zone.get('linked_presence', []) | default([], true) }}"
+            zone_link_mode: "{{ zone.get('linked_behavior', 'hold') }}"
+            zone_extra: "{{ zone.get('linked_seconds', 120) | float(120) }}"
+            zone_on_blocker: "{{ zone.get('on_blocker', '') | default('', true) }}"
+            zone_off_blocker: "{{ zone.get('off_blocker', '') | default('', true) }}"
+        - variables:
+            zone_off_targets: >-
+              {% set selected = zone.get('turn_off_entities', []) | default([], true) %}
+              {% if selected is sequence and selected is not string and selected | count > 0 %}
+                {{ selected }}
+              {% elif zone_on_entity.split('.')[0] in ['light', 'switch', 'group'] %}
+                {{ [zone_on_entity] }}
+              {% else %}
+                {{ [] }}
+              {% endif %}
+        - choose:
+            - alias: "Fast local motion: switch on one eligible zone"
+              conditions:
+                - condition: template
+                  value_template: >-
+                    {{ trigger.id == 'motion_on' and zone_enabled and
+                       trigger.entity_id in zone_motion and
+                       trigger.entity_id in watched_motion and
+                       zone_on_entity != '' and
+                       zone_on_entity.split('.')[0] in ['light', 'switch', 'group', 'scene', 'script'] and
+                       (global_on_blocker_id == '' or is_state(global_on_blocker_id, 'off')) and
+                       (zone_on_blocker == '' or is_state(zone_on_blocker, 'off')) }}
+              sequence:
+                - variables:
+                    already_lit: >-
+                      {% set ns = namespace(lit=false) %}
+                      {% for entity in zone_off_targets %}
+                        {% if is_state(entity, 'on') %}{% set ns.lit = true %}{% endif %}
+                      {% endfor %}
+                      {{ ns.lit }}
+                    lux_allowed: >-
+                      {% set lux_id = zone.get('illuminance_sensor', '') | default('', true) %}
+                      {% set helper = zone.get('illuminance_cutoff_helper', '') | default('', true) %}
+                      {% set threshold = states(helper) | float(none)
+                         if helper != '' else zone.get('illuminance_below', 45) | float(45) %}
+                      {{ lux_id == '' or (has_value(lux_id) and threshold is not none and
+                         states(lux_id) | float(1000000) < threshold) }}
+                    time_allowed: >-
+                      {% if not zone.get('restrict_time', false) %}
+                        true
+                      {% else %}
+                        {% set start = zone.get('time_from', '00:00:00') | string %}
+                        {% set stop = zone.get('time_until', '00:00:00') | string %}
+                        {% set clock = now().strftime('%H:%M:%S') %}
+                        {{ start == stop or
+                           (start < stop and start <= clock < stop) or
+                           (start > stop and (clock >= start or clock < stop)) }}
+                      {% endif %}
+                    sun_allowed: >-
+                      {% set mode = zone.get('sun_mode', 'always') %}
+                      {{ mode == 'always' or
+                         (mode == 'below' and is_state('sun.sun', 'below_horizon')) or
+                         (mode == 'above' and is_state('sun.sun', 'above_horizon')) }}
+                - if:
+                    - condition: template
+                      value_template: >-
+                        {{ not already_lit and lux_allowed and time_allowed and sun_allowed }}
+                  then:
+                    - action: homeassistant.turn_on
+                      target:
+                        entity_id: "{{ zone_on_entity }}"
+            - alias: "Nonblocking off reconciliation for all inactive zones"
+              conditions:
+                - condition: template
+                  value_template: >-
+                    {{ trigger.id == 'off_check' and zone_enabled and
+                       zone_auto_off and zone_motion | count > 0 and
+                       zone_off_targets | count > 0 and
+                       (global_off_blocker_id == '' or is_state(global_off_blocker_id, 'off')) and
+                       (zone_off_blocker == '' or is_state(zone_off_blocker, 'off')) }}
+              sequence:
+                - variables:
+                    zone_motion_status: >-
+                      {% set ns = namespace(clear=true, latest=0) %}
+                      {% for motion in zone_motion %}
+                        {% if not is_state(motion, 'off') %}
+                          {% set ns.clear = false %}
+                        {% else %}
+                          {% set changed = as_timestamp(states[motion].last_changed, 0) %}
+                          {% set ns.latest = [ns.latest, changed] | max %}
+                        {% endif %}
+                      {% endfor %}
+                      {{ dict(clear=ns.clear and ns.latest > 0, last=ns.latest) }}
+                    zone_presence_status: >-
+                      {% set ns = namespace(known=true, active=false, latest_off=0) %}
+                      {% for presence in zone_presence %}
+                        {% if is_state(presence, 'on') %}
+                          {% set ns.active = true %}
+                        {% elif is_state(presence, 'off') %}
+                          {% set changed = as_timestamp(states[presence].last_changed, 0) %}
+                          {% set ns.latest_off = [ns.latest_off, changed] | max %}
+                        {% else %}
+                          {% set ns.known = false %}
+                        {% endif %}
+                      {% endfor %}
+                      {{ dict(known=ns.known, active=ns.active, last_off=ns.latest_off) }}
+                - variables:
+                    zone_can_off: >-
+                      {% set current = as_timestamp(now()) %}
+                      {% set base_due = zone_motion_status.clear and
+                           current - zone_motion_status.last >= zone_delay %}
+                      {% set linked = zone_presence | count > 0 %}
+                      {% set link_known = not linked or zone_presence_status.known %}
+                      {% set hold_ok = (not zone_presence_status.active) and
+                           (not linked or current - zone_presence_status.last_off >= zone_extra) %}
+                      {% set extension_applies = linked and (
+                           zone_presence_status.active or
+                           current - zone_presence_status.last_off < zone_extra) %}
+                      {% set extend_ok = current - zone_motion_status.last >=
+                           (zone_delay + (zone_extra if extension_applies else 0)) %}
+                      {% set ns = namespace(manual=false, any_on=false, all_known=true) %}
+                      {% for entity in zone_off_targets %}
+                        {% if not has_value(entity) %}
+                          {% set ns.all_known = false %}
+                        {% elif is_state(entity, 'on') %}
+                          {% set ns.any_on = true %}
+                          {% if protect_manual_on and
+                             as_timestamp(states[entity].last_changed, 0) >
+                               zone_motion_status.last + 2 %}
+                            {% set ns.manual = true %}
+                          {% endif %}
+                        {% endif %}
+                      {% endfor %}
+                      {{ base_due and link_known and
+                         ((zone_link_mode == 'hold' and hold_ok) or
+                          (zone_link_mode == 'extend' and extend_ok) or not linked) and
+                         ns.any_on and ns.all_known and not ns.manual }}
+                - if:
+                    - condition: template
+                      value_template: "{{ zone_can_off }}"
+                  then:
+                    - action: homeassistant.turn_off
+                      target:
+                        entity_id: "{{ zone_off_targets }}"
+
+mode: queued
+max: 30
+max_exceeded: silent
