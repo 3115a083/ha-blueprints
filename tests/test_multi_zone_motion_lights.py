@@ -127,7 +127,7 @@ class MultiZoneMotionLightsTests(unittest.TestCase):
             "input_boolean.turn_on", "input_boolean.turn_off", "system_log.write"
         }, set())
         self.assertNotIn("shell_command", self.text)
-        self.assertNotIn("delay:", self.text)
+        self.assertFalse(any("delay" in x for x in command_names))
         self.assertNotIn("wait_for_trigger", self.text)
         # Condition actions inside repeat would accidentally abort every later zone.
         for item in all_steps:
