@@ -13,6 +13,7 @@ A collection of reusable, configurable **Home Assistant blueprints** maintained 
 | **🔊 Play When Idle / Speaker Fallback** | Run a Music Assistant radio station, a media URL, or custom actions when an observable Play request targets an idle speaker. Supports several media players, with safe paused-playback protection. | [Setup and limitations](blueprints/automation/play_when_idle/README.md) | [Import blueprint](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2F3115a083%2Fha-blueprints%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fplay_when_idle%2Fplay_when_idle.yaml) | `https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/play_when_idle/play_when_idle.yaml` · [Copy URL](#copy-play-when-idle-speaker-fallback-url) |
 | **🎵 Music Assistant / NSPanel Presets** | Start favorite radios/playlists, cycle speakers and transfer playback from NSPanel buttons without changing Blackymas firmware. | [Setup and examples](blueprints/automation/music_assistant_nspanel/README.md) | [Import blueprint](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2F3115a083%2Fha-blueprints%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fmusic_assistant_nspanel%2Fmusic_assistant_nspanel.yaml) | `https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/music_assistant_nspanel/music_assistant_nspanel.yaml` · [Copy URL](#copy-music-assistant-nspanel-presets-url) |
 | **🔥 Advanced Heating Control Multi-Zone** | Manage any number of independent heating zones in one automation, with room-specific inputs, global controls and a clear vacation override. Based on the awesome blueprint by [panhans](https://community.home-assistant.io/t/advanced-heating-control/469873). | [Setup and examples](blueprints/automation/advanced_heating_multi_zone/README.md) | [Import blueprint](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2F3115a083%2Fha-blueprints%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fadvanced_heating_multi_zone%2Fadvanced_heating_multi_zone.yaml) | `https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/advanced_heating_multi_zone/advanced_heating_multi_zone.yaml` · [Copy URL](#copy-advanced-heating-control-multi-zone-url) |
+| **💡 Motion Lighting / Multi-Zone** | Control any number of independent motion lights in one automation. Individual lux/sun/time rules and linked-area occupancy holds protect against unnecessary lamp cycling. | [Setup and examples](blueprints/automation/motion_lighting_multi_zone/README.md) | [Import blueprint](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2F3115a083%2Fha-blueprints%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fmotion_lighting_multi_zone%2Fmotion_lighting_multi_zone.yaml) | `https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/motion_lighting_multi_zone/motion_lighting_multi_zone.yaml` · [Copy URL](#copy-motion-lighting-multi-zone-url) |
 | **💡 Forgotten Devices / Energy Saver** | Shut down forgotten devices, groups or room lights with exceptions, shared entry rules, individual/global runtimes and a preview. | [Setup and examples](blueprints/automation/forgotten_devices/README.md) | [Import blueprint](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2F3115a083%2Fha-blueprints%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fforgotten_devices%2Fforgotten_devices.yaml) | `https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/forgotten_devices/forgotten_devices.yaml` · [Copy URL](#copy-forgotten-devices-energy-saver-url) |
 
 ## Copy an import URL
@@ -61,6 +62,12 @@ https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/music_
 https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/advanced_heating_multi_zone/advanced_heating_multi_zone.yaml
 ```
 
+### Copy Motion Lighting Multi-Zone URL
+
+```text
+https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/motion_lighting_multi_zone/motion_lighting_multi_zone.yaml
+```
+
 ### Copy Forgotten Devices Energy Saver URL
 
 ```text
@@ -78,7 +85,7 @@ The catalog is a starting point. **Blueprint-specific settings and use cases are
 
 ## Updates with Blueprints Updater
 
-All eight blueprints contain a canonical `blueprint.source_url` pointing to their own YAML file on this repository's `main` branch. The URLs in the catalog and copy blocks match those metadata values. Keep this metadata when importing or copying a file manually.
+All nine blueprints contain a canonical `blueprint.source_url` pointing to their own YAML file on this repository's `main` branch. The URLs in the catalog and copy blocks match those metadata values. Keep this metadata when importing or copying a file manually.
 
 [Blueprints Updater](https://github.com/luuquangvu/blueprints-updater) uses the source URL to retrieve the upstream file and compares normalized content hashes. It accepts GitHub `blob/main` URLs and converts them to raw downloads. **A GitHub Release, tag, release asset, or blueprint version field is not required.** A short hash shown as a blueprint's update version is normal for this integration; it is not the HACS release version of the updater integration itself. Adding a `version` key to blueprint metadata is unnecessary and may violate Home Assistant's blueprint schema.
 
@@ -115,6 +122,9 @@ blueprints/
       forgotten_devices.yaml
       README.md
       CHANGELOG.md
+    motion_lighting_multi_zone/
+      motion_lighting_multi_zone.yaml
+      README.md
     advanced_heating_multi_zone/
       advanced_heating_multi_zone.yaml
       README.md
@@ -128,6 +138,7 @@ tests/
   test_govee_recovery.py
   test_music_assistant_nspanel.py
   test_advanced_heating_multi_zone.py
+  test_motion_lighting_multi_zone.py
 ```
 
 New automation blueprints belong in `blueprints/automation/<topic>/`; script blueprints can use `blueprints/script/<topic>/`.
