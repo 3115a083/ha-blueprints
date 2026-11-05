@@ -398,7 +398,7 @@ actions:
                 - variables:
                     zone_can_off: >-
                       {% set current = as_timestamp(now()) %}
-                      {% set base_due = zone_motion_status.clear and
+                      {% set base_due = zone_motion_status['clear'] and
                            current - zone_motion_status.last >= zone_delay %}
                       {% set linked = zone_presence | count > 0 %}
                       {% set link_known = not linked or zone_presence_status.known %}
