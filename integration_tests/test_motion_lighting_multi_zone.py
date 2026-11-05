@@ -102,17 +102,6 @@ async def environment(tmp_path, zones=None, *, motion_age=200, occupancy_age=200
         ]
 
     expanded = config(zones, **inputs)
-    # Test-only observer of the live script-variable scope (no blueprint change).
-    off_sequence = expanded["actions"][1]["repeat"]["sequence"][3]["choose"][1]["sequence"]
-    off_sequence.insert(2, {
-        "action": "test.debug",
-        "data": {
-            "snapshot": "{{ dict(motion=zone_motion, motion_status=zone_motion_status, presence=zone_presence, presence_status=zone_presence_status, off_targets=zone_off_targets, can_off=zone_can_off, delay=zone_delay, light_is_on=is_state('light.hallway', 'on')) }}"
-        },
-    })
-    async def debug(call):
-        print("OFF_CHECK_DEBUG", repr(call.data))
-    hass.services.async_register("test", "debug", debug)
     actions = await async_validate_actions_config(
         hass, cv.SCRIPT_SCHEMA([
             {"variables": expanded["variables"]}, *expanded["actions"]
