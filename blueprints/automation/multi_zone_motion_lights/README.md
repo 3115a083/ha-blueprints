@@ -18,7 +18,7 @@ The form supports adding any number of zones. Each zone sensor is assigned again
 
 ## Which zone gets the other room's presence sensor?
 
-**Configure the rule on the zone whose LIGHTS you want to protect.** The selected sensors come from OTHER rooms that should delay that zone's automatic switch-off.
+**Configure the rule on the zone whose LIGHTS you want to protect.** Cross-room presence uses sensors from OTHER rooms to delay that zone's automatic switch-off.
 
 | You want to keep these lights ON | Edit this lighting zone | Select these OTHER rooms' occupancy sensors |
 | --- | --- | --- |
