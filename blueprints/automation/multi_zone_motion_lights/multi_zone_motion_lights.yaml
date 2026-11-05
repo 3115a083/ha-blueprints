@@ -146,11 +146,6 @@ blueprint:
                         - domain: group
                 cross_room_grace_seconds:
                   label: "Additional hold AFTER linked presence clears (seconds)"
-                  description: >-
-                    For example 180 keeps the hallway lit for 3 more
-                    minutes after the bathroom is vacant. Set 0 to only
-                    hold while the linked sensor stays ON. Sensors with
-                    stale OFF state do not continuously add time.
                   default: 180
                   selector:
                     number:
@@ -209,14 +204,6 @@ blueprint:
                         - domain: switch
                 ownership_helper:
                   label: "Optional Input Boolean: this automation owns the light"
-                  description: >-
-                    Strongly recommended if you also operate lights by
-                    hand. Create a separate Input Boolean per zone, initially
-                    OFF. The blueprint turns it ON after its own activation
-                    and OFF after its own switch-off. If omitted, a
-                    timestamp safeguard still avoids repeated switch-offs
-                    after a later manual turn-on, but cannot fully protect
-                    lights already on before motion was detected.
                   required: false
                   selector:
                     entity:
