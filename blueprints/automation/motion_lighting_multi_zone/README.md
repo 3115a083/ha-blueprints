@@ -98,9 +98,9 @@ Tests validate YAML, selectors, trigger routing, behavior under simulated state 
 
 ## Import URL
 
-~~~text
+```text
 https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/motion_lighting_multi_zone/motion_lighting_multi_zone.yaml
-~~~
+```
 
 ## Blueprint updates
 
