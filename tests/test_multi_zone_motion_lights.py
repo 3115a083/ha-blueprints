@@ -237,6 +237,41 @@ class MultiZoneMotionLightsTests(unittest.TestCase):
                                                              "binary_sensor.bath"]).strip(),
                          "[]")
 
+    def test_group_entities_use_their_own_state_not_expanded_members(self):
+        target = self.env.from_string(find_variable(self.config["actions"], "target_available"))
+        available = target.render(
+            zone_off=["group.hall_lights"],
+            has_value=lambda eid: eid == "group.hall_lights",
+        ).strip()
+        self.assertEqual(available, "True")
+        motion = self.env.from_string(find_variable(self.config["actions"], "motion_valid"))
+        self.assertEqual(motion.render(
+            zone_motion=["group.hall_motion"],
+            is_state=lambda eid, expected: eid == "group.hall_motion" and expected == "off",
+        ).strip(), "True")
+        self.assertEqual(motion.render(
+            zone_motion=["group.hall_motion"],
+            is_state=lambda eid, expected: False,
+        ).strip(), "False")
+
+    def test_late_auto_on_is_not_misclassified_as_manual_override(self):
+        template = self.env.from_string(find_variable(self.config["actions"], "new_manual_on"))
+        lights = {"light.hall": SimpleNamespace(last_changed=1100)}
+        def render(light_ts, motion_end=1000, extra_end=0, hold=None):
+            lights["light.hall"].last_changed = light_ts
+            return template.render(
+                zone_off=["light.hall"], zone_delay=120,
+                last_motion_clear=motion_end, last_linked_clear=extra_end,
+                zone_grace=180, zone_linked=hold or [],
+                states=lights, is_state=lambda eid, state: state == "on",
+                as_timestamp=lambda value, default=0: value,
+            ).strip() == "True"
+        self.assertFalse(render(1100))  # delayed light acknowledgement inside off delay
+        self.assertFalse(render(1120))
+        self.assertTrue(render(1124))  # manual activation after the due deadline
+        self.assertFalse(render(1300, extra_end=1200, hold=["binary_sensor.bath"]))
+        self.assertTrue(render(1383, extra_end=1200, hold=["binary_sensor.bath"]))
+
     def test_diagnostics_and_docs(self):
         readme = (FILE.parent / "README.md").read_text(encoding="utf-8")
         self.assertIn("Cross-room presence", readme)
