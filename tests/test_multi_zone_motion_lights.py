@@ -79,8 +79,10 @@ class MultiZoneMotionLightsTests(unittest.TestCase):
             "name", "motion_sensors", "on_entities", "off_entities", "off_delay_seconds",
             "linked_presence", "cross_room_grace_seconds", "ownership_helper",
             "lux_sensor", "lux_threshold", "sun_mode", "start_time", "end_time",
-            "blocking_entity", "enabled",
+            "blocking_entity", "enabled", "darkness_activation", "occupancy_sensors",
         }.issubset(fields))
+        self.assertEqual(fields["darkness_activation"]["default"], "off")
+        self.assertEqual(self.inputs["monitored_illuminance_sensors"]["default"], [])
         self.assertEqual(fields["cross_room_grace_seconds"]["default"], 180)
         self.assertEqual(fields["off_delay_seconds"]["default"], 120)
         self.assertEqual(self.inputs["lighting_zones"]["default"], [])
@@ -124,11 +126,17 @@ class MultiZoneMotionLightsTests(unittest.TestCase):
     def test_motion_is_immediate_without_global_state_listener(self):
         triggers = self.config["triggers"]
         self.assertEqual([x["id"] for x in triggers],
-                         ["motion_on", "off_reconcile", "startup", "startup"])
+                         ["motion_on", "sunset", "lux_changed",
+                          "off_reconcile", "startup", "startup"])
         self.assertEqual(triggers[0]["trigger"], "state")
         self.assertEqual(triggers[0]["to"], "on")
-        self.assertEqual(triggers[1]["seconds"], "/15")
-        self.assertEqual(triggers[2]["trigger"], "homeassistant")
+        self.assertEqual(triggers[1]["entity_id"], "sun.sun")
+        self.assertEqual(triggers[1]["to"], "below_horizon")
+        self.assertEqual(triggers[2]["entity_id"],
+                         "!input monitored_illuminance_sensors")
+        self.assertIn("_monitored_lux", triggers[2]["enabled"])
+        self.assertEqual(triggers[3]["seconds"], "/15")
+        self.assertEqual(triggers[4]["trigger"], "homeassistant")
         self.assertFalse(any(x.get("event_type") == "state_changed" for x in triggers))
         self.assertFalse(any(x.get("trigger") == "time_pattern" and
                              x.get("seconds") in ("/1", 1) for x in triggers))
@@ -221,7 +229,8 @@ class MultiZoneMotionLightsTests(unittest.TestCase):
         def is_state(entity_id, expected):
             return entity_id in states and states[entity_id].state == expected
         def ok():
-            return template.render(zone_motion=base, is_state=is_state).strip() == "True"
+            return template.render(zone_motion=base, zone_activity=base,
+                                   is_state=is_state).strip() == "True"
         self.assertFalse(ok())
         states[base[0]] = SimpleNamespace(state="off")
         self.assertFalse(ok())
@@ -263,11 +272,11 @@ class MultiZoneMotionLightsTests(unittest.TestCase):
         self.assertEqual(available, "True")
         motion = self.env.from_string(find_variable(self.config["actions"], "motion_valid"))
         self.assertEqual(motion.render(
-            zone_motion=["group.hall_motion"],
+            zone_motion=["group.hall_motion"], zone_activity=["group.hall_motion"],
             is_state=lambda eid, expected: eid == "group.hall_motion" and expected == "off",
         ).strip(), "True")
         self.assertEqual(motion.render(
-            zone_motion=["group.hall_motion"],
+            zone_motion=["group.hall_motion"], zone_activity=["group.hall_motion"],
             is_state=lambda eid, expected: False,
         ).strip(), "False")
 
@@ -289,9 +298,89 @@ class MultiZoneMotionLightsTests(unittest.TestCase):
         self.assertFalse(render(1300, extra_end=1200, hold=["binary_sensor.bath"]))
         self.assertTrue(render(1383, extra_end=1200, hold=["binary_sensor.bath"]))
 
+    def test_own_zone_presence_required_for_darkness_and_blocks_early_off(self):
+        occupied = self.env.from_string(find_variable(self.config["actions"], "zone_occupied"))
+        values = {
+            "binary_sensor.hall_motion": "off",
+            "input_boolean.hall_occupied": "on",
+            "binary_sensor.bath_occupied": "on",
+        }
+        def own_occupied():
+            return occupied.render(
+                zone_motion=["binary_sensor.hall_motion"],
+                zone_local_presence=["input_boolean.hall_occupied"],
+                is_state=lambda eid, state: values.get(eid) == state
+            ).strip() == "True"
+        self.assertTrue(own_occupied())
+        values["input_boolean.hall_occupied"] = "off"
+        self.assertFalse(own_occupied())  # bath is cross-room hold, not own presence
+        motion_valid = self.env.from_string(find_variable(self.config["actions"], "motion_valid"))
+        values["input_boolean.hall_occupied"] = "on"
+        self.assertEqual(motion_valid.render(
+            zone_motion=["binary_sensor.hall_motion"],
+            zone_activity=["binary_sensor.hall_motion", "input_boolean.hall_occupied"],
+            is_state=lambda eid, state: values.get(eid) == state
+        ).strip(), "False")
+
+    def test_sunset_and_lux_crossing_match_only_occupied_zone(self):
+        template = self.env.from_string(find_variable(self.config["actions"], "activation_event_matches"))
+        def matches(event_id, mode="both", occupied=True, entity="sun.sun",
+                    lux_id="sensor.hall_lux", old="100", new="79", threshold=80):
+            trigger = SimpleNamespace(
+                id=event_id, entity_id=entity,
+                from_state=SimpleNamespace(state=old),
+                to_state=SimpleNamespace(state=new),
+            )
+            return template.render(
+                trigger=trigger, zone_motion=["binary_sensor.hall_motion"],
+                zone_darkness_mode=mode, zone_occupied=occupied,
+                zone_lux=lux_id, zone_lux_threshold=threshold,
+                is_number=lambda val: (
+                    isinstance(val, (str, int, float))
+                    and str(val).replace(".", "", 1).isdigit()
+                ),
+            ).strip() == "True"
+        self.assertTrue(matches("sunset"))
+        self.assertFalse(matches("sunset", occupied=False))
+        self.assertFalse(matches("sunset", mode="lux"))
+        self.assertFalse(matches("sunset", mode="off"))
+        self.assertTrue(matches("lux_changed", entity="sensor.hall_lux"))
+        self.assertTrue(matches("lux_changed", entity="sensor.hall_lux", new="80"))
+        self.assertFalse(matches("lux_changed", entity="sensor.kitchen_lux"))
+        self.assertFalse(matches("lux_changed", entity="sensor.hall_lux", old="70"))
+        self.assertFalse(matches("lux_changed", entity="sensor.hall_lux", new="90"))
+        self.assertFalse(matches("lux_changed", entity="sensor.hall_lux", old="unavailable"))
+        self.assertFalse(matches("lux_changed", entity="sensor.hall_lux", occupied=False))
+        self.assertFalse(matches("lux_changed", entity="sensor.hall_lux", mode="sunset"))
+        self.assertFalse(matches("lux_changed", entity="sensor.hall_lux", mode="off"))
+        self.assertTrue(matches("motion_on", entity="binary_sensor.hall_motion", mode="off",
+                                occupied=False))
+        self.assertFalse(matches("motion_on", entity="binary_sensor.other_motion"))
+
+    def test_unregistered_lux_is_detected_only_for_lux_trigger_zones(self):
+        tmpl = self.env.from_string(find_variable(self.config["actions"], "unregistered_lux"))
+        zones = [
+            {"name": "Hall", "lux_sensor": "sensor.hall_lux",
+             "darkness_activation": "lux"},
+            {"name": "Bath", "lux_sensor": "sensor.bath_lux",
+             "darkness_activation": "sunset"},
+            {"name": "Kitchen", "lux_sensor": "sensor.hall_lux",
+             "darkness_activation": "both"}
+        ]
+        self.assertEqual(
+            tmpl.render(configured_zones=zones, monitored_lux_entities=[]).strip(),
+            "['sensor.hall_lux']",
+        )
+        self.assertEqual(
+            tmpl.render(configured_zones=zones,
+                        monitored_lux_entities=["sensor.hall_lux"]).strip(), "[]",
+        )
+
     def test_diagnostics_and_docs(self):
         readme = (FILE.parent / "README.md").read_text(encoding="utf-8")
         self.assertIn("Cross-room presence", readme)
+        self.assertIn("Already occupied at sunset", readme)
+        self.assertIn("illumination", readme.lower())
         self.assertIn("Which zone gets the other room's presence sensor?", readme)
         self.assertIn("only the first row applies", readme)
         self.assertIn("Bathroom", readme)
