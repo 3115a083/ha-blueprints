@@ -131,6 +131,7 @@ class MultiZoneMotionLightsTests(unittest.TestCase):
         self.assertEqual(triggers[0]["trigger"], "state")
         self.assertEqual(triggers[0]["to"], "on")
         self.assertEqual(triggers[1]["entity_id"], "sun.sun")
+        self.assertEqual(triggers[1]["from"], "above_horizon")
         self.assertEqual(triggers[1]["to"], "below_horizon")
         self.assertEqual(triggers[2]["entity_id"],
                          "!input monitored_illuminance_sensors")
