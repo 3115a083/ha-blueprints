@@ -1,5 +1,13 @@
 # Changelog
 
+## 2026-11-07 | Optional darkness activation for already-occupied zones
+
+- Added per-zone opt-in to activate at sunset, at a zone-specific lux threshold crossing, or on either event. Existing motion-only behavior remains the default.
+- Added a dedicated, entity-filtered list of monitored lux sensors, with a warning if a zone's configured lux trigger sensor is missing from the list.
+- Added optional presence sensors inside each zone. Sustained own-zone presence can activate lighting when the room becomes dark and prevents premature automatic switch-off. Linked cross-room occupancy remains a hold-only signal.
+- Reused existing time, sun, lux, blocker, availability and manual-ownership guards for every activation event.
+- Added tests for threshold crossings, unrelated sensors, unknown values, stationary occupancy, cross-room isolation and Home Assistant execution.
+
 ## 2026-11-05 | Initial release
 
 - Added repeatable, unlimited multi-zone motion lighting under one automation.

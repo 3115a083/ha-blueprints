@@ -15,6 +15,13 @@ blueprint:
     the configured grace time after both become vacant. This
     prevents unnecessary light cycling on the way back.
 
+    Optional darkness reactivation can also turn ON a zone that is
+    ALREADY OCCUPIED when sunset happens or its illuminance falls below
+    a configured threshold. The zone's OWN motion/presence sensors
+    determine occupancy. Cross-room presence only holds existing
+    lights ON and never activates a different room.
+    Sunset and lux changes are event-driven, without extra polling.
+
     For immediate, resource-efficient motion triggers, register all
     motion entities once under Sensor monitoring, then assign them
     to their zones below. No broad state_changed event listener or
@@ -35,9 +42,10 @@ blueprint:
       icon: mdi:motion-sensor
       description: >-
         Register every motion entity used for switching ON, then assign it
-        to one or more zones below. This separate registration is required
-        because Home Assistant cannot dynamically generate state triggers
-        from repeated form rows. It avoids listening to all entity changes.
+        to one or more zones below. Register illuminance sensors here too
+        if you want them to trigger occupied-room activation on a drop
+        below the zone's lux threshold. These lists avoid listening to
+        unrelated entity changes. Zone assignments remain below.
       input:
         monitored_motion_sensors:
           name: "All motion sensors used by your zones"
@@ -51,6 +59,20 @@ blueprint:
               filter:
                 - domain: binary_sensor
                 - domain: group
+        monitored_illuminance_sensors:
+          name: "Lux sensors for occupied-room darkness activation (optional)"
+          description: >-
+            Select each illuminance sensor that should fire an ON check
+            when its value crosses a zone's lux threshold from above
+            to at or below the threshold. Also select that sensor as
+            the zone's own Lux sensor and enable darkness activation
+            in the zone. No lux sensors are required for sunset-only use.
+          default: []
+          selector:
+            entity:
+              multiple: true
+              filter:
+                - domain: sensor
         global_enable:
           name: "Optional master enable switch"
           description: >-
@@ -73,6 +95,10 @@ blueprint:
         room is occupied, the HALLWAY lights stay ON. You do not need
         to configure the hallway inside the bathroom or kitchen entries.
         Each zone has its own motion sensors, lights, and timeout.
+        For sunset/lux reactivation, set Switch ON when it becomes dark
+        and select this zone's OWN occupancy sensor if motion may end
+        while someone is still present. OTHER-room sensors never
+        activate the hallway lights on their own.
       input:
         lighting_zones:
           name: "Lighting zones (add as many as you need)"
@@ -143,6 +169,17 @@ blueprint:
                       step: 5
                       unit_of_measurement: s
                       mode: box
+                occupancy_sensors:
+                  label: "Presence sensors INSIDE THIS zone (optional)"
+                  required: false
+                  default: []
+                  selector:
+                    entity:
+                      multiple: true
+                      filter:
+                        - domain: binary_sensor
+                        - domain: input_boolean
+                        - domain: group
                 linked_presence:
                   label: "Hold THIS zone's lights ON: presence sensors in OTHER rooms"
                   required: false
@@ -181,6 +218,20 @@ blueprint:
                       step: 1
                       unit_of_measurement: lx
                       mode: box
+                darkness_activation:
+                  label: "Switch ON when it becomes dark while THIS zone is occupied"
+                  default: "off"
+                  selector:
+                    select:
+                      options:
+                        - label: "Disabled (motion only, previous behavior)"
+                          value: "off"
+                        - label: "At sunset"
+                          value: sunset
+                        - label: "When THIS zone's lux value crosses its threshold"
+                          value: lux
+                        - label: "At sunset OR when lux crosses its threshold"
+                          value: both
                 sun_mode:
                   label: "Optional sun condition for switching ON"
                   default: any
@@ -233,10 +284,11 @@ blueprint:
           selector:
             boolean: {}
         warn_unregistered:
-          name: "Warn if zone sensors are not in the monitoring list"
+          name: "Warn if zone motion/lux sensors are not in the monitoring lists"
           description: >-
-            Checks on Home Assistant start and automation reload; log
-            a warning once for misconfigured sensors.
+            Checks on Home Assistant start and automation reload; logs a
+            warning once for zone motion or darkness-trigger lux sensors
+            missing from their corresponding monitored-entity lists.
           default: true
           selector:
             boolean: {}
@@ -244,15 +296,28 @@ blueprint:
 variables:
   configured_zones: !input lighting_zones
   monitored_entities: !input monitored_motion_sensors
+  monitored_lux_entities: !input monitored_illuminance_sensors
   master_enable_id: !input global_enable
   log_commands_enabled: !input log_commands
   warn_unregistered_enabled: !input warn_unregistered
+
+trigger_variables:
+  _monitored_lux: !input monitored_illuminance_sensors
 
 triggers:
   - trigger: state
     entity_id: !input monitored_motion_sensors
     to: "on"
     id: motion_on
+  - trigger: state
+    entity_id: sun.sun
+    from: above_horizon
+    to: below_horizon
+    id: sunset
+  - trigger: state
+    entity_id: !input monitored_illuminance_sensors
+    id: lux_changed
+    enabled: "{{ _monitored_lux | count > 0 }}"
   - trigger: time_pattern
     seconds: "/15"
     id: off_reconcile
@@ -267,10 +332,10 @@ conditions: []
 
 actions:
   - choose:
-      - alias: "Handle immediate motion for the matching zone"
+      - alias: "Activate on motion or darkness when the zone is occupied"
         conditions:
           - condition: template
-            value_template: "{{ trigger.id == 'motion_on' }}"
+            value_template: "{{ trigger.id in ['motion_on', 'sunset', 'lux_changed'] }}"
         sequence:
           - repeat:
               for_each: "{{ configured_zones | default([], true) }}"
@@ -280,12 +345,14 @@ actions:
                 - variables:
                     zone_name: "{{ zone.get('name', 'Unnamed zone') }}"
                     zone_motion: "{{ zone.get('motion_sensors', []) | default([], true) }}"
+                    zone_local_presence: "{{ zone.get('occupancy_sensors', []) | default([], true) }}"
                     zone_on: "{{ zone.get('on_entities', []) | default([], true) }}"
                     zone_off_explicit: "{{ zone.get('off_entities', []) | default([], true) }}"
                     zone_blocker: "{{ zone.get('blocking_entity', '') | default('', true) }}"
                     zone_owner: "{{ zone.get('ownership_helper', '') | default('', true) }}"
                     zone_lux: "{{ zone.get('lux_sensor', '') | default('', true) }}"
                     zone_lux_threshold: "{{ zone.get('lux_threshold', 80) | float(80) }}"
+                    zone_darkness_mode: "{{ zone.get('darkness_activation', 'off') }}"
                     zone_sun: "{{ zone.get('sun_mode', 'any') }}"
                     zone_start: "{{ zone.get('start_time', '00:00:00') | string }}"
                     zone_end: "{{ zone.get('end_time', '23:59:59') | string }}"
@@ -305,7 +372,32 @@ actions:
                         {{ [] if ns.unsafe else ns.ids }}
                       {% endif %}
                     now_local: "{{ now().strftime('%H:%M:%S') }}"
+                    zone_occupied: >-
+                      {% set ns = namespace(occupied=false) %}
+                      {% for eid in zone_motion + zone_local_presence %}
+                        {% if is_state(eid, 'on') %}
+                          {% set ns.occupied = true %}
+                        {% endif %}
+                      {% endfor %}
+                      {{ ns.occupied }}
                 - variables:
+                    activation_event_matches: >-
+                      {% if trigger.id == 'motion_on' %}
+                        {{ trigger.entity_id in zone_motion }}
+                      {% elif trigger.id == 'sunset' %}
+                        {{ zone_darkness_mode in ['sunset', 'both'] and zone_occupied }}
+                      {% elif trigger.id == 'lux_changed' %}
+                        {{ zone_darkness_mode in ['lux', 'both'] and
+                           zone_lux != '' and trigger.entity_id == zone_lux and
+                           zone_occupied and trigger.from_state is not none and
+                           trigger.to_state is not none and
+                           is_number(trigger.from_state.state) and
+                           is_number(trigger.to_state.state) and
+                           (trigger.from_state.state | float(1000000)) > zone_lux_threshold and
+                           (trigger.to_state.state | float(1000000)) <= zone_lux_threshold }}
+                      {% else %}
+                        false
+                      {% endif %}
                     in_time_window: >-
                       {{ (zone_start <= zone_end and zone_start <= now_local <= zone_end)
                          or (zone_start > zone_end and
@@ -338,7 +430,7 @@ actions:
                     - condition: template
                       value_template: >-
                         {{ zone is mapping and zone.get('enabled', true) and
-                           trigger.entity_id in zone_motion and
+                           activation_event_matches and
                            zone_motion | count > 0 and zone_on | count > 0 and
                            (master_enable_id == '' or is_state(master_enable_id, 'on')) and
                            (zone_blocker == '' or is_state(zone_blocker, 'off')) and
@@ -364,7 +456,9 @@ actions:
                           data:
                             level: info
                             logger: blueprints.multi_zone_motion_lights
-                            message: "Activated {{ zone_name }} on motion from {{ trigger.entity_id }}."
+                            message: >-
+                              Activated {{ zone_name }} on {{ trigger.id }}
+                              ({{ trigger.entity_id }}).
       - alias: "Reconcile independent switch-off deadlines"
         conditions:
           - condition: template
@@ -396,6 +490,31 @@ actions:
                       message: >-
                         Motion sensors not registered for instant triggers:
                         {{ unregistered | join(', ') }}. Add them to Sensor monitoring.
+              - variables:
+                  unregistered_lux: >-
+                    {% set ns = namespace(missing=[]) %}
+                    {% for zone in configured_zones if zone is mapping %}
+                      {% if zone.get('darkness_activation', 'off') in ['lux', 'both'] %}
+                        {% set eid = zone.get('lux_sensor', '') | default('', true) %}
+                        {% if eid != '' and eid not in monitored_lux_entities and
+                              eid not in ns.missing %}
+                          {% set ns.missing = ns.missing + [eid] %}
+                        {% endif %}
+                      {% endif %}
+                    {% endfor %}
+                    {{ ns.missing }}
+              - if:
+                  - condition: template
+                    value_template: "{{ unregistered_lux | count > 0 }}"
+                then:
+                  - action: system_log.write
+                    data:
+                      level: warning
+                      logger: blueprints.multi_zone_motion_lights
+                      message: >-
+                        Lux sensors missing from the darkness-trigger monitoring list:
+                        {{ unregistered_lux | join(', ') }}. Add them to Sensor monitoring
+                        for immediate threshold-crossing activation.
           - repeat:
               for_each: "{{ configured_zones | default([], true) }}"
               sequence:
@@ -404,6 +523,7 @@ actions:
                 - variables:
                     zone_name: "{{ zone.get('name', 'Unnamed zone') }}"
                     zone_motion: "{{ zone.get('motion_sensors', []) | default([], true) }}"
+                    zone_local_presence: "{{ zone.get('occupancy_sensors', []) | default([], true) }}"
                     zone_linked: "{{ zone.get('linked_presence', []) | default([], true) }}"
                     zone_on: "{{ zone.get('on_entities', []) | default([], true) }}"
                     zone_off_explicit: "{{ zone.get('off_entities', []) | default([], true) }}"
@@ -425,9 +545,10 @@ actions:
                         {% endfor %}
                         {{ [] if ns.unsafe else ns.ids }}
                       {% endif %}
+                    zone_activity: "{{ zone_motion + zone_local_presence }}"
                     motion_valid: >-
                       {% set ns = namespace(ok=zone_motion | count > 0) %}
-                      {% for eid in zone_motion %}
+                      {% for eid in zone_activity %}
                         {% if not is_state(eid, 'off') %}
                           {% set ns.ok = false %}
                         {% endif %}
@@ -452,7 +573,7 @@ actions:
                 - variables:
                     last_motion_clear: >-
                       {% set ns = namespace(ts=0) %}
-                      {% for eid in zone_motion if has_value(eid) %}
+                      {% for eid in zone_activity if has_value(eid) %}
                         {% set ns.ts = [ns.ts, as_timestamp(states[eid].last_changed, 0)] | max %}
                       {% endfor %}
                       {{ ns.ts }}

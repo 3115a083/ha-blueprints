@@ -57,6 +57,8 @@ async def make_runner(tmp_path, zones, *, bath_state="off", lux="10"):
     hass.states.async_set("binary_sensor.bath_motion", bath_state)
     hass.states.async_set("binary_sensor.bath_occupied", bath_state)
     hass.states.async_set("sensor.hall_lux", lux)
+    hass.states.async_set("sun.sun", "below_horizon")
+    hass.states.async_set("input_boolean.hall_occupied", "off")
     hass.states.async_set("light.hall", "off")
     hass.states.async_set("light.bath", "off")
     calls = []
@@ -82,8 +84,10 @@ async def make_runner(tmp_path, zones, *, bath_state="off", lux="10"):
     script = Script(hass, actions, "Multi-zone motion real HA test", "automation",
                     script_mode="queued")
 
-    async def trigger(id="motion_on", entity_id="binary_sensor.hall_motion"):
-        await script.async_run({"trigger": {"id": id, "entity_id": entity_id}}, Context())
+    async def trigger(id="motion_on", entity_id="binary_sensor.hall_motion", **extra):
+        await script.async_run(
+            {"trigger": {"id": id, "entity_id": entity_id, **extra}}, Context()
+        )
         await hass.async_block_till_done()
 
     return hass, calls, trigger
@@ -174,5 +178,95 @@ async def test_ownership_helper_protects_preexisting_manual_light(tmp_path):
             ("homeassistant.turn_on", "light.hall"),
             ("input_boolean.turn_on", "input_boolean.hall_owned"),
         ]
+    finally:
+        await hass.async_stop()
+
+
+@pytest.mark.asyncio
+async def test_sunset_activates_only_occupied_opted_in_zone(tmp_path):
+    zones = [
+        zone("Hall", "binary_sensor.hall_motion", "light.hall",
+             darkness_activation="sunset", sun_mode="night",
+             occupancy_sensors=["input_boolean.hall_occupied"]),
+        zone("Bath", "binary_sensor.bath_motion", "light.bath",
+             darkness_activation="sunset", sun_mode="night"),
+    ]
+    hass, calls, trigger = await make_runner(tmp_path, zones)
+    try:
+        # Hall motion has ended, but a sustained occupancy helper is still ON.
+        hass.states.async_set("binary_sensor.hall_motion", "off")
+        hass.states.async_set("binary_sensor.bath_motion", "off")
+        hass.states.async_set("input_boolean.hall_occupied", "on")
+        await trigger(id="sunset", entity_id="sun.sun")
+        assert calls == [("homeassistant.turn_on", "light.hall")]
+        # A second sunset-like call cannot retoggle an already-on light.
+        await trigger(id="sunset", entity_id="sun.sun")
+        assert calls == [("homeassistant.turn_on", "light.hall")]
+        # Occupancy also prevents the existing off reconciliation.
+        await trigger(id="off_reconcile", entity_id="sun.sun")
+        assert not any(c[0] == "homeassistant.turn_off" for c in calls)
+    finally:
+        await hass.async_stop()
+
+
+@pytest.mark.asyncio
+async def test_lux_crosses_threshold_in_occupied_zone_only(tmp_path):
+    from types import SimpleNamespace
+
+    zones = [
+        zone("Hall", "binary_sensor.hall_motion", "light.hall",
+             darkness_activation="both", lux_sensor="sensor.hall_lux", lux_threshold=80),
+        zone("Bath", "binary_sensor.bath_motion", "light.bath",
+             darkness_activation="both", lux_sensor="sensor.bath_lux", lux_threshold=35),
+    ]
+    hass, calls, trigger = await make_runner(tmp_path, zones, lux="79")
+    try:
+        hass.states.async_set("binary_sensor.bath_motion", "off")
+        await trigger(
+            id="lux_changed", entity_id="sensor.hall_lux",
+            from_state=SimpleNamespace(state="100"), to_state=SimpleNamespace(state="79")
+        )
+        assert calls == [("homeassistant.turn_on", "light.hall")]
+        await trigger(
+            id="lux_changed", entity_id="sensor.bath_lux",
+            from_state=SimpleNamespace(state="60"), to_state=SimpleNamespace(state="30")
+        )
+        assert calls == [("homeassistant.turn_on", "light.hall")]
+    finally:
+        await hass.async_stop()
+
+
+@pytest.mark.asyncio
+async def test_lux_without_threshold_crossing_is_inert(tmp_path):
+    from types import SimpleNamespace
+
+    zones = [
+        zone("Hall", "binary_sensor.hall_motion", "light.hall",
+             darkness_activation="lux", lux_sensor="sensor.hall_lux", lux_threshold=80),
+    ]
+    hass, calls, trigger = await make_runner(tmp_path, zones, lux="65")
+    try:
+        for before, after in [("unavailable", "65"), ("70", "65"), ("100", "90")]:
+            await trigger(
+                id="lux_changed", entity_id="sensor.hall_lux",
+                from_state=SimpleNamespace(state=before),
+                to_state=SimpleNamespace(state=after)
+            )
+        assert calls == []
+    finally:
+        await hass.async_stop()
+
+
+@pytest.mark.asyncio
+async def test_sunset_does_not_activate_from_only_other_room_presence(tmp_path):
+    zones = [
+        zone("Hall", "binary_sensor.hall_motion", "light.hall",
+             darkness_activation="sunset", linked_presence=["binary_sensor.bath_occupied"]),
+    ]
+    hass, calls, trigger = await make_runner(tmp_path, zones, bath_state="on")
+    try:
+        hass.states.async_set("binary_sensor.hall_motion", "off")
+        await trigger(id="sunset", entity_id="sun.sun")
+        assert calls == []
     finally:
         await hass.async_stop()
