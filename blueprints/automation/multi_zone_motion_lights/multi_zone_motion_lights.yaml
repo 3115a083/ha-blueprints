@@ -284,10 +284,11 @@ blueprint:
           selector:
             boolean: {}
         warn_unregistered:
-          name: "Warn if zone sensors are not in the monitoring list"
+          name: "Warn if zone motion/lux sensors are not in the monitoring lists"
           description: >-
-            Checks on Home Assistant start and automation reload; log
-            a warning once for misconfigured sensors.
+            Checks on Home Assistant start and automation reload; logs a
+            warning once for zone motion or darkness-trigger lux sensors
+            missing from their corresponding monitored-entity lists.
           default: true
           selector:
             boolean: {}
@@ -488,6 +489,31 @@ actions:
                       message: >-
                         Motion sensors not registered for instant triggers:
                         {{ unregistered | join(', ') }}. Add them to Sensor monitoring.
+              - variables:
+                  unregistered_lux: >-
+                    {% set ns = namespace(missing=[]) %}
+                    {% for zone in configured_zones if zone is mapping %}
+                      {% if zone.get('darkness_activation', 'off') in ['lux', 'both'] %}
+                        {% set eid = zone.get('lux_sensor', '') | default('', true) %}
+                        {% if eid != '' and eid not in monitored_lux_entities and
+                              eid not in ns.missing %}
+                          {% set ns.missing = ns.missing + [eid] %}
+                        {% endif %}
+                      {% endif %}
+                    {% endfor %}
+                    {{ ns.missing }}
+              - if:
+                  - condition: template
+                    value_template: "{{ unregistered_lux | count > 0 }}"
+                then:
+                  - action: system_log.write
+                    data:
+                      level: warning
+                      logger: blueprints.multi_zone_motion_lights
+                      message: >-
+                        Lux sensors missing from the darkness-trigger monitoring list:
+                        {{ unregistered_lux | join(', ') }}. Add them to Sensor monitoring
+                        for immediate threshold-crossing activation.
           - repeat:
               for_each: "{{ configured_zones | default([], true) }}"
               sequence:
