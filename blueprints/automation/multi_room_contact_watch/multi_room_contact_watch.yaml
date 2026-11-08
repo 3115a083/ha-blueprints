@@ -281,6 +281,19 @@ actions:
       notification_prefix: >-
         {{ (this.entity_id if this is defined else 'contact_watch')
            | replace('.', '_') | replace('-', '_') }}
+  - if:
+      - condition: template
+        value_template: >-
+          {{ trigger.id == 'startup' and not use_persistent and
+             notify_target_ids | count == 0 and companion_services | count == 0 }}
+    then:
+      - action: system_log.write
+        data:
+          level: warning
+          logger: blueprints.multi_room_contact_watch
+          message: >-
+            Contact Watch has no notification recipients. Enable Home Assistant
+            persistent notifications or select a notify entity / Companion service.
   - repeat:
       for_each: "{{ configured_rooms | default([], true) }}"
       sequence:
