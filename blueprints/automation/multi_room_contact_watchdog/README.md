@@ -11,7 +11,8 @@ One Home Assistant automation monitors any number of independent rooms, with as 
 
 1. Under **01 | Sensor monitoring**, select **every individual contact sensor** that should be watched.
 2. Under **02 | Rooms and contacts**, click **Add** for each room. Give it a name and select the contact sensors belonging to it. **Use the same entities as in step 1.** Defaults: ON means open, open alert after 10 minutes, unavailable alert after 20 minutes. These defaults can be overridden individually per room.
-3. Under **03 | Notifications**, keep **persistent Home Assistant notifications** enabled for immediate operation without a phone integration. For push notifications, add your existing mobile app service name, e.g. a service under the `notify.mobile_app_` namespace. More than one service can be entered, comma-separated.
+3. Under **03 | Notifications**, choose your notification recipients using the **notify entity picker**. You may select several targets. Persistent Home Assistant notifications remain enabled by default. If an older phone integration only exposes a `notify.mobile_app_*` action rather than a notify entity, keep using the optional legacy input under **05 | Advanced options**.
+4. Under **04 | When to send warnings**, optionally add **separate conditions** for open contacts and for unavailable/silent sensors. If left empty, each warning type operates normally.
 
 Example layout:
 
@@ -45,7 +46,22 @@ Each item has a distinct, stable notification ID/tag. Multiple rooms and contact
 
 **Reminders** are disabled by default. Set **Repeat unresolved alerts every N minutes** to e.g. 30 to receive an alert at the initial deadline and approximately every 30 minutes thereafter. The initial alert is sent once per unresolved incident in normal operation. HA startup/reload also checks overdue incidents to avoid silent missed alerts after downtime, but may generate a replacement notification during a restart. Mobile tags reduce visual duplication but do not guarantee suppression of vibration or sound.
 
-**Advanced extra conditions** can restrict when warnings are delivered; recovery and clearing remain unconditional. If a one-shot warning is suppressed by a condition, it will not automatically be retried until reminders are enabled or HA restarts. Custom alert and recovery actions are available in Advanced options, using `room_name`, `contact_id`, `contact_label`, `alert_type` and the corresponding title/message/tag variables.
+### Independent notification conditions
+
+The two condition fields in **04 | When to send warnings** use Home Assistant's **visual condition editor**. You can select real sensors, people and numeric thresholds without writing YAML.
+
+| Rule | Example | Affects |
+| --- | --- | --- |
+| **Open door/window warnings: send only when** | Numeric state, outdoor temperature sensor, **Below 17** | Only **open** alerts |
+| **Unavailable / silent sensor warnings: send only when** | State, person entity, **not_home** | Only **offline** and **silent last_seen** alerts |
+
+Use either rule, both rules or neither. Conditions inside each list are **AND** by default. For example, adding outdoor temperature below 17 and a person set to `not_home` means that **both** must be true. Use an **OR** group in the visual editor if either condition should be enough.
+
+Conditions are checked when a scheduled alert is due. They **do not stop sensor monitoring** and they **never block automatic clearing or recovery**. An unavailable sensor is still detected while an open-contact-only condition is false.
+
+**Important one-shot behavior:** When a condition is false at the initial warning deadline and reminders are disabled (the default), an alert may be missed even if the condition later becomes true. Enable **Repeat unresolved alerts** (for example 5 minutes) if you want the blueprint to reevaluate eligibility and notify after a condition later becomes true. This does not create an immediate threshold-crossing event: it checks again on the reminder schedule. The existing optional **Legacy shared conditions for BOTH warning types** is still respected for migrated automations, in addition to these two new lists.
+
+Custom alert and recovery actions remain available in Advanced options, using `room_name`, `contact_id`, `contact_label`, `alert_type` and the corresponding title/message/tag variables.
 
 ## Zigbee failure detection: exact limits
 
@@ -70,12 +86,15 @@ Device reporting time is **not equivalent to link health** unless your integrati
 
 If a contact remains open and subsequently stops updating, an existing open alert may still be visible while a separate offline/silence warning is added. Once its contact state becomes unknown/unavailable, the original open alert is cleared if it had reached its threshold, and the offline timer begins.
 
-## Advanced mobile notification options
+## Notification recipients and legacy mobile options
 
-- Multiple `notify.*` services may be supplied, separated by commas; only a `notify.<letters_numbers_underscores>` name is accepted for dynamic calls.
-- Phone click URL, Android notification icon/color, and iOS interruption level are selectable. Their actual behavior depends on the app/platform. The critical interruption level is intentionally not offered by default.
-- Persistent Home Assistant notifications are available even with no phone configured. Use at least one delivery method or your blueprint will be silent.
-- Optional custom actions are executed **only for due issues** or qualified recoveries. These actions may themselves send notifications or operate devices, so review them.
+- **Recommended:** Use **Notification recipients (select one or more)** to choose available `notify` entities, which the blueprint addresses with `notify.send_message`. Home Assistant supports multiple notify entities in a single call.
+- **Legacy mobile support:** Existing `notify_services` settings are not removed. They now appear under **05 | Advanced options** as optional comma-separated `notify.*` service names for integrations that still expose service actions but no notify entity.
+- **Avoid duplicates:** Do not configure the same phone using both the picker and its legacy mobile action.
+- **Tags and clearing:** A `notify` entity receives standard message/title data, but this generic action has no tag-based removal mechanism. Tagged mobile notifications and `clear_notification` remain supported only via the legacy `notify.mobile_app_*` service when configured. Home Assistant persistent notifications can still clear on recovery.
+- **Mobile-only settings:** The click URL, Android icon/color and iOS interruption level apply to legacy Companion app actions. A generic notify entity may ignore or lack those features.
+- Persistent Home Assistant notifications work even without a phone configured. Ensure at least one notification destination is enabled.
+- Optional custom actions run for due alerts or qualifying recovery, not simply on every sensor update. Review them before letting them operate devices.
 
 ## Performance, timing and restart behavior
 
@@ -83,6 +102,7 @@ The blueprint uses:
 - One **entity-filtered state trigger** for all listed contacts, to handle resolution immediately.
 - One **time-pattern trigger per minute** for open/offline/silence deadlines and optional reminders, irrespective of the number of rooms.
 - A startup/reload check so already-overdue sensors can be surfaced after downtime.
+- **Independent condition checks** only when an alert becomes due, not a new global event listener for temperature or presence.
 - **Queued mode** to serialize notification updates and prevent conflicting clear/create actions across rooms.
 
 It does **not** create delayed tasks per contact, poll Zigbee hardware, process every entity event, or send a notification on every minute tick. The deadline checks read a contact's `last_changed` or `last_seen` timestamp and only send a warning in a **single one-minute window** at the threshold and each configured reminder interval. With a one-minute time pattern, normal delivery may be up to approximately one minute later than the configured threshold.
