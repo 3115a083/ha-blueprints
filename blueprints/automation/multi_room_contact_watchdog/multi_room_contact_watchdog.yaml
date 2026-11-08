@@ -1,0 +1,635 @@
+blueprint:
+  name: "🚪 Multi-Room Door & Window Watchdog"
+  author: "3115a083"
+  domain: automation
+  homeassistant:
+    min_version: "2026.11.0"
+  source_url: https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/multi_room_contact_watchdog/multi_room_contact_watchdog.yaml
+  description: >-
+    Monitor any number of rooms, doors, and windows with ONE automation.
+    Notify when a contact stays open too long, a contact becomes
+    unknown/unavailable, or (optionally) its last_seen attribute is stale.
+    Send independent messages identifying the exact room and sensor.
+    Support mobile app services, persistent Home Assistant notifications,
+    reminder intervals, automatic resolution, and optional custom actions.
+
+    First register ALL contact entities under Sensor monitoring so recovery
+    changes are handled immediately. Then assign the same entities to
+    their rooms using Add room. Time thresholds are calculated from
+    contact state timestamps, not long-running delay scripts. The single
+    once-per-minute deadline check survives automation reloads.
+
+    IMPORTANT: unknown/unavailable detects only failures exposed by
+    Home Assistant. A Zigbee device that silently stops reporting while
+    keeping its old on/off state requires a meaningful last_seen
+    attribute; enable that check only for supported devices.
+
+    Inspired by the Neekster and Raukze contact notification blueprints.
+    See README for setup, source links, and detection limitations.
+  input:
+    sensors_section:
+      name: "📡 01 | Sensor monitoring"
+      icon: mdi:access-point-network
+      description: >-
+        Select EVERY individual door/window contact that is used in the
+        room entries below. This is a single list for fast, filtered
+        state-change and recovery events. Repeat the assignment inside
+        each room to set its rules. Select INDIVIDUAL contacts rather
+        than a binary-sensor group, so one disconnected Zigbee contact
+        cannot be hidden by other healthy members.
+      input:
+        monitored_contacts:
+          name: "All monitored door/window contact sensors"
+          description: >-
+            Select each contact once. Also assign it to its room under
+            Rooms. These are typically binary_sensor entities with
+            device class door, window, or opening.
+          selector:
+            entity:
+              multiple: true
+              filter:
+                - domain: binary_sensor
+    rooms_section:
+      name: "🚪 02 | Rooms and contacts"
+      icon: mdi:door
+      description: >-
+        Click Add room for each room or area. Choose its individual
+        contact sensors. By default, a sensor's ON state means open.
+        Set an alternative issue state per room if needed. The open
+        and offline delays can inherit the shared defaults or override
+        them. A room can have as many contacts as necessary.
+      input:
+        room_entries:
+          name: "Rooms (add as many as needed)"
+          default: []
+          description: >-
+            Each entry describes a room and the exact contacts to
+            monitor there. Notifications identify both the room and
+            the individual sensor. Do not assign the same contact to
+            multiple rooms unless duplicate alerts are intended.
+          selector:
+            object:
+              multiple: true
+              label_field: name
+              fields:
+                name:
+                  label: "Room / area name"
+                  required: true
+                  selector:
+                    text: {}
+                contacts:
+                  label: "Individual door/window sensors in this room"
+                  required: true
+                  selector:
+                    entity:
+                      multiple: true
+                      filter:
+                        - domain: binary_sensor
+                enabled:
+                  label: "Monitor this room"
+                  default: true
+                  selector:
+                    boolean: {}
+                issue_state:
+                  label: "Which sensor state means OPEN / alert?"
+                  default: "on"
+                  selector:
+                    select:
+                      options:
+                        - label: "ON means open (usual)"
+                          value: "on"
+                        - label: "OFF means open (inverted sensor)"
+                          value: "off"
+                open_after_minutes:
+                  label: "Open-alert delay (minutes; 0 = use shared default)"
+                  default: 0
+                  selector:
+                    number:
+                      min: 0
+                      max: 1440
+                      step: 1
+                      mode: box
+                      unit_of_measurement: min
+                monitor_offline:
+                  label: "Alert if sensor becomes unavailable / unknown"
+                  default: true
+                  selector:
+                    boolean: {}
+                offline_after_minutes:
+                  label: "Offline-alert delay (minutes; 0 = shared default)"
+                  default: 0
+                  selector:
+                    number:
+                      min: 0
+                      max: 1440
+                      step: 1
+                      mode: box
+                      unit_of_measurement: min
+                last_seen_hours:
+                  label: "Optional last_seen silence alert (hours; 0 = OFF)"
+                  default: 0
+                  selector:
+                    number:
+                      min: 0
+                      max: 168
+                      step: 1
+                      mode: box
+                      unit_of_measurement: h
+    notification_section:
+      name: "🔔 03 | Notifications"
+      icon: mdi:bell-outline
+      description: >-
+        Works immediately with Home Assistant persistent notifications.
+        To receive mobile push, add one or more existing notify services
+        below, separated by commas. Do not use device names; enter the
+        full service IDs, e.g. notify.mobile_app_my_phone. The same
+        notification tag is reused for a sensor until its problem clears.
+      input:
+        default_open_minutes:
+          name: "Default open-alert delay (minutes)"
+          default: 10
+          selector:
+            number:
+              min: 1
+              max: 1440
+              step: 1
+              mode: box
+              unit_of_measurement: min
+        default_offline_minutes:
+          name: "Default unavailable/unknown alert delay (minutes)"
+          default: 20
+          selector:
+            number:
+              min: 1
+              max: 1440
+              step: 1
+              mode: box
+              unit_of_measurement: min
+        notify_services:
+          name: "Mobile notify services (comma-separated, optional)"
+          description: >-
+            Example: notify.mobile_app_phone, notify.mobile_app_tablet.
+            Leave blank for Home Assistant notifications only. Use
+            real notify.* action IDs from Developer Tools.
+          default: ""
+          selector:
+            text: {}
+        persistent_enabled:
+          name: "Create persistent Home Assistant notifications"
+          default: true
+          selector:
+            boolean: {}
+        clear_on_recovery:
+          name: "Remove notification after the issue is resolved"
+          description: >-
+            Dismisses matching Home Assistant notifications and sends
+            clear_notification only to configured notify.mobile_app_*
+            services. Other notify providers may not support removal.
+          default: true
+          selector:
+            boolean: {}
+        recovery_message:
+          name: "Send a new notification when a sensor recovers"
+          description: >-
+            Optional. Recovery and clearing are separate: the alert
+            can be dismissed without sending another notification.
+          default: false
+          selector:
+            boolean: {}
+    advanced_section:
+      name: "⚙️ 04 | Advanced options"
+      icon: mdi:tune
+      collapsed: true
+      input:
+        reminder_minutes:
+          name: "Repeat unresolved alerts every N minutes (0 = once)"
+          description: >-
+            Each sensor and alert type has its own schedule. Reminders
+            use the same mobile notification tag and persistent ID.
+            Set 0 to notify only on the initial deadline.
+          default: 0
+          selector:
+            number:
+              min: 0
+              max: 1440
+              step: 1
+              mode: box
+              unit_of_measurement: min
+        mobile_click_url:
+          name: "Optional mobile notification tap URL"
+          description: "Example: /lovelace/security. Defaults to /."
+          default: "/"
+          selector:
+            text: {}
+        notification_color:
+          name: "Android notification accent color"
+          default: "red"
+          selector:
+            select:
+              options:
+                - "red"
+                - "orange"
+                - "yellow"
+                - "blue"
+        notification_icon:
+          name: "Android notification icon"
+          default: "mdi:door-open"
+          selector:
+            icon: {}
+        interruption_level:
+          name: "iOS interruption level"
+          default: active
+          selector:
+            select:
+              options:
+                - passive
+                - active
+                - time-sensitive
+        notify_conditions:
+          name: "Optional additional conditions before warning"
+          description: >-
+            Checked when an alert is due. Resolution/clear is not
+            blocked by these conditions. A suppressed one-time alert
+            may not fire later unless reminders are enabled.
+          default: []
+          selector:
+            condition: {}
+        on_alert_actions:
+          name: "Optional actions when a warning is sent"
+          description: >-
+            Variables: room_name, contact_id, contact_label, alert_type,
+            alert_title, alert_message, alert_tag, elapsed_minutes.
+          default: []
+          selector:
+            action: {}
+        on_recovery_actions:
+          name: "Optional actions when an alert resolves"
+          description: >-
+            Variables: room_name, contact_id, contact_label, alert_type,
+            recovery_title, recovery_message, alert_tag.
+          default: []
+          selector:
+            action: {}
+        warn_unregistered:
+          name: "Warn at startup about unregistered room contacts"
+          default: true
+          selector:
+            boolean: {}
+
+variables:
+  rooms: !input room_entries
+  contact_entities: !input monitored_contacts
+  global_open_minutes: !input default_open_minutes
+  global_offline_minutes: !input default_offline_minutes
+  notify_csv: !input notify_services
+  ha_notifications: !input persistent_enabled
+  resolve_clear: !input clear_on_recovery
+  recovery_enabled: !input recovery_message
+  repeat_minutes: !input reminder_minutes
+  notification_url: !input mobile_click_url
+  android_color: !input notification_color
+  android_icon: !input notification_icon
+  ios_level: !input interruption_level
+  warn_missing: !input warn_unregistered
+
+triggers:
+  - trigger: state
+    entity_id: !input monitored_contacts
+    id: contact_changed
+  - trigger: time_pattern
+    minutes: "/1"
+    id: deadline_check
+  - trigger: homeassistant
+    event: start
+    id: startup
+  - trigger: event
+    event_type: automation_reloaded
+    id: startup
+
+conditions: []
+
+actions:
+  - choose:
+      - alias: "Check all room contacts for due open, offline and silence alerts"
+        conditions:
+          - condition: template
+            value_template: "{{ trigger.id in ['deadline_check', 'startup'] }}"
+        sequence:
+          - if:
+              - condition: template
+                value_template: "{{ trigger.id == 'startup' and warn_missing }}"
+            then:
+              - variables:
+                  unregistered: >-
+                    {% set ns = namespace(ids=[]) %}
+                    {% for room in rooms if room is mapping %}
+                      {% for eid in room.get('contacts', []) | default([], true) %}
+                        {% if eid not in contact_entities and eid not in ns.ids %}
+                          {% set ns.ids = ns.ids + [eid] %}
+                        {% endif %}
+                      {% endfor %}
+                    {% endfor %}
+                    {{ ns.ids }}
+              - if:
+                  - condition: template
+                    value_template: "{{ unregistered | count > 0 }}"
+                then:
+                  - action: system_log.write
+                    data:
+                      level: warning
+                      logger: blueprints.multi_room_contact_watchdog
+                      message: >-
+                        Room contacts missing from Sensor monitoring:
+                        {{ unregistered | join(', ') }}.
+                        Add these entities to enable immediate recovery handling.
+          - repeat:
+              for_each: "{{ rooms | default([], true) }}"
+              sequence:
+                - variables:
+                    room: "{{ repeat.item }}"
+                - if:
+                    - condition: template
+                      value_template: "{{ room is mapping and room.get('enabled', true) }}"
+                  then:
+                    - variables:
+                        room_name: "{{ room.get('name', 'Unnamed room') }}"
+                        room_contacts: "{{ room.get('contacts', []) | default([], true) }}"
+                        issue_state: "{{ room.get('issue_state', 'on') }}"
+                        open_seconds: >-
+                          {{ ((room.get('open_after_minutes', 0) | int(0))
+                              or (global_open_minutes | int(10))) * 60 }}
+                        offline_seconds: >-
+                          {{ ((room.get('offline_after_minutes', 0) | int(0))
+                              or (global_offline_minutes | int(20))) * 60 }}
+                        silent_seconds: "{{ (room.get('last_seen_hours', 0) | int(0)) * 3600 }}"
+                        offline_enabled: "{{ room.get('monitor_offline', true) }}"
+                    - repeat:
+                        for_each: "{{ room_contacts }}"
+                        sequence:
+                          - variables:
+                              contact_id: "{{ repeat.item }}"
+                          - variables:
+                              contact_label: >-
+                                {{ state_attr(contact_id, 'friendly_name')
+                                   or contact_id }}
+                              contact_state: "{{ states(contact_id) }}"
+                              state_since: >-
+                                {% set state = states[contact_id] %}
+                                {{ as_timestamp(state.last_changed, 0)
+                                   if state is not none else 0 }}
+                              seen_since: >-
+                                {{ as_timestamp(state_attr(contact_id, 'last_seen'), 0) }}
+                          - repeat:
+                              for_each: ["open", "offline", "silent"]
+                              sequence:
+                                - variables:
+                                    alert_type: "{{ repeat.item }}"
+                                - variables:
+                                    alert_active: >-
+                                      {{ (alert_type == 'open' and
+                                          contact_state == issue_state)
+                                         or (alert_type == 'offline' and
+                                             offline_enabled and
+                                             contact_state in ['unknown', 'unavailable'])
+                                         or (alert_type == 'silent' and
+                                             silent_seconds | int(0) > 0 and
+                                             contact_state in ['on', 'off'] and
+                                             seen_since | float(0) > 0) }}
+                                    alert_started: >-
+                                      {{ seen_since if alert_type == 'silent'
+                                         else state_since }}
+                                    alert_delay: >-
+                                      {{ open_seconds if alert_type == 'open'
+                                         else offline_seconds if alert_type == 'offline'
+                                         else silent_seconds }}
+                                - variables:
+                                    elapsed_seconds: >-
+                                      {{ [0, as_timestamp(now()) -
+                                         (alert_started | float(0))] | max }}
+                                    alert_tag: >-
+                                      {{ 'contact_guard_' ~
+                                         (contact_id | replace('.', '_')) ~
+                                         '_' ~ alert_type }}
+                                - variables:
+                                    elapsed_minutes: "{{ (elapsed_seconds | float(0) / 60) | int(0) }}"
+                                    alert_due: >-
+                                      {% set age = elapsed_seconds | float(0) %}
+                                      {% set delay = alert_delay | float(0) %}
+                                      {% set repeats = (repeat_minutes | int(0)) * 60 %}
+                                      {{ alert_active and
+                                         alert_started | float(0) > 0 and
+                                         age >= delay and
+                                         (trigger.id == 'startup' or
+                                          age - delay < 60 or
+                                          (repeats > 0 and
+                                           (age - delay) >= repeats and
+                                           (age - delay) % repeats < 60)) }}
+                                - if:
+                                    - condition: template
+                                      value_template: "{{ alert_due }}"
+                                  then:
+                                    - if: !input notify_conditions
+                                      then:
+                                        - variables:
+                                            alert_title: >-
+                                              {% if alert_type == 'open' %}
+                                                {{ room_name }}: {{ contact_label }} left {{ 'open' if issue_state == 'on' else 'in alert state (OFF)' }}
+                                              {% elif alert_type == 'offline' %}
+                                                {{ room_name }}: {{ contact_label }} unavailable
+                                              {% else %}
+                                                {{ room_name }}: {{ contact_label }} no recent Zigbee report
+                                              {% endif %}
+                                            alert_message: >-
+                                              {% if alert_type == 'open' %}
+                                                {{ contact_label }} in {{ room_name }} has stayed {{ 'open' if issue_state == 'on' else 'OFF' }} for {{ elapsed_minutes }} minutes. Please check it.
+                                              {% elif alert_type == 'offline' %}
+                                                {{ contact_label }} in {{ room_name }} has been {{ contact_state }} for {{ elapsed_minutes }} minutes. Check the battery and Zigbee connection.
+                                              {% else %}
+                                                {{ contact_label }} in {{ room_name }} has not updated its last_seen attribute for {{ elapsed_minutes }} minutes. The device may have stopped reporting. Check its battery and Zigbee connection.
+                                              {% endif %}
+                                        - if:
+                                            - condition: template
+                                              value_template: "{{ ha_notifications }}"
+                                          then:
+                                            - action: persistent_notification.create
+                                              data:
+                                                notification_id: "{{ alert_tag }}"
+                                                title: "{{ alert_title }}"
+                                                message: "{{ alert_message }}"
+                                              continue_on_error: true
+                                        - repeat:
+                                            for_each: "{{ notify_csv.split(',') | map('trim') | reject('eq', '') | list }}"
+                                            sequence:
+                                              - variables:
+                                                  notify_action: "{{ repeat.item }}"
+                                              - if:
+                                                  - condition: template
+                                                    value_template: >-
+                                                      {{ notify_action | regex_match('^notify\\.[a-z0-9_]+$') }}
+                                                then:
+                                                  - action: "{{ notify_action }}"
+                                                    data:
+                                                      title: "{{ alert_title }}"
+                                                      message: "{{ alert_message }}"
+                                                      data:
+                                                        tag: "{{ alert_tag }}"
+                                                        url: "{{ notification_url }}"
+                                                        clickAction: "{{ notification_url }}"
+                                                        color: "{{ android_color }}"
+                                                        notification_icon: "{{ android_icon }}"
+                                                        push:
+                                                          interruption-level: "{{ ios_level }}"
+                                                    continue_on_error: true
+                                        - choose: []
+                                          default: !input on_alert_actions
+      - alias: "Clear per-contact alerts when a sensor recovers or closes"
+        conditions:
+          - condition: template
+            value_template: >-
+              {{ trigger.id == 'contact_changed' and
+                 trigger.from_state is not none and
+                 trigger.to_state is not none and
+                 (trigger.from_state.state != trigger.to_state.state or
+                  trigger.from_state.attributes.get('last_seen') !=
+                    trigger.to_state.attributes.get('last_seen')) }}
+        sequence:
+          - repeat:
+              for_each: "{{ rooms | default([], true) }}"
+              sequence:
+                - variables:
+                    room: "{{ repeat.item }}"
+                - if:
+                    - condition: template
+                      value_template: >-
+                        {{ room is mapping and room.get('enabled', true) and
+                           trigger.entity_id in
+                             (room.get('contacts', []) | default([], true)) }}
+                  then:
+                    - variables:
+                        room_name: "{{ room.get('name', 'Unnamed room') }}"
+                        contact_id: "{{ trigger.entity_id }}"
+                        contact_label: >-
+                          {{ state_attr(trigger.entity_id, 'friendly_name')
+                             or trigger.entity_id }}
+                        issue_state: "{{ room.get('issue_state', 'on') }}"
+                        open_seconds: >-
+                          {{ ((room.get('open_after_minutes', 0) | int(0))
+                              or (global_open_minutes | int(10))) * 60 }}
+                        offline_seconds: >-
+                          {{ ((room.get('offline_after_minutes', 0) | int(0))
+                              or (global_offline_minutes | int(20))) * 60 }}
+                        silent_seconds: "{{ (room.get('last_seen_hours', 0) | int(0)) * 3600 }}"
+                        offline_enabled: "{{ room.get('monitor_offline', true) }}"
+                    - variables:
+                        prior_state: "{{ trigger.from_state.state }}"
+                        new_state: "{{ trigger.to_state.state }}"
+                        old_state_since: "{{ as_timestamp(trigger.from_state.last_changed, 0) }}"
+                        old_last_seen: >-
+                          {{ as_timestamp(trigger.from_state.attributes.get('last_seen'), 0) }}
+                        new_last_seen: >-
+                          {{ as_timestamp(trigger.to_state.attributes.get('last_seen'), 0) }}
+                    - repeat:
+                        for_each: ["open", "offline", "silent"]
+                        sequence:
+                          - variables:
+                              alert_type: "{{ repeat.item }}"
+                          - variables:
+                              recovered: >-
+                                {% set now_ts = as_timestamp(now()) %}
+                                {% if alert_type == 'open' %}
+                                  {{ prior_state == issue_state and
+                                     new_state != issue_state and
+                                     old_state_since | float(0) > 0 and
+                                     now_ts - (old_state_since | float(0))
+                                         >= (open_seconds | float(0)) }}
+                                {% elif alert_type == 'offline' %}
+                                  {{ offline_enabled and
+                                     prior_state in ['unknown','unavailable'] and
+                                     new_state in ['on','off'] and
+                                     old_state_since | float(0) > 0 and
+                                     now_ts - (old_state_since | float(0))
+                                         >= (offline_seconds | float(0)) }}
+                                {% else %}
+                                  {{ silent_seconds | int(0) > 0 and
+                                     prior_state in ['on','off'] and
+                                     new_state in ['on','off'] and
+                                     old_last_seen | float(0) > 0 and
+                                     new_last_seen | float(0) > 0 and
+                                     now_ts - (old_last_seen | float(0))
+                                         >= (silent_seconds | float(0)) and
+                                     now_ts - (new_last_seen | float(0))
+                                         < (silent_seconds | float(0)) }}
+                                {% endif %}
+                              alert_tag: >-
+                                {{ 'contact_guard_' ~
+                                   (contact_id | replace('.', '_')) ~
+                                   '_' ~ alert_type }}
+                          - if:
+                              - condition: template
+                                value_template: "{{ recovered }}"
+                            then:
+                              - variables:
+                                  recovery_title: "{{ room_name }}: {{ contact_label }} recovered"
+                                  recovery_message: >-
+                                    {% if alert_type == 'open' %}
+                                      {{ contact_label }} in {{ room_name }} is no longer in its open/alert state.
+                                    {% elif alert_type == 'offline' %}
+                                      {{ contact_label }} in {{ room_name }} is reporting a valid state again.
+                                    {% else %}
+                                      {{ contact_label }} in {{ room_name }} has resumed updating its last_seen attribute.
+                                    {% endif %}
+                              - if:
+                                  - condition: template
+                                    value_template: "{{ resolve_clear }}"
+                                then:
+                                  - if:
+                                      - condition: template
+                                        value_template: "{{ ha_notifications }}"
+                                    then:
+                                      - action: persistent_notification.dismiss
+                                        data:
+                                          notification_id: "{{ alert_tag }}"
+                                        continue_on_error: true
+                                  - repeat:
+                                      for_each: "{{ notify_csv.split(',') | map('trim') | reject('eq', '') | list }}"
+                                      sequence:
+                                        - variables:
+                                            notify_action: "{{ repeat.item }}"
+                                        - if:
+                                            - condition: template
+                                              value_template: >-
+                                                {{ notify_action | regex_match('^notify\\.mobile_app_[a-z0-9_]+$') }}
+                                          then:
+                                            - action: "{{ notify_action }}"
+                                              data:
+                                                message: "clear_notification"
+                                                data:
+                                                  tag: "{{ alert_tag }}"
+                                              continue_on_error: true
+                              - if:
+                                  - condition: template
+                                    value_template: "{{ recovery_enabled }}"
+                                then:
+                                  - repeat:
+                                      for_each: "{{ notify_csv.split(',') | map('trim') | reject('eq', '') | list }}"
+                                      sequence:
+                                        - variables:
+                                            notify_action: "{{ repeat.item }}"
+                                        - if:
+                                            - condition: template
+                                              value_template: >-
+                                                {{ notify_action | regex_match('^notify\\.[a-z0-9_]+$') }}
+                                          then:
+                                            - action: "{{ notify_action }}"
+                                              data:
+                                                title: "{{ recovery_title }}"
+                                                message: "{{ recovery_message }}"
+                                                data:
+                                                  tag: "{{ alert_tag }}_recovered"
+                                              continue_on_error: true
+                              - choose: []
+                                default: !input on_recovery_actions
+
+mode: queued
+max: 20
+max_exceeded: warning
