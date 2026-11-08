@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-11-08 | Notification picker and independent alert conditions
+
+- Added a multi-select **notify entity picker** using `notify.send_message` for easy recipient setup.
+- Added two separate visual condition editors: one for open-contact alerts, one for offline and stale-`last_seen` health alerts.
+- Preserved existing legacy `notify_services` and shared `notify_conditions` configuration, along with tagged mobile alert clearing.
+- Clarified that conditions gate outgoing alerts only; recovery and existing alert cleanup remain independent.
+- Documented the one-shot suppression limitation and the option to enable reminder intervals so conditions are reevaluated.
+- Added real Home Assistant 2026.11.0 regression scenarios for the notify picker, condition independence and legacy conditions.
+
+
 ## 2026-11-08 | Initial implementation
 
 - Added a Home Assistant **2026.11.0** multi-room contact watchdog with native repeatable room forms.
