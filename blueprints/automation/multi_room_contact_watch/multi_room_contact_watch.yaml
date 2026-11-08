@@ -377,7 +377,12 @@ actions:
                   {% endif %}
                 {% elif states[eid] is not none %}
                   {% set ns.names = ns.names + [(state_attr(eid, 'friendly_name') or eid) ~ ' (invalid last-seen timestamp)'] %}
-                  {% if trigger.id == 'startup' %}
+                  {% set age = ((current_ts | float(0) -
+                    as_timestamp(states[eid].last_changed, current_ts | float(0))) / 60) | int(0) %}
+                  {% set slot = age - (offline_delay | int(15)) %}
+                  {% if (trigger.id == 'startup') or
+                     (slot >= 0 and (slot == 0 or
+                      (health_repeat > 0 and slot % health_repeat == 0))) %}
                     {% set ns.due = ns.due + [eid] %}
                   {% endif %}
                 {% endif %}
