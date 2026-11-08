@@ -10,8 +10,10 @@ blueprint:
     Notify when a contact stays open too long, a contact becomes
     unknown/unavailable, or (optionally) its last_seen attribute is stale.
     Send independent messages identifying the exact room and sensor.
-    Support mobile app services, persistent Home Assistant notifications,
-    reminder intervals, automatic resolution, and optional custom actions.
+    Support selectable notify entities, optional legacy Companion
+    notification actions, persistent notifications and reminders.
+    Configure separate visual conditions for open-contact warnings
+    and unavailable/stale-sensor warnings.
 
     First register ALL contact entities under Sensor monitoring so recovery
     changes are handled immediately. Then assign the same entities to
@@ -139,11 +141,11 @@ blueprint:
       name: "🔔 03 | Notifications"
       icon: mdi:bell-outline
       description: >-
-        Works immediately with Home Assistant persistent notifications.
-        To receive mobile push, add one or more existing notify services
-        below, separated by commas. Do not use device names; enter the
-        full service IDs, e.g. notify.mobile_app_my_phone. The same
-        notification tag is reused for a sensor until its problem clears.
+        Pick recipients from your existing notify entities, or enable
+        Home Assistant persistent notifications. Optional older
+        notify.mobile_app_* actions remain available under Advanced
+        options if a device has no notify entity. Avoid choosing
+        the same phone twice, or it will receive duplicate messages.
       input:
         default_open_minutes:
           name: "Default open-alert delay (minutes)"
@@ -165,15 +167,18 @@ blueprint:
               step: 1
               mode: box
               unit_of_measurement: min
-        notify_services:
-          name: "Mobile notify services (comma-separated, optional)"
+        notify_entities:
+          name: "Notification recipients (select one or more)"
           description: >-
-            Example: notify.mobile_app_phone, notify.mobile_app_tablet.
-            Leave blank for Home Assistant notifications only. Use
-            real notify.* action IDs from Developer Tools.
-          default: ""
+            Select notify entities from the picker. Uses the modern
+            notify.send_message action. Older mobile app actions
+            are an optional fallback under Advanced options.
+          default: []
           selector:
-            text: {}
+            entity:
+              multiple: true
+              filter:
+                - domain: notify
         persistent_enabled:
           name: "Create persistent Home Assistant notifications"
           default: true
@@ -196,11 +201,52 @@ blueprint:
           default: false
           selector:
             boolean: {}
+    rules_section:
+      name: "🎛️ 04 | When to send warnings"
+      icon: mdi:filter-outline
+      description: >-
+        These are TWO INDEPENDENT condition editors. They control only
+        sending warnings, not monitoring or clearing resolved alerts.
+        Leave a list empty to allow all alerts of that type. Example:
+        for open contacts, set a Numeric state condition on outside
+        temperature BELOW 17. For offline or silent sensors, set
+        a State condition on a person to not_home. Multiple entries
+        are AND by default; add an OR group for alternatives.
+      input:
+        open_alert_conditions:
+          name: "Open door/window warnings: send only when"
+          description: >-
+            Example: Numeric state, choose the outdoor temperature sensor,
+            below 17. Leave empty to always allow open alerts. If a
+            one-time warning is suppressed, it can be missed unless
+            reminder notifications are enabled.
+          default: []
+          selector:
+            condition: {}
+        health_alert_conditions:
+          name: "Unavailable / silent sensor warnings: send only when"
+          description: >-
+            Example: State, choose a person, enter not_home. Applies to
+            unknown, unavailable and stale last_seen. Independent from
+            open alerts. Leave empty to always allow health alerts.
+          default: []
+          selector:
+            condition: {}
     advanced_section:
-      name: "⚙️ 04 | Advanced options"
+      name: "⚙️ 05 | Advanced options"
       icon: mdi:tune
       collapsed: true
       input:
+        notify_services:
+          name: "Legacy mobile notify action IDs (optional)"
+          description: >-
+            Keep existing notify.mobile_app_* actions here for
+            backwards compatibility and tagged alert clearing.
+            Comma-separated names, for example notify.mobile_app_phone.
+            Do not pick the same phone in both notification methods.
+          default: ""
+          selector:
+            text: {}
         reminder_minutes:
           name: "Repeat unresolved alerts every N minutes (0 = once)"
           description: >-
@@ -246,11 +292,14 @@ blueprint:
                 - active
                 - time-sensitive
         notify_conditions:
-          name: "Optional additional conditions before warning"
+          name: "Legacy shared conditions for BOTH warning types"
           description: >-
-            Checked when an alert is due. Resolution/clear is not
-            blocked by these conditions. A suppressed one-time alert
-            may not fire later unless reminders are enabled.
+            Existing configured conditions are preserved. These must
+            pass IN ADDITION to the independent condition lists in
+            section 04 for every type of warning. Leave empty when
+            only separate conditions are wanted. Clearing resolved
+            notifications is never blocked. A suppressed one-time
+            alert may not fire later unless reminders are enabled.
           default: []
           selector:
             condition: {}
@@ -282,6 +331,7 @@ variables:
   global_open_minutes: !input default_open_minutes
   global_offline_minutes: !input default_offline_minutes
   notify_csv: !input notify_services
+  notify_entity_ids: !input notify_entities
   ha_notifications: !input persistent_enabled
   resolve_clear: !input clear_on_recovery
   recovery_enabled: !input recovery_message
@@ -428,7 +478,25 @@ actions:
                                     - condition: template
                                       value_template: "{{ alert_due }}"
                                   then:
-                                    - if: !input notify_conditions
+                                    - if:
+                                        - condition: and
+                                          conditions:
+                                            - condition: and
+                                              conditions: !input notify_conditions
+                                            - condition: or
+                                              conditions:
+                                                - condition: and
+                                                  conditions:
+                                                    - condition: template
+                                                      value_template: "{{ alert_type == 'open' }}"
+                                                    - condition: and
+                                                      conditions: !input open_alert_conditions
+                                                - condition: and
+                                                  conditions:
+                                                    - condition: template
+                                                      value_template: "{{ alert_type in ['offline', 'silent'] }}"
+                                                    - condition: and
+                                                      conditions: !input health_alert_conditions
                                       then:
                                         - variables:
                                             alert_title: >-
@@ -454,6 +522,17 @@ actions:
                                             - action: persistent_notification.create
                                               data:
                                                 notification_id: "{{ alert_tag }}"
+                                                title: "{{ alert_title }}"
+                                                message: "{{ alert_message }}"
+                                              continue_on_error: true
+                                        - if:
+                                            - condition: template
+                                              value_template: "{{ notify_entity_ids | count > 0 }}"
+                                          then:
+                                            - action: notify.send_message
+                                              target:
+                                                entity_id: "{{ notify_entity_ids }}"
+                                              data:
                                                 title: "{{ alert_title }}"
                                                 message: "{{ alert_message }}"
                                               continue_on_error: true
@@ -610,6 +689,17 @@ actions:
                                   - condition: template
                                     value_template: "{{ recovery_enabled }}"
                                 then:
+                                  - if:
+                                      - condition: template
+                                        value_template: "{{ notify_entity_ids | count > 0 }}"
+                                    then:
+                                      - action: notify.send_message
+                                        target:
+                                          entity_id: "{{ notify_entity_ids }}"
+                                        data:
+                                          title: "{{ recovery_title }}"
+                                          message: "{{ recovery_message }}"
+                                        continue_on_error: true
                                   - repeat:
                                       for_each: "{{ notify_csv.split(',') | map('trim') | reject('eq', '') | list }}"
                                       sequence:
