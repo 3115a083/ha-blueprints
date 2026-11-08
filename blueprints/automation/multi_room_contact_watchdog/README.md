@@ -112,8 +112,8 @@ Inspirational sources, maintained separately by their authors:
 
 Canonical import URL:
 
-~~~text
+```text
 https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/multi_room_contact_watchdog/multi_room_contact_watchdog.yaml
-~~~
+```
 
 After repository updates, update/reimport the blueprint and reload automations on Home Assistant. An upstream GitHub merge alone does not change the local installed blueprint. Blueprints Updater users can refresh discovery through the `blueprints_updater.reload` action.
