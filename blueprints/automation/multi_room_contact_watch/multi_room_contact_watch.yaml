@@ -389,8 +389,8 @@ actions:
               {% endfor %}
               {{ dict(names=ns.names, due=ns.due) | to_json }}
         - variables:
-            opened_now: "{{ opened_now_json | from_json }}"
-            unhealthy_now: "{{ unhealthy_now_json | from_json }}"
+            opened_now: "{{ opened_now_json if opened_now_json is mapping else opened_now_json | from_json }}"
+            unhealthy_now: "{{ unhealthy_now_json if unhealthy_now_json is mapping else unhealthy_now_json | from_json }}"
         - if:
             - condition: template
               value_template: >-
