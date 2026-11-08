@@ -7,6 +7,7 @@ A collection of reusable, configurable **Home Assistant blueprints** maintained 
 | Blueprint | Description | Documentation | Install | Manual import URL |
 | --- | --- | --- | --- | --- |
 | **🔐 Unlock Sequence** | Detect ordered button/event/MQTT sequences with independent time limits, optional persistent lockout and explicit authorization checks. | [Setup and security](blueprints/automation/unlock_sequence/README.md) | [Import blueprint](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2F3115a083%2Fha-blueprints%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Funlock_sequence%2Funlock_sequence.yaml) | `https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/unlock_sequence/unlock_sequence.yaml` · [Copy URL](#copy-unlock-sequence-url) |
+| **🚪 Multi-Room Door & Window Watchdog** | Monitor contacts across multiple rooms in one automation: long-open alerts, Zigbee offline/unknown warnings, optional last_seen silence checks, reminders and mobile/persistent notifications. | [Setup and limitations](blueprints/automation/multi_room_contact_watchdog/README.md) | [Import blueprint](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2F3115a083%2Fha-blueprints%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fmulti_room_contact_watchdog%2Fmulti_room_contact_watchdog.yaml) | `https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/multi_room_contact_watchdog/multi_room_contact_watchdog.yaml` · [Copy URL](#copy-multi-room-door-window-watchdog-url) |
 | **💡 Multi-Zone Motion Lights** | Control any number of motion-lit rooms in one automation. Each zone has its own light targets, lux/sun conditions and off timer; adjacent-room occupancy can keep its lights on and add an exit grace period. | [Setup and behavior](blueprints/automation/multi_zone_motion_lights/README.md) | [Import blueprint](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2F3115a083%2Fha-blueprints%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fmulti_zone_motion_lights%2Fmulti_zone_motion_lights.yaml) | `https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/multi_zone_motion_lights/multi_zone_motion_lights.yaml` · [Copy URL](#copy-multi-zone-motion-lights-url) |
 | **🏠 Area Occupancy Manager** | Detect occupied/vacant areas using people, devices, and optional sensors. Run configurable actions, with guest/sleep protections and independent timed routines. | [Setup and examples](blueprints/automation/occupancy/README.md) | [Import blueprint](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2F3115a083%2Fha-blueprints%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Foccupancy%2Farea_occupancy_manager.yaml) | `https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/occupancy/area_occupancy_manager.yaml` · [Copy URL](#copy-area-occupancy-manager-url) |
 | **🌅 Sunrise Alarm / Light Wake-Up** | Start lights a configurable time before a phone alarm. Linear, ramp-up or instant brightening, with optional start, completion and alarm-time actions. | [Setup and examples](blueprints/automation/alarm_light/README.md) | [Import blueprint](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2F3115a083%2Fha-blueprints%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Falarm_light%2Falarm_light.yaml) | `https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/alarm_light/alarm_light.yaml` · [Copy URL](#copy-sunrise-alarm-light-wake-up-url) |
@@ -25,6 +26,12 @@ Paste a **blueprint YAML URL**, not a My Home Assistant redirect, into **Setting
 
 ```text
 https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/unlock_sequence/unlock_sequence.yaml
+```
+
+### Copy Multi-Room Door Window Watchdog URL
+
+```text
+https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/multi_room_contact_watchdog/multi_room_contact_watchdog.yaml
 ```
 
 ### Copy Multi-Zone Motion Lights URL
@@ -92,7 +99,7 @@ The catalog is a starting point. **Blueprint-specific settings and use cases are
 
 ## Updates with Blueprints Updater
 
-All nine blueprints contain a canonical `blueprint.source_url` pointing to their own YAML file on this repository's `main` branch. The URLs in the catalog and copy blocks match those metadata values. Keep this metadata when importing or copying a file manually.
+All blueprints contain a canonical `blueprint.source_url` pointing to their own YAML file on this repository's `main` branch. The URLs in the catalog and copy blocks match those metadata values. Keep this metadata when importing or copying a file manually.
 
 [Blueprints Updater](https://github.com/luuquangvu/blueprints-updater) uses the source URL to retrieve the upstream file and compares normalized content hashes. It accepts GitHub `blob/main` URLs and converts them to raw downloads. **A GitHub Release, tag, release asset, or blueprint version field is not required.** A short hash shown as a blueprint's update version is normal for this integration; it is not the HACS release version of the updater integration itself. Adding a `version` key to blueprint metadata is unnecessary and may violate Home Assistant's blueprint schema.
 
@@ -116,6 +123,10 @@ blueprints/
     occupancy/
       area_occupancy_manager.yaml
       README.md
+    multi_room_contact_watchdog/
+      multi_room_contact_watchdog.yaml
+      README.md
+      CHANGELOG.md
     multi_zone_motion_lights/
       multi_zone_motion_lights.yaml
       README.md
