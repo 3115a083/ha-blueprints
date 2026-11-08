@@ -1,5 +1,6 @@
 """Validate the new room form and action tree with real Home Assistant 2026.11.0."""
 from pathlib import Path
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -87,6 +88,22 @@ async def test_room_actions_validate_using_real_ha_2026_11(tmp_path):
         )
         await hass.async_block_till_done()
         assert calls == []  # Closed contacts without prior warnings send no alerts.
+
+        # Simulate a physical contact whose ON state began ten minutes ago.
+        hass.states.async_set("binary_sensor.kitchen_window", "on")
+        hass.states.get("binary_sensor.kitchen_window").last_changed = (
+            datetime.now(timezone.utc) - timedelta(minutes=10, seconds=10)
+        )
+        await script.async_run(
+            {"trigger": {"id": "minute"},
+             "this": SimpleNamespace(entity_id="automation.contact_watch_test")},
+            Context(),
+        )
+        await hass.async_block_till_done()
+        assert len(calls) == 1
+        assert calls[0][0:2] == ("notify", "send_message")
+        assert "Kitchen" in calls[0][2]["message"]
+        assert "Hall" not in calls[0][2]["message"]
     finally:
         await hass.async_stop()
 
