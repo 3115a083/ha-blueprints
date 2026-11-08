@@ -7,7 +7,7 @@ One Home Assistant automation monitors any number of independent rooms, with as 
 - **Minimum version: Home Assistant Core 2026.11.0**.
 - Inspired by [Neekster's contact-left-open blueprint](https://community.home-assistant.io/t/notification-if-door-or-window-is-left-open/402851) and [Raukze's contact notification blueprint](https://gist.github.com/Raukze/27fe0c6bf6d91b8ae2ab5e11880509ba). This is a fresh, event-driven multi-room implementation, not a verbatim copy.
 
-## Quick setup (the three steps that matter)
+## Quick setup
 
 1. Under **01 | Sensor monitoring**, select **every individual contact sensor** that should be watched.
 2. Under **02 | Rooms and contacts**, click **Add** for each room. Give it a name and select the contact sensors belonging to it. **Use the same entities as in step 1.** Defaults: ON means open, open alert after 10 minutes, unavailable alert after 20 minutes. These defaults can be overridden individually per room.
