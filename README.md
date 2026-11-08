@@ -8,6 +8,7 @@ A collection of reusable, configurable **Home Assistant blueprints** maintained 
 | --- | --- | --- | --- | --- |
 | **🔐 Unlock Sequence** | Detect ordered button/event/MQTT sequences with independent time limits, optional persistent lockout and explicit authorization checks. | [Setup and security](blueprints/automation/unlock_sequence/README.md) | [Import blueprint](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2F3115a083%2Fha-blueprints%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Funlock_sequence%2Funlock_sequence.yaml) | `https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/unlock_sequence/unlock_sequence.yaml` · [Copy URL](#copy-unlock-sequence-url) |
 | **💡 Multi-Zone Motion Lights** | Control any number of motion-lit rooms in one automation. Each zone has its own light targets, lux/sun conditions and off timer; adjacent-room occupancy can keep its lights on and add an exit grace period. | [Setup and behavior](blueprints/automation/multi_zone_motion_lights/README.md) | [Import blueprint](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2F3115a083%2Fha-blueprints%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fmulti_zone_motion_lights%2Fmulti_zone_motion_lights.yaml) | `https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/multi_zone_motion_lights/multi_zone_motion_lights.yaml` · [Copy URL](#copy-multi-zone-motion-lights-url) |
+| **🚪 Multi-Room Contact Watch** | Monitor open doors/windows in any number of rooms and notify about unavailable Zigbee contacts, offline sensors, low batteries and overdue last-seen reports. | [Setup and sensor health](blueprints/automation/multi_room_contact_watch/README.md) | [Import blueprint](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2F3115a083%2Fha-blueprints%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fmulti_room_contact_watch%2Fmulti_room_contact_watch.yaml) | `https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/multi_room_contact_watch/multi_room_contact_watch.yaml` · [Copy URL](#copy-multi-room-contact-watch-url) |
 | **🏠 Area Occupancy Manager** | Detect occupied/vacant areas using people, devices, and optional sensors. Run configurable actions, with guest/sleep protections and independent timed routines. | [Setup and examples](blueprints/automation/occupancy/README.md) | [Import blueprint](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2F3115a083%2Fha-blueprints%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Foccupancy%2Farea_occupancy_manager.yaml) | `https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/occupancy/area_occupancy_manager.yaml` · [Copy URL](#copy-area-occupancy-manager-url) |
 | **🌅 Sunrise Alarm / Light Wake-Up** | Start lights a configurable time before a phone alarm. Linear, ramp-up or instant brightening, with optional start, completion and alarm-time actions. | [Setup and examples](blueprints/automation/alarm_light/README.md) | [Import blueprint](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2F3115a083%2Fha-blueprints%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Falarm_light%2Falarm_light.yaml) | `https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/alarm_light/alarm_light.yaml` · [Copy URL](#copy-sunrise-alarm-light-wake-up-url) |
 | **🔧 Govee Light Recovery** | Diagnose Govee2MQTT light unavailability and ESPHome relay power issues for any number of lamps, each with an optional relay and Ping sensor; guarded restoration, optional app restart and notifications. | [Setup and safety](blueprints/automation/govee_recovery/README.md) | [Import blueprint](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2F3115a083%2Fha-blueprints%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fgovee_recovery%2Fgovee_recovery.yaml) | `https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/govee_recovery/govee_recovery.yaml` · [Copy URL](#copy-govee-light-recovery-url) |
@@ -31,6 +32,12 @@ https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/unlock
 
 ```text
 https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/multi_zone_motion_lights/multi_zone_motion_lights.yaml
+```
+
+### Copy Multi-Room Contact Watch URL
+
+```text
+https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/multi_room_contact_watch/multi_room_contact_watch.yaml
 ```
 
 ### Copy Area Occupancy Manager URL
@@ -92,7 +99,7 @@ The catalog is a starting point. **Blueprint-specific settings and use cases are
 
 ## Updates with Blueprints Updater
 
-All nine blueprints contain a canonical `blueprint.source_url` pointing to their own YAML file on this repository's `main` branch. The URLs in the catalog and copy blocks match those metadata values. Keep this metadata when importing or copying a file manually.
+All 11 blueprints contain a canonical `blueprint.source_url` pointing to their own YAML file on this repository's `main` branch. The URLs in the catalog and copy blocks match those metadata values. Keep this metadata when importing or copying a file manually.
 
 [Blueprints Updater](https://github.com/luuquangvu/blueprints-updater) uses the source URL to retrieve the upstream file and compares normalized content hashes. It accepts GitHub `blob/main` URLs and converts them to raw downloads. **A GitHub Release, tag, release asset, or blueprint version field is not required.** A short hash shown as a blueprint's update version is normal for this integration; it is not the HACS release version of the updater integration itself. Adding a `version` key to blueprint metadata is unnecessary and may violate Home Assistant's blueprint schema.
 
@@ -113,6 +120,10 @@ blueprints/
       unlock_sequence.yaml
       helpers-package.example.yml
       README.md
+    multi_room_contact_watch/
+      multi_room_contact_watch.yaml
+      README.md
+      CHANGELOG.md
     occupancy/
       area_occupancy_manager.yaml
       README.md
