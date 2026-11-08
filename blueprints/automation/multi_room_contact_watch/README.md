@@ -85,4 +85,8 @@ Those examples inspired left-open alerts, reminders, customization and Companion
 
 ## Canonical import URL
 
+```text
 https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/multi_room_contact_watch/multi_room_contact_watch.yaml
+```
+
+To find updated releases using the optional Blueprints Updater integration, execute the blueprints_updater.reload action after importing.
