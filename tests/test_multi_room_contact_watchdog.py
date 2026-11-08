@@ -155,7 +155,7 @@ class ContactWatchdogTests(unittest.TestCase):
         guide=(PATH.parent/"README.md").read_text()
         self.assertIn("outdoor temperature",guide)
         self.assertIn("not_home",guide)
-        self.assertIn("one-time warning",guide)
+        self.assertIn("one-shot behavior",guide.lower())
 
     def test_unique_tags_whitelisted_services_and_docs(self):
         self.assertEqual(self.render("alert_tag",contact_id="binary_sensor.bath",
