@@ -1,0 +1,618 @@
+blueprint:
+  name: "🚪 Multi-Room Contact Watch | Open Doors, Sensor Health & Battery"
+  author: "3115a083"
+  description: >-
+    Watch any number of rooms with ONE automation. Add doors/windows
+    per room in a repeatable form. Receive alerts when contacts stay
+    open, optionally repeat those alerts, and monitor Zigbee contact
+    sensors for unknown/unavailable states, offline connectivity,
+    low batteries, and optional last-seen reporting gaps.
+
+    Configure each sensor only inside its ROOM. The blueprint checks
+    configured entities once per minute, without wildcard events,
+    per-contact delay scripts, or extra helpers. It supports native
+    notify entities, Home Assistant persistent notifications, and
+    optional Companion app services for tagged/clearable alerts.
+
+    IMPORTANT: A contact sensor that remains 'closed' while silently
+    disconnected cannot be detected from that contact state alone.
+    Configure a real availability or last-seen entity for that case.
+    See README for details, defaults, recovery and limitations.
+
+    Inspired by Neekster's and Raukze's left-open notification blueprints.
+  domain: automation
+  homeassistant:
+    min_version: "2026.11.0"
+  source_url: https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/multi_room_contact_watch/multi_room_contact_watch.yaml
+  input:
+    rooms_section:
+      name: "🚪 01 | Rooms and contacts"
+      icon: mdi:door-open
+      description: >-
+        Add one row for each room. Select the doors/windows in that room.
+        Optional health fields accept availability sensors (ON = online),
+        battery percentage sensors and ISO date/time last-seen sensors.
+        Each contact belongs to one room only. No duplicate global
+        sensor list or per-sensor automations are needed.
+      input:
+        rooms:
+          name: "Rooms (add as many as needed)"
+          description: >-
+            Click Add and name the room. ON normally means open for door
+            and window binary sensors. Invert only if your integration
+            reports the opposite. Optional health entities apply to
+            THIS room and appear in its warnings.
+          default: []
+          selector:
+            object:
+              multiple: true
+              label_field: name
+              fields:
+                name:
+                  label: "Room name"
+                  required: true
+                  selector:
+                    text: {}
+                enabled:
+                  label: "Monitor this room"
+                  default: true
+                  selector:
+                    boolean: {}
+                contacts:
+                  label: "Doors and windows in THIS room"
+                  required: true
+                  selector:
+                    entity:
+                      multiple: true
+                      filter:
+                        - domain: binary_sensor
+                issue_state:
+                  label: "State that means OPEN"
+                  default: "on"
+                  selector:
+                    select:
+                      options:
+                        - label: "ON (normal door/window sensor)"
+                          value: "on"
+                        - label: "OFF (inverted sensor)"
+                          value: "off"
+                open_minutes:
+                  label: "Warn when still open after (minutes)"
+                  default: 10
+                  selector:
+                    number:
+                      min: 1
+                      max: 1440
+                      step: 1
+                      mode: box
+                      unit_of_measurement: min
+                availability:
+                  label: "Optional connectivity entities (ON = online)"
+                  required: false
+                  default: []
+                  selector:
+                    entity:
+                      multiple: true
+                      filter:
+                        - domain: binary_sensor
+                        - domain: input_boolean
+                batteries:
+                  label: "Optional battery percentage sensors"
+                  required: false
+                  default: []
+                  selector:
+                    entity:
+                      multiple: true
+                      filter:
+                        - domain: sensor
+                last_seen:
+                  label: "Optional last-seen timestamp sensors"
+                  required: false
+                  default: []
+                  selector:
+                    entity:
+                      multiple: true
+                      filter:
+                        - domain: sensor
+    notification_section:
+      name: "📲 02 | Where to send notifications"
+      icon: mdi:bell-outline
+      description: >-
+        Choose one or more notify entities for push messages. If you
+        have no notify entities, enable Home Assistant persistent
+        notifications. Optional legacy Companion app services provide
+        tagged alerts that can be cleared automatically on recovery.
+      input:
+        notify_entities:
+          name: "Recipients (notify entities)"
+          description: >-
+            Choose phones or other notify entities. Uses the modern
+            notify.send_message action. Can be empty if persistent
+            notifications are enabled below.
+          default: []
+          selector:
+            entity:
+              multiple: true
+              filter:
+                - domain: notify
+        persistent_notifications:
+          name: "Also show alerts inside Home Assistant"
+          default: true
+          selector:
+            boolean: {}
+        mobile_services:
+          name: "Optional Companion app services (advanced)"
+          description: >-
+            Comma-separated legacy services, for example
+            notify.mobile_app_my_phone,notify.mobile_app_second_phone.
+            ONLY notify.mobile_app_* is accepted. Useful for tagged
+            mobile notifications that clear on recovery. Leave empty
+            if the notify-entity picker is sufficient.
+          default: ""
+          selector:
+            text: {}
+    timing_section:
+      name: "⏱️ 03 | Reminders and sensor health"
+      icon: mdi:timer-outline
+      description: >-
+        The room's first open alert delay is configured in Rooms.
+        These advanced defaults control repetitions and Zigbee
+        monitoring for all rooms. Set repeat intervals to 0 to
+        disable repetition, without disabling initial warnings.
+      input:
+        repeat_open_minutes:
+          name: "Repeat open-door/window alerts every (minutes; 0 = off)"
+          default: 30
+          selector:
+            number:
+              min: 0
+              max: 1440
+              step: 1
+              mode: box
+              unit_of_measurement: min
+        unavailable_after_minutes:
+          name: "Warn after unknown/unavailable/offline for (minutes)"
+          default: 15
+          selector:
+            number:
+              min: 1
+              max: 1440
+              step: 1
+              mode: box
+              unit_of_measurement: min
+        repeat_health_minutes:
+          name: "Repeat connectivity alerts every (minutes; 0 = off)"
+          default: 360
+          selector:
+            number:
+              min: 0
+              max: 10080
+              step: 1
+              mode: box
+              unit_of_measurement: min
+        low_battery_percent:
+          name: "Low battery warning threshold (%)"
+          default: 20
+          selector:
+            number:
+              min: 1
+              max: 90
+              step: 1
+              mode: box
+              unit_of_measurement: "%"
+        last_seen_after_hours:
+          name: "Warn if last-seen timestamp is older than (hours)"
+          description: >-
+            Only checks explicitly selected last-seen entities.
+            The sensor must report an ISO date/time or timestamp.
+            Choose a threshold suited to your Zigbee reporting.
+          default: 48
+          selector:
+            number:
+              min: 1
+              max: 720
+              step: 1
+              mode: box
+              unit_of_measurement: h
+    advanced_section:
+      name: "🛠️ 04 | Advanced delivery and actions"
+      icon: mdi:tune-variant
+      collapsed: true
+      input:
+        click_url:
+          name: "Optional Companion app tap URL"
+          description: "Example: /lovelace/security"
+          default: "/"
+          selector:
+            text: {}
+        clear_mobile_on_recovery:
+          name: "Clear tagged Companion alerts when all sensors recover"
+          default: true
+          selector:
+            boolean: {}
+        on_open_actions:
+          name: "Optional actions when an open alert is sent"
+          default: []
+          selector:
+            action: {}
+        on_health_actions:
+          name: "Optional actions when a sensor health alert is sent"
+          default: []
+          selector:
+            action: {}
+        log_diagnostics:
+          name: "Log alert delivery and invalid mobile service names"
+          default: false
+          selector:
+            boolean: {}
+
+variables:
+  configured_rooms: !input rooms
+  notify_target_ids: !input notify_entities
+  use_persistent: !input persistent_notifications
+  mobile_service_csv: !input mobile_services
+  mobile_click_url: !input click_url
+  clear_mobile: !input clear_mobile_on_recovery
+  repeat_open: !input repeat_open_minutes
+  offline_delay: !input unavailable_after_minutes
+  repeat_health: !input repeat_health_minutes
+  battery_threshold: !input low_battery_percent
+  last_seen_hours: !input last_seen_after_hours
+  verbose: !input log_diagnostics
+
+triggers:
+  - trigger: time_pattern
+    minutes: "/1"
+    id: minute
+  - trigger: homeassistant
+    event: start
+    id: startup
+  - trigger: event
+    event_type: automation_reloaded
+    id: startup
+
+conditions: []
+
+actions:
+  - variables:
+      current_ts: "{{ as_timestamp(now()) }}"
+      companion_services: >-
+        {{ mobile_service_csv.split(',') | map('trim') | reject('eq', '') | list }}
+      notification_prefix: >-
+        {{ (this.entity_id if this is defined else 'contact_watch')
+           | replace('.', '_') | replace('-', '_') }}
+  - repeat:
+      for_each: "{{ configured_rooms | default([], true) }}"
+      sequence:
+        - variables:
+            room: "{{ repeat.item }}"
+            room_position: "{{ repeat.index }}"
+        - variables:
+            room_name: "{{ room.get('name', 'Unnamed room') }}"
+            contacts: "{{ room.get('contacts', []) | default([], true) }}"
+            issue_state: "{{ room.get('issue_state', 'on') }}"
+            first_open: "{{ room.get('open_minutes', 10) | int(10) }}"
+            connectivity: "{{ room.get('availability', []) | default([], true) }}"
+            batteries: "{{ room.get('batteries', []) | default([], true) }}"
+            last_seen_entities: "{{ room.get('last_seen', []) | default([], true) }}"
+        - variables:
+            tag_open: "{{ notification_prefix }}_{{ room_position }}_open"
+            tag_health: "{{ notification_prefix }}_{{ room_position }}_health"
+            opened_now: >-
+              {% set ns = namespace(names=[], due=[]) %}
+              {% for eid in contacts %}
+                {% if is_state(eid, issue_state) and states[eid] is not none %}
+                  {% set elapsed = ((current_ts | float(0) -
+                     as_timestamp(states[eid].last_changed, current_ts | float(0))) / 60) | int(0) %}
+                  {% set ns.names = ns.names + [state_attr(eid, 'friendly_name') or eid] %}
+                  {% set slot = elapsed - first_open %}
+                  {% if slot >= 0 and (slot == 0 or
+                     (repeat_open | int(0) > 0 and slot % (repeat_open | int(0)) == 0)) %}
+                    {% set ns.due = ns.due + [eid] %}
+                  {% endif %}
+                {% endif %}
+              {% endfor %}
+              {{ dict(names=ns.names, due=ns.due) }}
+            unhealthy_now: >-
+              {% set ns = namespace(names=[], due=[]) %}
+              {% set health_repeat = repeat_health | int(0) %}
+              {% for eid in contacts %}
+                {% if states(eid) in ['unknown', 'unavailable'] and states[eid] is not none %}
+                  {% set age = ((current_ts | float(0) -
+                    as_timestamp(states[eid].last_changed, current_ts | float(0))) / 60) | int(0) %}
+                  {% set ns.names = ns.names + [(state_attr(eid, 'friendly_name') or eid) ~ ' (unavailable)'] %}
+                  {% set slot = age - (offline_delay | int(15)) %}
+                  {% if slot >= 0 and (slot == 0 or
+                    (health_repeat > 0 and slot % health_repeat == 0)) %}
+                    {% set ns.due = ns.due + [eid] %}
+                  {% endif %}
+                {% endif %}
+              {% endfor %}
+              {% for eid in connectivity %}
+                {% if not is_state(eid, 'on') and states[eid] is not none %}
+                  {% set age = ((current_ts | float(0) -
+                    as_timestamp(states[eid].last_changed, current_ts | float(0))) / 60) | int(0) %}
+                  {% set ns.names = ns.names + [(state_attr(eid, 'friendly_name') or eid) ~ ' (offline)'] %}
+                  {% set slot = age - (offline_delay | int(15)) %}
+                  {% if slot >= 0 and (slot == 0 or
+                    (health_repeat > 0 and slot % health_repeat == 0)) %}
+                    {% set ns.due = ns.due + [eid] %}
+                  {% endif %}
+                {% endif %}
+              {% endfor %}
+              {% for eid in batteries %}
+                {% if is_number(states(eid)) and (states(eid) | float(101)) <= (battery_threshold | float(20)) %}
+                  {% set age = ((current_ts | float(0) -
+                    as_timestamp(states[eid].last_changed, current_ts | float(0))) / 60) | int(0) %}
+                  {% set ns.names = ns.names + [(state_attr(eid, 'friendly_name') or eid) ~ ' (low battery: ' ~ states(eid) ~ '%)'] %}
+                  {% if trigger.id == 'startup' or age % 1440 == 0 %}
+                    {% set ns.due = ns.due + [eid] %}
+                  {% endif %}
+                {% endif %}
+              {% endfor %}
+              {% for eid in last_seen_entities %}
+                {% set seen_ts = as_timestamp(states(eid), 0) %}
+                {% if seen_ts > 0 %}
+                  {% set age = ((current_ts | float(0) - seen_ts) / 60) | int(0) %}
+                  {% set slot = age - (last_seen_hours | int(48)) * 60 %}
+                  {% if slot >= 0 %}
+                    {% set ns.names = ns.names + [(state_attr(eid, 'friendly_name') or eid) ~ ' (last seen too long ago)'] %}
+                    {% if trigger.id == 'startup' or slot == 0 or
+                       (health_repeat > 0 and slot % health_repeat == 0) %}
+                      {% set ns.due = ns.due + [eid] %}
+                    {% endif %}
+                  {% endif %}
+                {% elif states[eid] is not none %}
+                  {% set ns.names = ns.names + [(state_attr(eid, 'friendly_name') or eid) ~ ' (invalid last-seen timestamp)'] %}
+                  {% if trigger.id == 'startup' %}
+                    {% set ns.due = ns.due + [eid] %}
+                  {% endif %}
+                {% endif %}
+              {% endfor %}
+              {{ dict(names=ns.names, due=ns.due) }}
+        - if:
+            - condition: template
+              value_template: >-
+                {{ room is mapping and room.get('enabled', true) and
+                   contacts | count > 0 and
+                   opened_now.due | count > 0 and
+                   (notify_target_ids | count > 0 or use_persistent or companion_services | count > 0) }}
+          then:
+            - variables:
+                alert_title: "{{ room_name }}: door or window still open"
+                alert_message: >-
+                  {{ room_name }}: {{ opened_now.names | join(', ') }}.
+                  Check the open doors/windows.
+            - if:
+                - condition: template
+                  value_template: "{{ use_persistent }}"
+              then:
+                - action: persistent_notification.create
+                  continue_on_error: true
+                  data:
+                    notification_id: "{{ tag_open }}"
+                    title: "{{ alert_title }}"
+                    message: "{{ alert_message }}"
+            - if:
+                - condition: template
+                  value_template: "{{ notify_target_ids | count > 0 }}"
+              then:
+                - action: notify.send_message
+                  continue_on_error: true
+                  target:
+                    entity_id: "{{ notify_target_ids }}"
+                  data:
+                    title: "{{ alert_title }}"
+                    message: "{{ alert_message }}"
+            - repeat:
+                for_each: "{{ companion_services }}"
+                sequence:
+                  - variables:
+                      recipient: "{{ repeat.item }}"
+                  - if:
+                      - condition: template
+                        value_template: "{{ recipient is match('^notify\\.mobile_app_[a-z0-9_]+$') }}"
+                    then:
+                      - action: "{{ recipient }}"
+                        continue_on_error: true
+                        data:
+                          title: "{{ alert_title }}"
+                          message: "{{ alert_message }}"
+                          data:
+                            tag: "{{ tag_open }}"
+                            url: "{{ mobile_click_url }}"
+                            clickAction: "{{ mobile_click_url }}"
+                    else:
+                      - if:
+                          - condition: template
+                            value_template: "{{ verbose }}"
+                        then:
+                          - action: system_log.write
+                            data:
+                              level: warning
+                              logger: blueprints.multi_room_contact_watch
+                              message: "Ignored invalid Companion app notify service: {{ recipient }}"
+            - choose: []
+              default: !input on_open_actions
+        - if:
+            - condition: template
+              value_template: >-
+                {{ room is mapping and room.get('enabled', true) and
+                   (contacts | count > 0 or connectivity | count > 0 or
+                    batteries | count > 0 or last_seen_entities | count > 0) and
+                   unhealthy_now.due | count > 0 and
+                   (notify_target_ids | count > 0 or use_persistent or companion_services | count > 0) }}
+          then:
+            - variables:
+                alert_title: "{{ room_name }}: sensor health warning"
+                alert_message: >-
+                  {{ room_name }}: {{ unhealthy_now.names | join(', ') }}.
+                  Check sensor batteries, Zigbee connectivity, reporting
+                  and coordinator availability. A missing update does not
+                  prove which component failed.
+            - if:
+                - condition: template
+                  value_template: "{{ use_persistent }}"
+              then:
+                - action: persistent_notification.create
+                  continue_on_error: true
+                  data:
+                    notification_id: "{{ tag_health }}"
+                    title: "{{ alert_title }}"
+                    message: "{{ alert_message }}"
+            - if:
+                - condition: template
+                  value_template: "{{ notify_target_ids | count > 0 }}"
+              then:
+                - action: notify.send_message
+                  continue_on_error: true
+                  target:
+                    entity_id: "{{ notify_target_ids }}"
+                  data:
+                    title: "{{ alert_title }}"
+                    message: "{{ alert_message }}"
+            - repeat:
+                for_each: "{{ companion_services }}"
+                sequence:
+                  - variables:
+                      recipient: "{{ repeat.item }}"
+                  - if:
+                      - condition: template
+                        value_template: "{{ recipient is match('^notify\\.mobile_app_[a-z0-9_]+$') }}"
+                    then:
+                      - action: "{{ recipient }}"
+                        continue_on_error: true
+                        data:
+                          title: "{{ alert_title }}"
+                          message: "{{ alert_message }}"
+                          data:
+                            tag: "{{ tag_health }}"
+                            url: "{{ mobile_click_url }}"
+                            clickAction: "{{ mobile_click_url }}"
+                    else:
+                      - if:
+                          - condition: template
+                            value_template: "{{ verbose }}"
+                        then:
+                          - action: system_log.write
+                            data:
+                              level: warning
+                              logger: blueprints.multi_room_contact_watch
+                              message: "Ignored invalid Companion app notify service: {{ recipient }}"
+            - choose: []
+              default: !input on_health_actions
+        - variables:
+            all_contacts_closed: >-
+              {% set ns = namespace(ok=contacts | count > 0) %}
+              {% for eid in contacts %}
+                {% if not is_state(eid, 'off' if issue_state == 'on' else 'on') %}
+                  {% set ns.ok = false %}
+                {% endif %}
+              {% endfor %}
+              {{ ns.ok }}
+            all_health_ok: >-
+              {% set ns = namespace(ok=true) %}
+              {% for eid in contacts %}
+                {% if not has_value(eid) %}
+                  {% set ns.ok = false %}
+                {% endif %}
+              {% endfor %}
+              {% for eid in connectivity %}
+                {% if not is_state(eid, 'on') %}
+                  {% set ns.ok = false %}
+                {% endif %}
+              {% endfor %}
+              {% for eid in batteries %}
+                {% if not is_number(states(eid)) or
+                   (states(eid) | float(0)) <= (battery_threshold | float(20)) %}
+                  {% set ns.ok = false %}
+                {% endif %}
+              {% endfor %}
+              {% for eid in last_seen_entities %}
+                {% set seen_ts = as_timestamp(states(eid), 0) %}
+                {% if seen_ts <= 0 or
+                   (current_ts | float(0)) - seen_ts > (last_seen_hours | int(48)) * 3600 %}
+                  {% set ns.ok = false %}
+                {% endif %}
+              {% endfor %}
+              {{ ns.ok }}
+            recently_updated: >-
+              {% set ns = namespace(recent=trigger.id == 'startup') %}
+              {% for eid in contacts + connectivity + batteries + last_seen_entities %}
+                {% if states[eid] is not none and
+                   current_ts | float(0) -
+                     as_timestamp(states[eid].last_changed, 0) <= 61 %}
+                  {% set ns.recent = true %}
+                {% endif %}
+              {% endfor %}
+              {{ ns.recent }}
+        - if:
+            - condition: template
+              value_template: >-
+                {{ room is mapping and room.get('enabled', true) and
+                   recently_updated and all_contacts_closed }}
+          then:
+            - if:
+                - condition: template
+                  value_template: "{{ use_persistent }}"
+              then:
+                - action: persistent_notification.dismiss
+                  continue_on_error: true
+                  data:
+                    notification_id: "{{ tag_open }}"
+            - if:
+                - condition: template
+                  value_template: "{{ clear_mobile }}"
+              then:
+                - repeat:
+                    for_each: "{{ companion_services }}"
+                    sequence:
+                      - variables:
+                          recipient: "{{ repeat.item }}"
+                      - if:
+                          - condition: template
+                            value_template: "{{ recipient is match('^notify\\.mobile_app_[a-z0-9_]+$') }}"
+                        then:
+                          - action: "{{ recipient }}"
+                            continue_on_error: true
+                            data:
+                              message: clear_notification
+                              data:
+                                tag: "{{ tag_open }}"
+        - if:
+            - condition: template
+              value_template: >-
+                {{ room is mapping and room.get('enabled', true) and
+                   recently_updated and all_health_ok }}
+          then:
+            - if:
+                - condition: template
+                  value_template: "{{ use_persistent }}"
+              then:
+                - action: persistent_notification.dismiss
+                  continue_on_error: true
+                  data:
+                    notification_id: "{{ tag_health }}"
+            - if:
+                - condition: template
+                  value_template: "{{ clear_mobile }}"
+              then:
+                - repeat:
+                    for_each: "{{ companion_services }}"
+                    sequence:
+                      - variables:
+                          recipient: "{{ repeat.item }}"
+                      - if:
+                          - condition: template
+                            value_template: "{{ recipient is match('^notify\\.mobile_app_[a-z0-9_]+$') }}"
+                        then:
+                          - action: "{{ recipient }}"
+                            continue_on_error: true
+                            data:
+                              message: clear_notification
+                              data:
+                                tag: "{{ tag_health }}"
+
+mode: queued
+max: 10
+max_exceeded: warning
