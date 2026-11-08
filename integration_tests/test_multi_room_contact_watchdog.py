@@ -47,6 +47,7 @@ async def build(tmp_path,rooms,monitored,**extra):
     for service in ("create","dismiss"):
         hass.services.async_register("persistent_notification",service,receive)
     hass.services.async_register("notify","mobile_app_phone",receive)
+    hass.services.async_register("notify","send_message",receive)
     hass.services.async_register("system_log","write",receive)
     cfg=expanded(rooms,monitored,**extra)
     steps=await async_validate_actions_config(
@@ -170,5 +171,98 @@ async def test_offline_can_be_disabled_by_room(tmp_path):
         hass.states.async_set(sensor,"unavailable",timestamp=time()-2000)
         await run()
         assert not calls
+    finally:
+        await hass.async_stop()
+
+
+@pytest.mark.asyncio
+async def test_notify_entity_picker_sends_without_legacy_mobile_action(tmp_path):
+    sensor="binary_sensor.kitchen_window"
+    hass,calls,run=await build(
+        tmp_path,[room("Kitchen",[sensor])],[sensor],
+        notify_entities=["notify.kitchen_phone"],notify_services="",
+        persistent_enabled=False
+    )
+    try:
+        hass.states.async_set(sensor,"on",timestamp=time()-630)
+        await run()
+        selected=[x for x in calls if x[:2]==("notify","send_message")]
+        assert len(selected)==1
+        assert "Kitchen" in selected[0][2]["title"]
+        assert not any(x[:2]==("notify","mobile_app_phone") for x in calls)
+        assert not any(x[0]=="persistent_notification" for x in calls)
+    finally:
+        await hass.async_stop()
+
+
+@pytest.mark.asyncio
+async def test_open_and_health_conditions_are_independent(tmp_path):
+    window="binary_sensor.kitchen_window"
+    door="binary_sensor.hall_door"
+    hass,calls,run=await build(
+        tmp_path,[
+            room("Kitchen",[window]),
+            room("Hall",[door]),
+        ],
+        [window,door],
+        notify_entities=["notify.kitchen_phone"],persistent_enabled=False,
+        open_alert_conditions=[{
+            "condition":"numeric_state",
+            "entity_id":"sensor.outdoor_temperature",
+            "below":17,
+        }],
+        health_alert_conditions=[{
+            "condition":"state",
+            "entity_id":"person.someone",
+            "state":"not_home",
+        }],
+    )
+    try:
+        hass.states.async_set(window,"on",timestamp=time()-630)
+        hass.states.async_set(door,"unavailable",timestamp=time()-1230)
+
+        # Outside too warm for the open-contact warning; person away
+        # is enough to allow the independent offline warning.
+        hass.states.async_set("sensor.outdoor_temperature","19")
+        hass.states.async_set("person.someone","not_home")
+        await run()
+        warnings=[x for x in calls if x[:2]==("notify","send_message")]
+        assert len(warnings)==1
+        assert "Hall" in warnings[0][2]["title"]
+        calls.clear()
+
+        # Reverse which condition passes, keeping both contact issues due.
+        hass.states.async_set("sensor.outdoor_temperature","16.5")
+        hass.states.async_set("person.someone","home")
+        await run()
+        warnings=[x for x in calls if x[:2]==("notify","send_message")]
+        assert len(warnings)==1
+        assert "Kitchen" in warnings[0][2]["title"]
+    finally:
+        await hass.async_stop()
+
+
+@pytest.mark.asyncio
+async def test_legacy_shared_conditions_still_gate_both_alert_types(tmp_path):
+    window="binary_sensor.kitchen_window"
+    door="binary_sensor.hall_door"
+    hass,calls,run=await build(
+        tmp_path,[room("Kitchen",[window]),room("Hall",[door])],[window,door],
+        notify_entities=["notify.kitchen_phone"],persistent_enabled=False,
+        notify_conditions=[{
+            "condition":"state",
+            "entity_id":"input_boolean.alerts_enabled",
+            "state":"on",
+        }],
+    )
+    try:
+        hass.states.async_set(window,"on",timestamp=time()-630)
+        hass.states.async_set(door,"unavailable",timestamp=time()-1230)
+        hass.states.async_set("input_boolean.alerts_enabled","off")
+        await run()
+        assert not calls
+        hass.states.async_set("input_boolean.alerts_enabled","on")
+        await run()
+        assert len([x for x in calls if x[:2]==("notify","send_message")])==2
     finally:
         await hass.async_stop()

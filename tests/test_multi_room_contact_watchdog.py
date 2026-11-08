@@ -127,6 +127,36 @@ class ContactWatchdogTests(unittest.TestCase):
         self.assertFalse(recovered("silent",old_last_seen=0))
         self.assertFalse(recovered("silent",silent_seconds=0))
 
+
+    def test_notify_picker_and_independent_condition_sections(self):
+        notify=self.inputs["notify_entities"]
+        self.assertEqual(notify["default"],[])
+        self.assertTrue(notify["selector"]["entity"]["multiple"])
+        self.assertEqual(notify["selector"]["entity"]["filter"],[{"domain":"notify"}])
+        self.assertEqual(self.inputs["notify_services"]["default"],"")  # migrated input
+        self.assertEqual(self.inputs["open_alert_conditions"]["default"],[])
+        self.assertEqual(self.inputs["health_alert_conditions"]["default"],[])
+        self.assertIn("condition",self.inputs["open_alert_conditions"]["selector"])
+        self.assertIn("condition",self.inputs["health_alert_conditions"]["selector"])
+        sections=self.data["blueprint"]["input"]
+        self.assertEqual(list(sections),["sensors_section","rooms_section",
+                                         "notification_section","rules_section",
+                                         "advanced_section"])
+        self.assertIn("notify_entities",sections["notification_section"]["input"])
+        self.assertIn("open_alert_conditions",sections["rules_section"]["input"])
+        self.assertIn("health_alert_conditions",sections["rules_section"]["input"])
+        self.assertIn("notify_services",sections["advanced_section"]["input"])
+        self.assertIn("notify_conditions",sections["advanced_section"]["input"])
+        self.assertIn("!input open_alert_conditions",self.source)
+        self.assertIn("!input health_alert_conditions",self.source)
+        self.assertIn("!input notify_conditions",self.source)
+        self.assertIn("target:\n                                                entity_id: \"{{ notify_entity_ids }}\"",self.source)
+        self.assertIn("alert_type in ['offline', 'silent']",self.source)
+        guide=(PATH.parent/"README.md").read_text()
+        self.assertIn("outdoor temperature",guide)
+        self.assertIn("not_home",guide)
+        self.assertIn("one-shot behavior",guide.lower())
+
     def test_unique_tags_whitelisted_services_and_docs(self):
         self.assertEqual(self.render("alert_tag",contact_id="binary_sensor.bath",
                                      alert_type="open"),"contact_guard_binary_sensor_bath_open")
@@ -135,7 +165,8 @@ class ContactWatchdogTests(unittest.TestCase):
         actions={s["action"] for s in walk(self.data["actions"])
                  if isinstance(s,dict) and "action" in s}
         self.assertEqual(actions,{"system_log.write","persistent_notification.create",
-                                  "persistent_notification.dismiss","{{ notify_action }}"})
+                                  "persistent_notification.dismiss","{{ notify_action }}",
+                                  "notify.send_message"})
         self.assertIn("notify_action | regex_match",self.source)
         self.assertTrue(self.inputs["persistent_enabled"]["default"])
         self.assertTrue(self.inputs["clear_on_recovery"]["default"])
