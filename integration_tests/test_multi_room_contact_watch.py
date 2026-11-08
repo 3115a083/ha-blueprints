@@ -104,6 +104,31 @@ async def test_room_actions_validate_using_real_ha_2026_11(tmp_path):
         assert calls[0][0:2] == ("notify", "send_message")
         assert "Kitchen" in calls[0][2]["message"]
         assert "Hall" not in calls[0][2]["message"]
+
+        # A vanished Zigbee contact must produce an independent health warning.
+        hass.states.async_set("binary_sensor.kitchen_window", "unavailable")
+        hass.states.get("binary_sensor.kitchen_window").last_changed = (
+            datetime.now(timezone.utc) - timedelta(minutes=15, seconds=10)
+        )
+        await script.async_run(
+            {"trigger": {"id": "minute"},
+             "this": SimpleNamespace(entity_id="automation.contact_watch_test")},
+            Context(),
+        )
+        await hass.async_block_till_done()
+        assert len(calls) == 2
+        assert calls[1][0:2] == ("notify", "send_message")
+        assert "sensor health warning" in calls[1][2]["title"]
+
+        # A recovered closed sensor must not generate another warning.
+        hass.states.async_set("binary_sensor.kitchen_window", "off")
+        await script.async_run(
+            {"trigger": {"id": "minute"},
+             "this": SimpleNamespace(entity_id="automation.contact_watch_test")},
+            Context(),
+        )
+        await hass.async_block_till_done()
+        assert len(calls) == 2
     finally:
         await hass.async_stop()
 
