@@ -135,9 +135,11 @@ async def test_silent_last_seen_is_explicit_opt_in(tmp_path):
     hass,calls,run=await build(tmp_path,
         [room("Living room",[sensor],last_seen_hours=24)],[sensor])
     try:
+        # A previously silent device is surfaced on restart/reload even if
+        # its exact first one-minute alert window was missed during downtime.
         stamp=(datetime.now(timezone.utc)-timedelta(hours=26)).isoformat()
         hass.states.async_set(sensor,"off",{"last_seen":stamp},timestamp=time()-120)
-        await run()
+        await run("startup")
         create=[x for x in calls if x[:2]==("persistent_notification","create")]
         assert len(create)==1
         assert create[0][2]["notification_id"].endswith("_silent")
