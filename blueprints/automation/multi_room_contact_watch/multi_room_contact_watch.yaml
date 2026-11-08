@@ -298,7 +298,7 @@ actions:
         - variables:
             tag_open: "{{ notification_prefix }}_{{ room_position }}_open"
             tag_health: "{{ notification_prefix }}_{{ room_position }}_health"
-            opened_now: >-
+            opened_now_json: >-
               {% set ns = namespace(names=[], due=[]) %}
               {% for eid in contacts %}
                 {% if is_state(eid, issue_state) and states[eid] is not none %}
@@ -312,8 +312,8 @@ actions:
                   {% endif %}
                 {% endif %}
               {% endfor %}
-              {{ dict(names=ns.names, due=ns.due) }}
-            unhealthy_now: >-
+              {{ dict(names=ns.names, due=ns.due) | to_json }}
+            unhealthy_now_json: >-
               {% set ns = namespace(names=[], due=[]) %}
               {% set health_repeat = repeat_health | int(0) %}
               {% for eid in contacts %}
@@ -369,7 +369,10 @@ actions:
                   {% endif %}
                 {% endif %}
               {% endfor %}
-              {{ dict(names=ns.names, due=ns.due) }}
+              {{ dict(names=ns.names, due=ns.due) | to_json }}
+        - variables:
+            opened_now: "{{ opened_now_json | from_json }}"
+            unhealthy_now: "{{ unhealthy_now_json | from_json }}"
         - if:
             - condition: template
               value_template: >-
