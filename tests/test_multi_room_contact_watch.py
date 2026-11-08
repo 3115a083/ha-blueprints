@@ -2,6 +2,7 @@
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import re
+import json
 import unittest
 
 import yaml
@@ -48,8 +49,8 @@ def as_timestamp(value, default=0):
 
 
 def walk(data):
+    yield data
     if isinstance(data, dict):
-        yield data
         for value in data.values():
             yield from walk(value)
     elif isinstance(data, list):
@@ -60,7 +61,7 @@ def walk(data):
 def room_variables(actions):
     return next(n["variables"] for n in walk(actions)
                 if isinstance(n, dict) and isinstance(n.get("variables"), dict)
-                and "opened_now" in n["variables"] and "unhealthy_now" in n["variables"])
+                and "opened_now_json" in n["variables"] and "unhealthy_now_json" in n["variables"])
 
 
 class ContactWatchTests(unittest.TestCase):
@@ -72,6 +73,8 @@ class ContactWatchTests(unittest.TestCase):
                        for key, value in section["input"].items()}
         cls.fields = cls.entries["rooms"]["selector"]["object"]["fields"]
         cls.env = NativeEnvironment()
+        cls.env.filters["to_json"] = json.dumps
+        cls.env.filters["from_json"] = json.loads
         cls.env.tests["match"] = lambda s, regex: bool(re.match(regex, s))
         cls.current = datetime(2026, 11, 8, 15, 0, tzinfo=timezone.utc).timestamp()
         cls.vars = room_variables(cls.data["actions"])
@@ -94,7 +97,7 @@ class ContactWatchTests(unittest.TestCase):
         return ctx
 
     def render(self, field, data, **updates):
-        return self.env.from_string(self.vars[field]).render(**self.context(data, **updates))
+        return json.loads(self.env.from_string(self.vars[field+"_json"]).render(**self.context(data, **updates)).strip())
 
     def test_schema_and_ui(self):
         self.assertEqual(self.data["blueprint"]["homeassistant"]["min_version"], "2026.11.0")
@@ -182,13 +185,13 @@ class ContactWatchTests(unittest.TestCase):
             template = next(n["variables"][name] for n in walk(self.data["actions"])
                             if isinstance(n, dict) and isinstance(n.get("variables"), dict)
                             and name in n["variables"])
-            self.assertTrue(self.env.from_string(template).render(**ctx))
+            self.assertEqual(str(self.env.from_string(template).render(**ctx)).strip(), "True")
         ctx["states"].values[names[1]] = State("unavailable", self.current)
         for name in ("all_contacts_closed", "all_health_ok"):
             template = next(n["variables"][name] for n in walk(self.data["actions"])
                             if isinstance(n, dict) and isinstance(n.get("variables"), dict)
                             and name in n["variables"])
-            self.assertFalse(self.env.from_string(template).render(**ctx))
+            self.assertEqual(str(self.env.from_string(template).render(**ctx)).strip(), "False")
 
     def test_service_whitelist_and_docs(self):
         result = self.env.from_string(
