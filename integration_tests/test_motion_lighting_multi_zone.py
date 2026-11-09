@@ -276,3 +276,47 @@ async def test_no_room_entries_is_inert(tmp_path):
         assert calls == []
     finally:
         await hass.async_stop()
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scope", ["zone", "global"])
+@pytest.mark.parametrize("blocker_state,expected_on", [
+    ("on", False), ("off", True), ("unknown", False), ("unavailable", False),
+])
+async def test_other_light_blocks_activation_but_not_unrelated_zone(
+        tmp_path, scope, blocker_state, expected_on):
+    settings = {"on_blocker": "light.manual_lamp"} if scope == "zone" else {}
+    inputs = {"on_blocker_global": "light.manual_lamp"} if scope == "global" else {}
+    zones = [
+        zone("Hallway", HALL, HALL_LIGHT, **settings),
+        zone("Bathroom", BATH, BATH_LIGHT),
+    ]
+    hass, calls, run, state = await environment(tmp_path, zones, **inputs)
+    try:
+        state(HALL_LIGHT, "off")
+        state("light.manual_lamp", blocker_state)
+        await run("motion_on", HALL)
+        assert calls == (
+            [("homeassistant", "turn_on", (HALL_LIGHT,))] if expected_on else []
+        )
+        calls.clear()
+        await run("motion_on", BATH)
+        assert calls == (
+            [("homeassistant", "turn_on", (BATH_LIGHT,))]
+            if scope == "zone" or expected_on else []
+        )
+    finally:
+        await hass.async_stop()
+
+
+@pytest.mark.asyncio
+async def test_light_turn_off_blocker_does_not_block_initial_activation(tmp_path):
+    zones = [zone("Hallway", HALL, HALL_LIGHT,
+                  off_blocker="light.manual_lamp")]
+    hass, calls, run, state = await environment(tmp_path, zones)
+    try:
+        state(HALL_LIGHT, "off")
+        state("light.manual_lamp", "on")
+        await run("motion_on", HALL)
+        assert calls == [("homeassistant", "turn_on", (HALL_LIGHT,))]
+    finally:
+        await hass.async_stop()

@@ -270,3 +270,37 @@ async def test_sunset_does_not_activate_from_only_other_room_presence(tmp_path):
         assert calls == []
     finally:
         await hass.async_stop()
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("blocker_state,expected_on", [
+    ("on", False), ("off", True), ("unknown", False), ("unavailable", False),
+])
+async def test_other_light_blocks_motion_and_sunset_only_in_its_zone(
+        tmp_path, blocker_state, expected_on):
+    zones = [
+        zone("Hall", "binary_sensor.hall_motion", "light.hall",
+             blocking_entity="light.manual_lamp", darkness_activation="sunset"),
+        zone("Bath", "binary_sensor.bath_motion", "light.bath"),
+    ]
+    hass, calls, trigger = await make_runner(tmp_path, zones)
+    try:
+        hass.states.async_set("light.manual_lamp", blocker_state)
+        await trigger()
+        assert calls == (
+            [("homeassistant.turn_on", "light.hall")] if expected_on else []
+        )
+
+        # The same blocker must guard sunset activation in the occupied zone.
+        calls.clear()
+        hass.states.async_set("light.hall", "off")
+        await trigger(id="sunset", entity_id="sun.sun")
+        assert calls == (
+            [("homeassistant.turn_on", "light.hall")] if expected_on else []
+        )
+
+        # A blocked hallway must not prevent the bathroom zone from activating.
+        calls.clear()
+        await trigger(entity_id="binary_sensor.bath_motion")
+        assert calls == [("homeassistant.turn_on", "light.bath")]
+    finally:
+        await hass.async_stop()

@@ -255,7 +255,7 @@ blueprint:
                   selector:
                     time: {}
                 blocking_entity:
-                  label: "Optional zone blocker (ON blocks new light activations)"
+                  label: "Optional turn-on blocker (light/helper ON prevents activation)"
                   required: false
                   selector:
                     entity:
@@ -263,6 +263,7 @@ blueprint:
                         - domain: input_boolean
                         - domain: binary_sensor
                         - domain: switch
+                        - domain: light
                 ownership_helper:
                   label: "Optional Input Boolean: this automation owns the light"
                   required: false

@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-09 | Allow lights as motion-activation blockers
+
+- Added `light` to the per-zone activation-blocker entity picker. A configured light reporting `on` prevents new motion, sunset and lux-triggered light commands; `unknown` or `unavailable` remain fail-closed.
+- Documented how to select another light as the blocker, verify its stored entity and re-import the updated blueprint.
+- Added selector and Home Assistant script regression tests for light blocker ON/OFF/unavailable states and per-zone independence.
+
 ## 2026-11-07 | Optional darkness activation for already-occupied zones
 
 - Added per-zone opt-in to activate at sunset, at a zone-specific lux threshold crossing, or on either event. Existing motion-only behavior remains the default.

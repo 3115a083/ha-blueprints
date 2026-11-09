@@ -200,13 +200,14 @@ blueprint:
                       mode: box
                       unit_of_measurement: s
                 on_blocker:
-                  label: "Optional turn-on blocker (ON blocks this zone)"
+                  label: "Optional turn-on blocker (ON prevents motion activation)"
                   required: false
                   selector:
                     entity:
                       filter:
                         - domain: binary_sensor
                         - domain: input_boolean
+                        - domain: light
                 off_blocker:
                   label: "Optional turn-off blocker (ON keeps this zone lit)"
                   required: false
@@ -215,6 +216,7 @@ blueprint:
                       filter:
                         - domain: binary_sensor
                         - domain: input_boolean
+                        - domain: light
     global_section:
       name: "⚙️ 03 | Shared controls"
       icon: mdi:tune
@@ -237,6 +239,7 @@ blueprint:
               filter:
                 - domain: binary_sensor
                 - domain: input_boolean
+                - domain: light
         off_blocker_global:
           name: "Optional global turn-off blocker (ON = keep lights)"
           default: ""
@@ -245,6 +248,7 @@ blueprint:
               filter:
                 - domain: binary_sensor
                 - domain: input_boolean
+                - domain: light
         respect_manual_on:
           name: "Protect lights manually turned on after motion ended"
           description: >-

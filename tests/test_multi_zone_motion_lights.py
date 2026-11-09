@@ -89,6 +89,15 @@ class MultiZoneMotionLightsTests(unittest.TestCase):
         self.assertEqual(set(self.config["blueprint"]["input"]),
                          {"sensors_section", "zones_section", "diagnostics_section"})
 
+    def test_turn_on_blocker_accepts_light_entity_and_fails_closed(self):
+        fields = self.inputs["lighting_zones"]["selector"]["object"]["fields"]
+        domains = {entry["domain"] for entry in
+                   fields["blocking_entity"]["selector"]["entity"]["filter"]}
+        self.assertIn("light", domains)
+        self.assertIn("binary_sensor", domains)
+        activation = str(self.config["actions"])
+        self.assertIn("is_state(zone_blocker, 'off')", activation)
+
     def test_inputs_exist_and_templates_compile(self):
         found = set(re.findall(r"!input\s+([a-zA-Z0-9_]+)", self.text))
         self.assertFalse(found - set(self.inputs))
