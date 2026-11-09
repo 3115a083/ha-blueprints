@@ -33,13 +33,16 @@ Click **Add** for as many independent zones as needed, then configure the follow
 | Linked-area presence | One or more binary sensors or input_boolean helpers from adjacent areas |
 | Linked presence effect | Hold while occupied or extend the regular no-motion delay |
 | Hold grace / extended delay | Additional seconds, default 120 seconds |
-| Turn-on / turn-off blockers | Optional independent, per-zone safety conditions |
+| Turn-on blocker | Optional light, binary sensor or Input Boolean. ON prevents this zone from switching on; an unknown or unavailable state also blocks activation. |
+| Turn-off blocker | Optional light, binary sensor or Input Boolean. ON prevents automatic switch-off; **this does not block motion activation**. |
 
 **Use unique physical light targets in each zone.** Do not make two zones independently control the same bulb unless you intend the resulting interaction. For multiple bulbs in a zone, use a Home Assistant light group or a scene with explicit off targets.
 
 ### 03 | Shared controls
 
-An optional global enable helper, global turn-on blocker and global turn-off blocker apply to all zones. The default manual-on protection avoids turning off lights that were switched on after the local motion sensors stopped detecting activity.
+An optional global enable helper, global turn-on blocker and global turn-off blocker apply to all zones. The global turn-on and turn-off blockers can use a light, binary sensor or Input Boolean, with the same ON/unknown/unavailable behavior as their per-zone counterparts. The default manual-on protection avoids turning off lights that were switched on after the local motion sensors stopped detecting activity.
+
+**Blocking activation with another lamp:** In the zone you want to suppress, select the other lamp (for example `light.night_lamp`) under **Optional turn-on blocker**, not **Optional turn-off blocker**. If `light.night_lamp` reports `on`, motion must not turn on this zone. If it reports `off`, motion may activate it. The blocker never changes the other lamp's state. After updating the imported blueprint, reopen and save the automation, verify that the `light.*` blocker was retained, and test both states in Home Assistant. A GitHub update by itself does not replace the local import.
 
 ## Hallway / bathroom example
 

@@ -92,6 +92,20 @@ class MotionLightingTests(unittest.TestCase):
         self.assertTrue(fields["enabled"]["default"])
         self.assertEqual(fields["linked_presence"]["default"], [])
 
+    def test_light_allowed_for_per_zone_and_global_blockers(self):
+        fields = self.inputs["zone_entries"]["selector"]["object"]["fields"]
+        for key in ("on_blocker", "off_blocker"):
+            domains = {item["domain"] for item in
+                       fields[key]["selector"]["entity"]["filter"]}
+            self.assertIn("light", domains, key)
+        for key in ("on_blocker_global", "off_blocker_global"):
+            domains = {item["domain"] for item in
+                       self.inputs[key]["selector"]["entity"]["filter"]}
+            self.assertIn("light", domains, key)
+        actions = str(self.data["actions"])
+        self.assertIn("is_state(zone_on_blocker, 'off')", actions)
+        self.assertIn("is_state(global_on_blocker_id, 'off')", actions)
+
     def test_all_input_references_valid_and_templates_compile(self):
         unknown = set(re.findall(r"!input\s+([a-zA-Z0-9_]+)", self.text)) - set(self.inputs)
         self.assertEqual(unknown, set())

@@ -109,7 +109,9 @@ The automation sets that helper ON only after it sends its own activation. It se
 
 ### Sun, time, illuminance, blockers
 
-Sun, time window, illuminance threshold, master switch and per-zone blocking switch are checked on every NEW ON command, whether caused by motion, sunset or a lux threshold crossing. They do not prevent an existing automatic OFF when the room becomes unoccupied. The local time window supports crossing midnight. Unknown lux, blocker or master states block new activations.
+Sun, time window, illuminance threshold, master switch and per-zone turn-on blocker are checked on every NEW ON command, whether caused by motion, sunset or a lux threshold crossing. The blocker accepts a light, switch, binary sensor or Input Boolean. For example, set the bathroom zone's **Optional turn-on blocker** to `light.night_lamp`: while that light reports `on`, bathroom motion cannot switch on its configured lights. When the blocker reports `off`, motion is allowed again (subject to the other conditions). `unknown`, `unavailable` and missing blocker entities fail closed. The blocker does not turn the selected light off, and it does not prevent an existing automatic OFF when the room becomes unoccupied. The local time window supports crossing midnight.
+
+After updating the imported blueprint, reopen the automation and confirm that the intended `light.*` entity is saved in **Optional turn-on blocker** for the correct zone. Check its actual state in Developer Tools, then test motion with the blocker ON and OFF. The GitHub update alone does not update an existing Home Assistant import.
 
 ## Cross-room timing
 
