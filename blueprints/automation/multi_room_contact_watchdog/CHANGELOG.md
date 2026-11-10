@@ -1,3 +1,13 @@
+# Changelog
+
+## 2026-11-10 | Separate warning/reminder actions and bundled contacts
+
+- Moved editable notification title/message templates and the existing post-warning action editor to Advanced options.
+- Added separate visual `on_reminder_actions` for scheduled reminders; preserved `on_alert_actions` for initial alerts and startup replays.
+- Bundled overdue contacts of the same alert type using a shared per-automation persistent notification ID and legacy mobile tag. New alerts update the bundle instead of creating unrelated tagged notifications.
+- Updated shared persistent/mobile bundles on recovery and cleared the shared tag only after the last overdue contact of that type recovers; preserved legacy per-contact clearing for upgrades.
+- Documented the limitation that generic `notify.send_message` providers cannot be guaranteed to replace existing mobile notifications, and added static/integration regression scenarios.
+
 ## 2026-11-10 | Custom message templates, post-notification actions and scheduled reminders
 
 - Added editable notification title and message templates with per-contact, per-room and alert-type copyable variables. Kept the existing default wording for unconfigured inputs.
