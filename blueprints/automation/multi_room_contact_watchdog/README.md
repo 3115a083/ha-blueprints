@@ -11,7 +11,7 @@ One Home Assistant automation monitors any number of independent rooms, with as 
 
 1. Under **01 | Sensor monitoring**, select **every individual contact sensor** that should be watched.
 2. Under **02 | Rooms and contacts**, click **Add** for each room. Give it a name and select the contact sensors belonging to it. **Use the same entities as in step 1.** Defaults: ON means open, open alert after 10 minutes, unavailable alert after 20 minutes. These defaults can be overridden individually per room.
-3. Under **03 | Notifications**, choose your notification recipients using the **notify entity picker**. You may select several targets. Persistent Home Assistant notifications remain enabled by default. Edit the prefilled notification title/message templates, enter optional reminder offsets (such as `5,15`), and configure visual **Actions AFTER each warning or reminder** if needed. If an older phone integration only exposes a `notify.mobile_app_*` action rather than a notify entity, keep using the optional legacy input under **05 | Advanced options**.
+3. Under **03 | Notifications**, choose your notification recipients using the **notify entity picker**. Persistent notifications remain enabled by default. Enter optional reminder offsets (such as `5,15`). Under **05 | Advanced options**, edit the prefilled title/message templates and configure separate visual **Actions AFTER an initial warning** and **Actions AFTER each reminder**. For older Companion apps, use the optional legacy `notify.mobile_app_*` action field under Advanced options.
 4. Under **04 | When to send warnings**, optionally add **separate conditions** for open contacts and for unavailable/silent sensors. If left empty, each warning type operates normally.
 
 Example layout:
@@ -22,7 +22,7 @@ Example layout:
 | Kitchen | Kitchen window | Shared 10 min | 20 min |
 | Living room | Patio door, two windows | 5 min | 30 min |
 
-A message identifies **the exact contact and the room**, not just "a window somewhere is open".
+Every notification identifies **the exact contacts and rooms**. Multiple overdue contacts of the same alert type appear together. When a new contact becomes due, the bundle is updated with all unresolved contacts of that type.
 
 ### Why select each sensor twice?
 
@@ -40,7 +40,11 @@ For each sensor, the automation distinguishes these independent alert types:
 | **Unavailable / unknown** | HA contact state remains unknown/unavailable | 20 min | Contact reports ON or OFF |
 | **Silent last_seen** | Valid contact still shows ON/OFF but its last_seen attribute is old | Disabled | last_seen becomes fresh again |
 
-Each item has a distinct, stable notification ID/tag. Multiple rooms and contacts produce independent messages. Persistent notifications are created/updated by ID. Mobile app notifications reuse their tags so repeated alerts can replace prior phone notifications rather than creating a list of unrelated warnings, subject to app behavior.
+Open contacts share one stable notification ID/tag per automation, as do offline and silent contacts. When a second sensor of the same alert type becomes due, its alert **updates the same bundled persistent notification** and, for legacy Companion-app notification actions, reuses the same mobile tag. The most recent message contains the triggering contact plus all other currently overdue contacts of that type. Duplicate assignments of the same entity in multiple rooms are shown once. Bundling is **per alert type** to preserve independent open/health notification conditions.
+
+**Important provider limitation:** Modern `notify.send_message` entity recipients cannot universally replace or dismiss an earlier push. Each outgoing update still contains the current combined list, but the notification provider may display multiple separate notifications. For replaceable mobile notifications, use a legacy `notify.mobile_app_*` action, configured only once, and verify tag support on the actual phone.
+
+On recovery, the persistent bundle is updated to show remaining overdue contacts. Tagged legacy mobile notifications are updated when others remain or cleared when the last contact of that type recovers. Recovery updates do not send a separate `notify.send_message` push unless explicit recovery notifications are enabled. Provider errors do not block later custom actions.
 
 **Automatic clear** is enabled by default. It dismisses the matching persistent Home Assistant notification and sends `clear_notification` to configured `notify.mobile_app_*` services. Other notification providers are not sent the clear command because they may treat it as a literal message. Optionally enable a **recovery notification** so the phone explicitly says the contact is closed or online again.
 
@@ -67,7 +71,7 @@ Both **Notification title** and **Notification message** are editable **Jinja te
 
 For example, replace the message with `Attention: {{ contact_label }} in {{ room_name }}. Type: {{ alert_type }}. Duration: {{ elapsed_minutes }} min.` This applies to persistent notifications, modern notify entities and legacy mobile notifications alike. Existing automations that omit the new inputs retain the previous default title/message wording.
 
-The visual **Actions AFTER each warning or reminder** selector is now located directly under Notifications. It keeps the existing `on_alert_actions` input key: configured actions migrate without changes. Actions execute after the configured notification services have been attempted (with `continue_on_error` for provider failures), for the initial warning and each scheduled reminder. They do not run when notification conditions suppress an alert or when a contact has recovered. Recovery actions remain separately configurable under Advanced options.
+Under **05 | Advanced options**, the editable title/message templates and the two visual action editors are grouped together. **Actions AFTER an initial warning** retains the existing `on_alert_actions` input key, so saved actions continue working for initial warnings. **Actions AFTER each reminder** uses the new `on_reminder_actions` input key, defaulting to no actions. Scheduled reminders do not execute the initial-warning actions. Both execute only after all notification delivery attempts (provider failures are tolerated), and neither runs if the relevant conditions suppress the warning. Startup replays count as initial warnings. Recovery actions remain a separate control.
 
 ### Independent notification conditions
 
@@ -84,7 +88,7 @@ Conditions are checked when a scheduled alert is due. They **do not stop sensor 
 
 **Important one-shot behavior:** When a condition is false at the initial warning deadline and reminders are disabled (the default), an alert may be missed even if the condition later becomes true. Configure specific reminder offsets (for example `5,15`) or the legacy periodic interval to reevaluate notification eligibility at the next due time. This does not create an immediate threshold-crossing event: it checks again on the reminder schedule. The existing optional **Legacy shared conditions for BOTH warning types** is still respected for migrated automations, in addition to these two new lists.
 
-Custom alert actions are in Notifications; custom recovery actions remain under Advanced options. Both use `room_name`, `contact_id`, `contact_label`, `alert_type` and the corresponding title/message/tag variables.
+Custom initial-warning, reminder and recovery actions are in Advanced options. Both use `room_name`, `contact_id`, `contact_label`, `alert_type` and the corresponding title/message/tag variables.
 
 ## Zigbee failure detection: exact limits
 
@@ -116,8 +120,8 @@ If a contact remains open and subsequently stops updating, an existing open aler
 - **Avoid duplicates:** Do not configure the same phone using both the picker and its legacy mobile action.
 - **Tags and clearing:** A `notify` entity receives standard message/title data, but this generic action has no tag-based removal mechanism. Tagged mobile notifications and `clear_notification` remain supported only via the legacy `notify.mobile_app_*` service when configured. Home Assistant persistent notifications can still clear on recovery.
 - **Mobile-only settings:** The click URL, Android icon/color and iOS interruption level apply to legacy Companion app actions. A generic notify entity may ignore or lack those features.
-- Persistent Home Assistant notifications work even without a phone configured. Ensure at least one notification destination is enabled.
-- Optional custom actions run for due alerts or qualifying recovery, not simply on every sensor update. Review them before letting them operate devices.
+- Persistent Home Assistant notifications work even without a phone configured. Ensure at least one notification destination is enabled. Shared tags are unique per automation entity ID and alert type.
+- Initial-warning custom actions, reminder custom actions and recovery custom actions run at their respective events, not on every sensor update. Contacts of the same alert type becoming due in the same minute share ONE combined notification update and execute the corresponding warning/reminder action once for the batch. The custom action can inspect `bundle_members` for the full affected list. Review custom actions before allowing them to operate devices.
 
 ## Performance, timing and restart behavior
 
@@ -142,8 +146,10 @@ The blueprint relies on contact sensor states, not on event-based battery-teleme
 - Check `unknown` separately from `unavailable`, and avoid misclassifying sensor startup transitions.
 - If last_seen is supported, simulate a stale timestamp and a fresh update. If unsupported, confirm silence detection is inert.
 - Configure reminder offsets `5,15` and verify the initial notification and both later reminders for the same contact; confirm no further periodic alerts after the last offset. Test old periodic interval settings separately.
-- Edit the title/message templates and confirm sensor/room substitution for open, offline and silent warnings. Add a visual custom action and verify it runs after notifications are attempted.
-- Verify the existing `on_alert_actions` key still works after moving the input into the Notifications section.
+- Edit the title/message templates under Advanced options and confirm sensor/room substitution for open, offline and silent warnings. Add separate warning and reminder custom actions and verify only the correct one runs after notification attempts.
+- Trigger two different windows in sequence and verify the second notification updates the shared tag with BOTH contacts, and the first closure updates the persistent bundle while the last closure removes it.
+- Test same-minute warnings, provider-specific tag replacement, automatic clearing, and separate conditions for open/offline alerts.
+- Verify the existing `on_alert_actions` key still works after moving it to Advanced options, while `on_reminder_actions` is separate.
 - Test Home Assistant restart and automation reload with an already-open contact.
 - Validate push and tag deletion on each configured mobile app; notification service implementations differ.
 

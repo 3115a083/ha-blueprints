@@ -114,10 +114,14 @@ class ContactWatchdogTests(unittest.TestCase):
         notify_section=self.data["blueprint"]["input"]["notification_section"]["input"]
         advanced_section=self.data["blueprint"]["input"]["advanced_section"]["input"]
         for name in ("alert_title_template","alert_message_template"):
-            self.assertIn(name,notify_section)
-            self.assertEqual(notify_section[name]["selector"],{"template":{}})
-        self.assertIn("on_alert_actions",notify_section)
-        self.assertNotIn("on_alert_actions",advanced_section)
+            self.assertIn(name,advanced_section)
+            self.assertEqual(advanced_section[name]["selector"],{"template":{}})
+        self.assertNotIn("on_alert_actions",notify_section)
+        self.assertIn("on_alert_actions",advanced_section)
+        self.assertIn("on_reminder_actions",advanced_section)
+        self.assertEqual(self.inputs["on_reminder_actions"]["default"],[])
+        self.assertNotIn("alert_title_template",notify_section)
+        self.assertNotIn("alert_message_template",notify_section)
         self.assertEqual(self.inputs["on_alert_actions"]["default"],[])
         self.assertEqual(self.inputs["reminder_offsets_minutes"]["default"],"")
         self.assertEqual(self.inputs["reminder_offsets_minutes"]["selector"],{"text":{}})
@@ -136,7 +140,21 @@ class ContactWatchdogTests(unittest.TestCase):
         self.assertEqual(find_var(self.data["actions"],"alert_title"),"!input alert_title_template")
         guide=(PATH.parent/"README.md").read_text()
         self.assertIn("{{ contact_label }}",guide)
-        self.assertIn("Actions AFTER each warning",guide)
+        self.assertIn("Actions AFTER an initial warning",guide)
+        self.assertIn("Actions AFTER each reminder",guide)
+
+    def test_bundled_notification_and_separate_actions(self):
+        self.assertIn("bundle_tag_prefix",self.data["variables"])
+        self.assertIn("bundle_notification_message",self.source)
+        self.assertIn("bundle_recovery_message",self.source)
+        self.assertIn("!input on_reminder_actions",self.source)
+        self.assertIn("!input on_alert_actions",self.source)
+        self.assertIn('tag: "{{ bundle_tag }}"',self.source)
+        self.assertIn('notification_id: "{{ bundle_tag }}"',self.source)
+        self.assertIn('notification_id: "{{ alert_tag }}"',self.source)
+        self.assertIn("Other unresolved {{ alert_type }} contacts",self.source)
+        self.assertIn("Remaining {{ alert_type }} contacts",self.source)
+        self.assertIn("bundle_members | count == 0",self.source)
 
     def test_specific_reminder_offsets_and_legacy_fallback(self):
         base=dict(alert_active=True,alert_started=1000,alert_delay=600,
@@ -199,7 +217,7 @@ class ContactWatchdogTests(unittest.TestCase):
         self.assertIn("!input open_alert_conditions",self.source)
         self.assertIn("!input health_alert_conditions",self.source)
         self.assertIn("!input notify_conditions",self.source)
-        self.assertIn("target:\n                                                entity_id: \"{{ notify_entity_ids }}\"",self.source)
+        self.assertRegex(self.source, r'target:\n\s+entity_id: "{{ notify_entity_ids }}"')
         self.assertIn("alert_type in ['offline', 'silent']",self.source)
         guide=(PATH.parent/"README.md").read_text()
         self.assertIn("outdoor temperature",guide)

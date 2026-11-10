@@ -79,10 +79,10 @@ async def test_independent_open_and_offline_notifications(tmp_path):
         await run()
         created=[x for x in calls if x[:2]==("persistent_notification","create")]
         self_tags={x[2]["notification_id"] for x in created}
-        assert self_tags=={
-            "contact_guard_binary_sensor_bath_window_open",
-            "contact_guard_binary_sensor_kitchen_window_offline",
-        }
+        assert len(self_tags)==2
+        assert any(tag.endswith("_open") for tag in self_tags)
+        assert any(tag.endswith("_offline") for tag in self_tags)
+        assert all(tag.startswith("contact_guard_bundle_") for tag in self_tags)
         assert "Bathroom" in created[0][2]["title"]
         assert "Kitchen" in created[1][2]["title"]
         phone=[x for x in calls if x[:2]==("notify","mobile_app_phone")]
@@ -315,6 +315,7 @@ async def test_specific_reminders_at_five_and_fifteen_minutes(tmp_path):
         tmp_path,[room("Hall",[sensor])],[sensor],
         reminder_offsets_minutes="5,15",reminder_minutes=2,
         on_alert_actions=[{"action":"test.record","data":{"alert":"{{ alert_type }}"}}],
+        on_reminder_actions=[{"action":"test.record","data":{"alert":"{{ alert_type }}"}}],
     )
     try:
         for elapsed,expected in (
@@ -336,6 +337,99 @@ async def test_specific_reminders_at_five_and_fifteen_minutes(tmp_path):
             assert bool(creates)==expected,(elapsed,calls)
             assert len(actions)==len(creates),(elapsed,calls)
             if creates:
-                assert creates[0][2]["notification_id"]=="contact_guard_binary_sensor_hall_window_open"
+                assert creates[0][2]["notification_id"].endswith("_open")
+                assert creates[0][2]["notification_id"].startswith("contact_guard_bundle_")
+    finally:
+        await hass.async_stop()
+
+
+
+@pytest.mark.asyncio
+async def test_warning_and_reminder_actions_are_separate(tmp_path):
+    sensor="binary_sensor.study_window"
+    hass,calls,run=await build(
+        tmp_path,[room("Study",[sensor])],[sensor],
+        reminder_offsets_minutes="5,15",
+        on_alert_actions=[{"action":"test.record","data":{"phase":"initial"}}],
+        on_reminder_actions=[{"action":"test.record","data":{"phase":"reminder"}}],
+    )
+    try:
+        for age,phase in ((630,"initial"),(930,"reminder"),(1530,"reminder")):
+            hass.states.async_set(sensor,"off")
+            hass.states.async_set(sensor,"on",timestamp=time()-age)
+            calls.clear()
+            await run()
+            assert calls[-1][:2]==("test","record"),calls
+            phases=[x[2]["phase"] for x in calls if x[:2]==("test","record")]
+            assert phases==[phase],calls
+        calls.clear()
+        hass.states.async_set(sensor,"off")
+        hass.states.async_set(sensor,"on",timestamp=time()-870)
+        await run()
+        assert not [x for x in calls if x[:2]==("test","record")]
+    finally:
+        await hass.async_stop()
+
+
+@pytest.mark.asyncio
+async def test_two_contacts_share_one_persistent_and_mobile_tag(tmp_path):
+    first="binary_sensor.kitchen_window"
+    second="binary_sensor.bath_window"
+    hass,calls,run=await build(
+        tmp_path,[room("Kitchen",[first]),room("Bathroom",[second])],
+        [first,second],notify_services="notify.mobile_app_phone",
+    )
+    try:
+        hass.states.async_set(first,"on",{"friendly_name":"Kitchen window"},timestamp=time()-630)
+        hass.states.async_set(second,"off",{"friendly_name":"Bathroom window"})
+        await run()
+        first_persistent=[x for x in calls if x[:2]==("persistent_notification","create")]
+        first_mobile=[x for x in calls if x[:2]==("notify","mobile_app_phone")
+                      and x[2].get("message")!="clear_notification"]
+        assert len(first_persistent)==len(first_mobile)==1
+        tag=first_persistent[0][2]["notification_id"]
+        assert tag.endswith("_open")
+        assert first_mobile[0][2]["data"]["tag"]==tag
+        calls.clear()
+
+        # A second sensor opens later and reaches its own initial deadline.
+        hass.states.async_set(first,"on",{"friendly_name":"Kitchen window"},timestamp=time()-900)
+        hass.states.async_set(second,"on",{"friendly_name":"Bathroom window"},timestamp=time()-630)
+        await run()
+        updated=[x for x in calls if x[:2]==("persistent_notification","create")]
+        updated_mobile=[x for x in calls if x[:2]==("notify","mobile_app_phone")
+                        and x[2].get("message")!="clear_notification"]
+        assert len(updated)==len(updated_mobile)==1,calls
+        assert updated[0][2]["notification_id"]==tag
+        assert updated_mobile[0][2]["data"]["tag"]==tag
+        assert "Kitchen window" in updated[0][2]["message"]
+        assert "Bathroom window" in updated[0][2]["message"]
+        assert "Kitchen window" in updated_mobile[0][2]["message"]
+
+        # Closing the first window retains the bundled tag with the second.
+        old=hass.states.get(first)
+        hass.states.async_set(first,"off")
+        new=hass.states.get(first)
+        calls.clear()
+        await run("contact_changed",entity_id=first,from_state=old,to_state=new)
+        revisions=[x for x in calls if x[:2]==("persistent_notification","create")]
+        assert len(revisions)==1,calls
+        assert revisions[0][2]["notification_id"]==tag
+        assert "Bathroom window" in revisions[0][2]["message"]
+        assert "Kitchen window" not in revisions[0][2]["message"]
+        assert not [x for x in calls if x[:2]==("persistent_notification","dismiss") and
+                    x[2]["notification_id"]==tag]
+        calls.clear()
+
+        # Last recovery dismisses exactly the shared bundle.
+        old=hass.states.get(second)
+        hass.states.async_set(second,"off")
+        new=hass.states.get(second)
+        await run("contact_changed",entity_id=second,from_state=old,to_state=new)
+        assert len([x for x in calls if x[:2]==("persistent_notification","dismiss")
+                    and x[2]["notification_id"]==tag])==1,calls
+        assert any(x[:2]==("notify","mobile_app_phone") and
+                   x[2].get("message")=="clear_notification" and
+                   x[2].get("data",{}).get("tag")==tag for x in calls)
     finally:
         await hass.async_stop()

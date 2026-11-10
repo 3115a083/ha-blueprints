@@ -9,13 +9,14 @@ blueprint:
     Monitor any number of rooms, doors, and windows with ONE automation.
     Notify when a contact stays open too long, a contact becomes
     unknown/unavailable, or (optionally) its last_seen attribute is stale.
-    Send independent messages identifying the exact room and sensor.
-    Support selectable notify entities, optional legacy Companion
-    notification actions, persistent notifications and reminders.
+    Bundle unresolved contacts by alert type (open, offline, silent)
+    into shared persistent and tagged mobile notifications. Show every
+    affected room and sensor. Support selectable notify entities,
+    optional legacy Companion notification actions and reminders.
     Configure separate visual conditions for open-contact warnings
     and unavailable/stale-sensor warnings. Customize notification
-    titles and messages, run actions after delivery, and schedule
-    reminders at specific offsets after the first warning.
+    titles and messages, separate first-warning and reminder actions,
+    and schedule reminders at specific offsets after the first warning.
 
     First register ALL contact entities under Sensor monitoring so recovery
     changes are handled immediately. Then assign the same entities to
@@ -203,6 +204,54 @@ blueprint:
           default: false
           selector:
             boolean: {}
+        reminder_offsets_minutes:
+          name: "⏱️ Additional reminders after first alert (minutes)"
+          description: >-
+            Comma-separated minutes measured from the FIRST alert deadline,
+            e.g. 5,15 sends additional alerts 5 and 15 minutes later.
+            Leave blank to use the legacy repeat interval (if configured),
+            or to send only once. Non-integer, zero or out-of-range entries
+            are ignored; up to 12 offsets from 1 to 1440 minutes.
+            Each alert type and contact has its own schedule.
+          default: ""
+          selector:
+            text: {}
+    rules_section:
+      name: "🎛️ 04 | When to send warnings"
+      icon: mdi:filter-outline
+      description: >-
+        These are TWO INDEPENDENT condition editors. They control only
+        sending warnings, not monitoring or clearing resolved alerts.
+        Leave a list empty to allow all alerts of that type. Example:
+        for open contacts, set a Numeric state condition on outside
+        temperature BELOW 17. For offline or silent sensors, set
+        a State condition on a person to not_home. Multiple entries
+        are AND by default; add an OR group for alternatives.
+      input:
+        open_alert_conditions:
+          name: "Open door/window warnings: send only when"
+          description: >-
+            Example: Numeric state, choose the outdoor temperature sensor,
+            below 17. Leave empty to always allow open alerts. If a
+            one-time warning is suppressed, it can be missed unless
+            reminder notifications are enabled.
+          default: []
+          selector:
+            condition: {}
+        health_alert_conditions:
+          name: "Unavailable / silent sensor warnings: send only when"
+          description: >-
+            Example: State, choose a person, enter not_home. Applies to
+            unknown, unavailable and stale last_seen. Independent from
+            open alerts. Leave empty to always allow health alerts.
+          default: []
+          selector:
+            condition: {}
+    advanced_section:
+      name: "⚙️ 05 | Advanced options"
+      icon: mdi:tune
+      collapsed: true
+      input:
         alert_title_template:
           name: "✏️ Notification title (editable template)"
           description: >-
@@ -240,65 +289,29 @@ blueprint:
             {% endif %}
           selector:
             template: {}
-        reminder_offsets_minutes:
-          name: "⏱️ Additional reminders after first alert (minutes)"
-          description: >-
-            Comma-separated minutes measured from the FIRST alert deadline,
-            e.g. 5,15 sends additional alerts 5 and 15 minutes later.
-            Leave blank to use the legacy repeat interval (if configured),
-            or to send only once. Non-integer, zero or out-of-range entries
-            are ignored; up to 12 offsets from 1 to 1440 minutes.
-            Each alert type and contact has its own schedule.
-          default: ""
-          selector:
-            text: {}
         on_alert_actions:
-          name: "⚡ Actions AFTER each warning or reminder"
+          name: "⚡ Actions AFTER an initial warning"
           description: >-
-            Optional visual action sequence, executed after notification
-            delivery has been attempted. Runs for the initial alert and
-            each due reminder. Available variables: room_name,
+            Optional actions after the first warning (or startup replay).
+            Reminder actions have a separate editor below. Available variables: room_name,
             contact_id, contact_label, alert_type, contact_state,
-            alert_title, alert_message, alert_tag and elapsed_minutes.
+            alert_title, alert_message, bundle_notification_message,
+            alert_tag, bundle_tag and elapsed_minutes.
           default: []
           selector:
             action: {}
-    rules_section:
-      name: "🎛️ 04 | When to send warnings"
-      icon: mdi:filter-outline
-      description: >-
-        These are TWO INDEPENDENT condition editors. They control only
-        sending warnings, not monitoring or clearing resolved alerts.
-        Leave a list empty to allow all alerts of that type. Example:
-        for open contacts, set a Numeric state condition on outside
-        temperature BELOW 17. For offline or silent sensors, set
-        a State condition on a person to not_home. Multiple entries
-        are AND by default; add an OR group for alternatives.
-      input:
-        open_alert_conditions:
-          name: "Open door/window warnings: send only when"
+        on_reminder_actions:
+          name: "⏱️ Actions AFTER each reminder"
           description: >-
-            Example: Numeric state, choose the outdoor temperature sensor,
-            below 17. Leave empty to always allow open alerts. If a
-            one-time warning is suppressed, it can be missed unless
-            reminder notifications are enabled.
+            Optional visual action sequence executed after a scheduled
+            reminder has been sent, separate from initial warning actions.
+            Available variables: room_name, contact_id, contact_label,
+            alert_type, contact_state, alert_title, alert_message,
+            bundle_notification_message, alert_tag, bundle_tag and
+            elapsed_minutes.
           default: []
           selector:
-            condition: {}
-        health_alert_conditions:
-          name: "Unavailable / silent sensor warnings: send only when"
-          description: >-
-            Example: State, choose a person, enter not_home. Applies to
-            unknown, unavailable and stale last_seen. Independent from
-            open alerts. Leave empty to always allow health alerts.
-          default: []
-          selector:
-            condition: {}
-    advanced_section:
-      name: "⚙️ 05 | Advanced options"
-      icon: mdi:tune
-      collapsed: true
-      input:
+            action: {}
         notify_services:
           name: "Legacy mobile notify action IDs (optional)"
           description: >-
@@ -392,6 +405,9 @@ variables:
   recovery_enabled: !input recovery_message
   repeat_minutes: !input reminder_minutes
   reminder_offsets_csv: !input reminder_offsets_minutes
+  bundle_tag_prefix: >-
+    contact_guard_bundle_{{ (this.entity_id if this is defined
+      and this.entity_id is defined else 'watchdog') | replace('.', '_') }}
   notification_url: !input mobile_click_url
   android_color: !input notification_color
   android_icon: !input notification_icon
@@ -572,52 +588,153 @@ actions:
                                         - variables:
                                             alert_title: !input alert_title_template
                                             alert_message: !input alert_message_template
+                                        - variables:
+                                            bundle_members: >-
+                                              {% set ns = namespace(items=[], seen=[]) %}
+                                              {% set now_ts = as_timestamp(now()) %}
+                                              {% for candidate_room in rooms | default([], true)
+                                                 if candidate_room is mapping and candidate_room.get('enabled', true) %}
+                                                {% set issue = candidate_room.get('issue_state', 'on') %}
+                                                {% set open_delay = ((candidate_room.get('open_after_minutes', 0) | int(0))
+                                                                     or (global_open_minutes | int(10))) * 60 %}
+                                                {% set offline_delay = ((candidate_room.get('offline_after_minutes', 0) | int(0))
+                                                                        or (global_offline_minutes | int(20))) * 60 %}
+                                                {% set silent_delay = (candidate_room.get('last_seen_hours', 0) | int(0)) * 3600 %}
+                                                {% for eid in candidate_room.get('contacts', []) | default([], true) %}
+                                                  {% if eid is string and eid not in ns.seen %}
+                                                    {% set state_obj = states[eid] %}
+                                                    {% set s = states(eid) %}
+                                                    {% set changed_at = as_timestamp(state_obj.last_changed, 0)
+                                                                        if state_obj is not none else 0 %}
+                                                    {% set last_seen = as_timestamp(state_attr(eid, 'last_seen'), 0) %}
+                                                    {% set active = (alert_type == 'open' and s == issue)
+                                                                    or (alert_type == 'offline'
+                                                                        and candidate_room.get('monitor_offline', true)
+                                                                        and s in ['unknown', 'unavailable'])
+                                                                    or (alert_type == 'silent' and silent_delay > 0
+                                                                        and s in ['on', 'off'] and last_seen > 0) %}
+                                                    {% set started_at = last_seen if alert_type == 'silent' else changed_at %}
+                                                    {% set delay = open_delay if alert_type == 'open' else
+                                                                   offline_delay if alert_type == 'offline' else silent_delay %}
+                                                    {% if active and started_at > 0 and now_ts - started_at >= delay %}
+                                                      {% set past_deadline = now_ts - started_at - delay %}
+                                                      {% set periodic = (repeat_minutes | int(0)) * 60 %}
+                                                      {% set offsets = namespace(enabled=false, due=false) %}
+                                                      {% for raw_offset in (reminder_offsets_csv | string).split(',')[:12] %}
+                                                        {% set token = raw_offset | trim %}
+                                                        {% if is_number(token) %}
+                                                          {% set value = token | float(0) %}
+                                                          {% if value == (value | int(0)) and 1 <= value <= 1440 %}
+                                                            {% set offsets.enabled = true %}
+                                                            {% if past_deadline >= value * 60 and past_deadline - value * 60 < 60 %}
+                                                              {% set offsets.due = true %}
+                                                            {% endif %}
+                                                          {% endif %}
+                                                        {% endif %}
+                                                      {% endfor %}
+                                                      {% set due_now = trigger.id == 'startup' or
+                                                                       past_deadline < 60 or offsets.due or
+                                                                       (not offsets.enabled and periodic > 0 and
+                                                                        past_deadline >= periodic and
+                                                                        past_deadline % periodic < 60) %}
+                                                      {% set ns.items = ns.items + [{
+                                                        'room_name': candidate_room.get('name', 'Unnamed room'),
+                                                        'contact_id': eid,
+                                                        'contact_label': state_attr(eid, 'friendly_name') or eid,
+                                                        'contact_state': s,
+                                                        'issue_state': issue,
+                                                        'elapsed_minutes': ((now_ts - started_at) / 60) | int(0),
+                                                        'notify_due': due_now
+                                                      }] %}
+                                                      {% set ns.seen = ns.seen + [eid] %}
+                                                    {% endif %}
+                                                  {% endif %}
+                                                {% endfor %}
+                                              {% endfor %}
+                                              {{ ns.items }}
+                                        - variables:
+                                            bundle_tag: "{{ bundle_tag_prefix ~ '_' ~ alert_type }}"
+                                            alert_is_reminder: >-
+                                              {{ trigger.id != 'startup' and
+                                                 (elapsed_seconds | float(0)) -
+                                                 (alert_delay | float(0)) >= 60 }}
+                                            bundle_notification_title: >-
+                                              {{ alert_title | trim }}
+                                              {% if bundle_members | count > 1 %}
+                                                (+{{ (bundle_members | count) - 1 }} more)
+                                              {% endif %}
+                                            bundle_notification_message: |-
+                                              {{ alert_message | trim }}
+                                              {% if bundle_members | count > 1 %}
+
+                                              Other unresolved {{ alert_type }} contacts:
+                                                {% for member in bundle_members
+                                                   if member.contact_id != contact_id %}
+                                              - {{ member.contact_label }} ({{ member.room_name }}, {{ member.elapsed_minutes }} min)
+                                                {% endfor %}
+                                              {% endif %}
+                                        - variables:
+                                            bundle_should_send: >-
+                                              {% set due_members = bundle_members | selectattr('notify_due') | list %}
+                                              {{ due_members | count > 0 and
+                                                 due_members[0].contact_id == contact_id }}
                                         - if:
                                             - condition: template
-                                              value_template: "{{ ha_notifications }}"
+                                              value_template: "{{ bundle_should_send }}"
                                           then:
-                                            - action: persistent_notification.create
-                                              data:
-                                                notification_id: "{{ alert_tag }}"
-                                                title: "{{ alert_title }}"
-                                                message: "{{ alert_message }}"
-                                              continue_on_error: true
-                                        - if:
-                                            - condition: template
-                                              value_template: "{{ notify_entity_ids | count > 0 }}"
-                                          then:
-                                            - action: notify.send_message
-                                              target:
-                                                entity_id: "{{ notify_entity_ids }}"
-                                              data:
-                                                title: "{{ alert_title }}"
-                                                message: "{{ alert_message }}"
-                                              continue_on_error: true
-                                        - repeat:
-                                            for_each: "{{ notify_csv.split(',') | map('trim') | reject('eq', '') | list }}"
-                                            sequence:
-                                              - variables:
-                                                  notify_action: "{{ repeat.item }}"
-                                              - if:
-                                                  - condition: template
-                                                    value_template: >-
-                                                      {{ notify_action | regex_match('^notify\\.[a-z0-9_]+$') }}
-                                                then:
-                                                  - action: "{{ notify_action }}"
-                                                    data:
-                                                      title: "{{ alert_title }}"
-                                                      message: "{{ alert_message }}"
-                                                      data:
-                                                        tag: "{{ alert_tag }}"
-                                                        url: "{{ notification_url }}"
-                                                        clickAction: "{{ notification_url }}"
-                                                        color: "{{ android_color }}"
-                                                        notification_icon: "{{ android_icon }}"
-                                                        push:
-                                                          interruption-level: "{{ ios_level }}"
-                                                    continue_on_error: true
-                                        - choose: []
-                                          default: !input on_alert_actions
+                                            - if:
+                                                - condition: template
+                                                  value_template: "{{ ha_notifications }}"
+                                              then:
+                                                - action: persistent_notification.create
+                                                  data:
+                                                    notification_id: "{{ bundle_tag }}"
+                                                    title: "{{ bundle_notification_title }}"
+                                                    message: "{{ bundle_notification_message }}"
+                                                  continue_on_error: true
+                                            - if:
+                                                - condition: template
+                                                  value_template: "{{ notify_entity_ids | count > 0 }}"
+                                              then:
+                                                - action: notify.send_message
+                                                  target:
+                                                    entity_id: "{{ notify_entity_ids }}"
+                                                  data:
+                                                    title: "{{ bundle_notification_title }}"
+                                                    message: "{{ bundle_notification_message }}"
+                                                  continue_on_error: true
+                                            - repeat:
+                                                for_each: "{{ notify_csv.split(',') | map('trim') | reject('eq', '') | list }}"
+                                                sequence:
+                                                  - variables:
+                                                      notify_action: "{{ repeat.item }}"
+                                                  - if:
+                                                      - condition: template
+                                                        value_template: >-
+                                                          {{ notify_action | regex_match('^notify\\.[a-z0-9_]+$') }}
+                                                    then:
+                                                      - action: "{{ notify_action }}"
+                                                        data:
+                                                          title: "{{ bundle_notification_title }}"
+                                                          message: "{{ bundle_notification_message }}"
+                                                          data:
+                                                            tag: "{{ bundle_tag }}"
+                                                            url: "{{ notification_url }}"
+                                                            clickAction: "{{ notification_url }}"
+                                                            color: "{{ android_color }}"
+                                                            notification_icon: "{{ android_icon }}"
+                                                            push:
+                                                              interruption-level: "{{ ios_level }}"
+                                                        continue_on_error: true
+                                            - if:
+                                                - condition: template
+                                                  value_template: "{{ alert_is_reminder }}"
+                                              then:
+                                                - choose: []
+                                                  default: !input on_reminder_actions
+                                              else:
+                                                - choose: []
+                                                  default: !input on_alert_actions
       - alias: "Clear per-contact alerts when a sensor recovers or closes"
         conditions:
           - condition: template
@@ -714,6 +831,79 @@ actions:
                                     {% else %}
                                       {{ contact_label }} in {{ room_name }} has resumed updating its last_seen attribute.
                                     {% endif %}
+                              - variables:
+                                  bundle_members: >-
+                                    {% set ns = namespace(items=[], seen=[]) %}
+                                    {% set now_ts = as_timestamp(now()) %}
+                                    {% for candidate_room in rooms | default([], true)
+                                       if candidate_room is mapping and candidate_room.get('enabled', true) %}
+                                      {% set issue = candidate_room.get('issue_state', 'on') %}
+                                      {% set open_delay = ((candidate_room.get('open_after_minutes', 0) | int(0))
+                                                           or (global_open_minutes | int(10))) * 60 %}
+                                      {% set offline_delay = ((candidate_room.get('offline_after_minutes', 0) | int(0))
+                                                              or (global_offline_minutes | int(20))) * 60 %}
+                                      {% set silent_delay = (candidate_room.get('last_seen_hours', 0) | int(0)) * 3600 %}
+                                      {% for eid in candidate_room.get('contacts', []) | default([], true) %}
+                                        {% if eid is string and eid not in ns.seen %}
+                                          {% set state_obj = states[eid] %}
+                                          {% set s = states(eid) %}
+                                          {% set changed_at = as_timestamp(state_obj.last_changed, 0)
+                                                              if state_obj is not none else 0 %}
+                                          {% set last_seen = as_timestamp(state_attr(eid, 'last_seen'), 0) %}
+                                          {% set active = (alert_type == 'open' and s == issue)
+                                                          or (alert_type == 'offline'
+                                                              and candidate_room.get('monitor_offline', true)
+                                                              and s in ['unknown', 'unavailable'])
+                                                          or (alert_type == 'silent' and silent_delay > 0
+                                                              and s in ['on', 'off'] and last_seen > 0) %}
+                                          {% set started_at = last_seen if alert_type == 'silent' else changed_at %}
+                                          {% set delay = open_delay if alert_type == 'open' else
+                                                         offline_delay if alert_type == 'offline' else silent_delay %}
+                                          {% if active and started_at > 0 and now_ts - started_at >= delay %}
+                                            {% set past_deadline = now_ts - started_at - delay %}
+                                            {% set periodic = (repeat_minutes | int(0)) * 60 %}
+                                            {% set offsets = namespace(enabled=false, due=false) %}
+                                            {% for raw_offset in (reminder_offsets_csv | string).split(',')[:12] %}
+                                              {% set token = raw_offset | trim %}
+                                              {% if is_number(token) %}
+                                                {% set value = token | float(0) %}
+                                                {% if value == (value | int(0)) and 1 <= value <= 1440 %}
+                                                  {% set offsets.enabled = true %}
+                                                  {% if past_deadline >= value * 60 and past_deadline - value * 60 < 60 %}
+                                                    {% set offsets.due = true %}
+                                                  {% endif %}
+                                                {% endif %}
+                                              {% endif %}
+                                            {% endfor %}
+                                            {% set due_now = trigger.id == 'startup' or
+                                                             past_deadline < 60 or offsets.due or
+                                                             (not offsets.enabled and periodic > 0 and
+                                                              past_deadline >= periodic and
+                                                              past_deadline % periodic < 60) %}
+                                            {% set ns.items = ns.items + [{
+                                              'room_name': candidate_room.get('name', 'Unnamed room'),
+                                              'contact_id': eid,
+                                              'contact_label': state_attr(eid, 'friendly_name') or eid,
+                                              'contact_state': s,
+                                              'issue_state': issue,
+                                              'elapsed_minutes': ((now_ts - started_at) / 60) | int(0),
+                                              'notify_due': due_now
+                                            }] %}
+                                            {% set ns.seen = ns.seen + [eid] %}
+                                          {% endif %}
+                                        {% endif %}
+                                      {% endfor %}
+                                    {% endfor %}
+                                    {{ ns.items }}
+                              - variables:
+                                  bundle_tag: "{{ bundle_tag_prefix ~ '_' ~ alert_type }}"
+                                  bundle_recovery_title: >-
+                                    {{ bundle_members | count }} unresolved {{ alert_type }} contact(s)
+                                  bundle_recovery_message: |-
+                                    Remaining {{ alert_type }} contacts:
+                                    {% for member in bundle_members %}
+                                    - {{ member.contact_label }} ({{ member.room_name }}, {{ member.elapsed_minutes }} min)
+                                    {% endfor %}
                               - if:
                                   - condition: template
                                     value_template: "{{ resolve_clear }}"
@@ -742,6 +932,92 @@ actions:
                                                 data:
                                                   tag: "{{ alert_tag }}"
                                               continue_on_error: true
+                              - if:
+                                  - condition: template
+                                    value_template: "{{ resolve_clear }}"
+                                then:
+                                  - if:
+                                      - condition: template
+                                        value_template: "{{ bundle_members | count == 0 }}"
+                                    then:
+                                      - if:
+                                          - condition: template
+                                            value_template: "{{ ha_notifications }}"
+                                        then:
+                                          - action: persistent_notification.dismiss
+                                            data:
+                                              notification_id: "{{ bundle_tag }}"
+                                            continue_on_error: true
+                                      - repeat:
+                                          for_each: "{{ notify_csv.split(',') | map('trim') | reject('eq', '') | list }}"
+                                          sequence:
+                                            - variables:
+                                                notify_action: "{{ repeat.item }}"
+                                            - if:
+                                                - condition: template
+                                                  value_template: >-
+                                                    {{ notify_action | regex_match('^notify\\.mobile_app_[a-z0-9_]+$') }}
+                                              then:
+                                                - action: "{{ notify_action }}"
+                                                  data:
+                                                    message: "clear_notification"
+                                                    data:
+                                                      tag: "{{ bundle_tag }}"
+                                                  continue_on_error: true
+                                    else:
+                                      - if:
+                                          - condition: and
+                                            conditions:
+                                              - condition: and
+                                                conditions: !input notify_conditions
+                                              - condition: or
+                                                conditions:
+                                                  - condition: and
+                                                    conditions:
+                                                      - condition: template
+                                                        value_template: "{{ alert_type == 'open' }}"
+                                                      - condition: and
+                                                        conditions: !input open_alert_conditions
+                                                  - condition: and
+                                                    conditions:
+                                                      - condition: template
+                                                        value_template: "{{ alert_type in ['offline', 'silent'] }}"
+                                                      - condition: and
+                                                        conditions: !input health_alert_conditions
+                                        then:
+                                          - if:
+                                              - condition: template
+                                                value_template: "{{ ha_notifications }}"
+                                            then:
+                                              - action: persistent_notification.create
+                                                data:
+                                                  notification_id: "{{ bundle_tag }}"
+                                                  title: "{{ bundle_recovery_title }}"
+                                                  message: "{{ bundle_recovery_message }}"
+                                                continue_on_error: true
+                                          - repeat:
+                                              for_each: "{{ notify_csv.split(',') | map('trim') | reject('eq', '') | list }}"
+                                              sequence:
+                                                - variables:
+                                                    notify_action: "{{ repeat.item }}"
+                                                - if:
+                                                    - condition: template
+                                                      value_template: >-
+                                                        {{ notify_action | regex_match('^notify\\.mobile_app_[a-z0-9_]+$') }}
+                                                  then:
+                                                    - action: "{{ notify_action }}"
+                                                      data:
+                                                        title: "{{ bundle_recovery_title }}"
+                                                        message: "{{ bundle_recovery_message }}"
+                                                        data:
+                                                          tag: "{{ bundle_tag }}"
+                                                          url: "{{ notification_url }}"
+                                                          clickAction: "{{ notification_url }}"
+                                                          color: "{{ android_color }}"
+                                                          notification_icon: "{{ android_icon }}"
+                                                          push:
+                                                            interruption-level: "{{ ios_level }}"
+                                                      continue_on_error: true
                               - if:
                                   - condition: template
                                     value_template: "{{ recovery_enabled }}"
