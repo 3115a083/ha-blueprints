@@ -49,6 +49,7 @@ async def build(tmp_path,rooms,monitored,**extra):
     hass.services.async_register("notify","mobile_app_phone",receive)
     hass.services.async_register("notify","send_message",receive)
     hass.services.async_register("system_log","write",receive)
+    hass.services.async_register("test","record",receive)
     cfg=expanded(rooms,monitored,**extra)
     steps=await async_validate_actions_config(
         hass,cv.SCRIPT_SCHEMA([{"variables":cfg["variables"]},*cfg["actions"]])
@@ -264,5 +265,77 @@ async def test_legacy_shared_conditions_still_gate_both_alert_types(tmp_path):
         hass.states.async_set("input_boolean.alerts_enabled","on")
         await run()
         assert len([x for x in calls if x[:2]==("notify","send_message")])==2
+    finally:
+        await hass.async_stop()
+
+
+
+@pytest.mark.asyncio
+async def test_custom_message_and_actions_run_after_notifications(tmp_path):
+    sensor="binary_sensor.study_window"
+    hass,calls,run=await build(
+        tmp_path,[room("Study",[sensor])],[sensor],
+        notify_entities=["notify.study_phone"],
+        alert_title_template="{{ room_name }}: {{ alert_type }} warning",
+        alert_message_template=(
+            "{{ contact_label }} ({{ contact_id }}) in {{ room_name }} "
+            "has been {{ alert_type }} for {{ elapsed_minutes }} minutes."
+        ),
+        on_alert_actions=[{
+            "action":"test.record",
+            "data":{
+                "message":"{{ alert_message }}",
+                "contact":"{{ contact_id }}",
+            },
+        }],
+    )
+    try:
+        hass.states.async_set(sensor,"on",{"friendly_name":"Study window"},timestamp=time()-630)
+        await run()
+        assert [(domain,service) for domain,service,_ in calls]==[
+            ("persistent_notification","create"),
+            ("notify","send_message"),
+            ("test","record"),
+        ]
+        title=calls[0][2]["title"]
+        message=calls[0][2]["message"]
+        assert title=="Study: open warning"
+        assert "Study window (binary_sensor.study_window) in Study" in message
+        assert calls[1][2]["message"]==message
+        assert calls[2][2]["message"]==message
+        assert calls[2][2]["contact"]==sensor
+    finally:
+        await hass.async_stop()
+
+
+@pytest.mark.asyncio
+async def test_specific_reminders_at_five_and_fifteen_minutes(tmp_path):
+    sensor="binary_sensor.hall_window"
+    hass,calls,run=await build(
+        tmp_path,[room("Hall",[sensor])],[sensor],
+        reminder_offsets_minutes="5,15",reminder_minutes=2,
+        on_alert_actions=[{"action":"test.record","data":{"alert":"{{ alert_type }}"}}],
+    )
+    try:
+        for elapsed,expected in (
+            (630,True),      # first warning at 10 min
+            (735,False),     # legacy 2-minute period suppressed
+            (930,True),      # first reminder at 15 min of open state
+            (990,False),     # no second minute of the same reminder
+            (1230,False),
+            (1530,True),     # second reminder at 25 min of open state
+            (1590,False),
+            (1830,False),    # no unrequested repeat
+        ):
+            hass.states.async_set(sensor,"off")
+            hass.states.async_set(sensor,"on",timestamp=time()-elapsed)
+            calls.clear()
+            await run()
+            creates=[x for x in calls if x[:2]==("persistent_notification","create")]
+            actions=[x for x in calls if x[:2]==("test","record")]
+            assert bool(creates)==expected,(elapsed,calls)
+            assert len(actions)==len(creates),(elapsed,calls)
+            if creates:
+                assert creates[0][2]["notification_id"]=="contact_guard_binary_sensor_hall_window_open"
     finally:
         await hass.async_stop()

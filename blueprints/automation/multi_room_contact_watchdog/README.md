@@ -11,7 +11,7 @@ One Home Assistant automation monitors any number of independent rooms, with as 
 
 1. Under **01 | Sensor monitoring**, select **every individual contact sensor** that should be watched.
 2. Under **02 | Rooms and contacts**, click **Add** for each room. Give it a name and select the contact sensors belonging to it. **Use the same entities as in step 1.** Defaults: ON means open, open alert after 10 minutes, unavailable alert after 20 minutes. These defaults can be overridden individually per room.
-3. Under **03 | Notifications**, choose your notification recipients using the **notify entity picker**. You may select several targets. Persistent Home Assistant notifications remain enabled by default. If an older phone integration only exposes a `notify.mobile_app_*` action rather than a notify entity, keep using the optional legacy input under **05 | Advanced options**.
+3. Under **03 | Notifications**, choose your notification recipients using the **notify entity picker**. You may select several targets. Persistent Home Assistant notifications remain enabled by default. Edit the prefilled notification title/message templates, enter optional reminder offsets (such as `5,15`), and configure visual **Actions AFTER each warning or reminder** if needed. If an older phone integration only exposes a `notify.mobile_app_*` action rather than a notify entity, keep using the optional legacy input under **05 | Advanced options**.
 4. Under **04 | When to send warnings**, optionally add **separate conditions** for open contacts and for unavailable/silent sensors. If left empty, each warning type operates normally.
 
 Example layout:
@@ -44,7 +44,30 @@ Each item has a distinct, stable notification ID/tag. Multiple rooms and contact
 
 **Automatic clear** is enabled by default. It dismisses the matching persistent Home Assistant notification and sends `clear_notification` to configured `notify.mobile_app_*` services. Other notification providers are not sent the clear command because they may treat it as a literal message. Optionally enable a **recovery notification** so the phone explicitly says the contact is closed or online again.
 
-**Reminders** are disabled by default. Set **Repeat unresolved alerts every N minutes** to e.g. 30 to receive an alert at the initial deadline and approximately every 30 minutes thereafter. The initial alert is sent once per unresolved incident in normal operation. HA startup/reload also checks overdue incidents to avoid silent missed alerts after downtime, but may generate a replacement notification during a restart. Mobile tags reduce visual duplication but do not guarantee suppression of vibration or sound.
+**Reminders** are disabled by default. Enter **Additional reminders after first alert (minutes)** as comma-separated offsets, for example `5,15`, to send one warning at the initial deadline, then additional warnings 5 and 15 minutes after that deadline. For a contact configured with an initial 10-minute delay, alerts are due after 10, 15 and 25 minutes of being open. To alert at 5 and 15 minutes of being open, set the initial open delay to 5 and the reminder offset to `10`. Each contact and alert type is scheduled independently.
+
+Only whole positive minutes between 1 and 1440 are accepted; at most the first 12 comma-separated entries are considered. Invalid entries are ignored, duplicates have no extra effect, and an empty field disables this schedule. If no valid specific offsets are supplied, the pre-existing **Legacy periodic reminder interval** (under Advanced options) still works, e.g. `30` for periodic alerts. Specific offsets take precedence over the periodic interval, so they will not combine into surprise extra notifications.
+
+The first alert is sent once per unresolved incident in normal operation. Each reminder is evaluated in its one-minute due window; skipped windows are not replayed later. HA startup/reload checks overdue incidents to avoid silent missed alerts, but may generate a replacement notification during a restart. Mobile tags reduce visual duplication but do not guarantee suppression of vibration or sound.
+
+### Customize notification text and actions
+
+Both **Notification title** and **Notification message** are editable **Jinja template** fields with working English defaults for open contacts, unavailable/unknown contacts and silent last_seen warnings. Copy these snippets into either field as needed:
+
+| Snippet | Meaning |
+| --- | --- |
+| `{{ contact_label }}` | Friendly name of the sensor that triggered the alert |
+| `{{ contact_id }}` | Entity ID, for example `binary_sensor.window` |
+| `{{ room_name }}` | Room name from the room entry |
+| `{{ alert_type }}` | `open`, `offline` or `silent` |
+| `{{ contact_state }}` | Current Home Assistant sensor state |
+| `{{ elapsed_minutes }}` | Minutes elapsed since the triggering state or last_seen timestamp |
+| `{{ issue_state }}` | Contact state configured as open for that room |
+| `{{ alert_tag }}` | Stable notification tag for the sensor and alert type |
+
+For example, replace the message with `Attention: {{ contact_label }} in {{ room_name }}. Type: {{ alert_type }}. Duration: {{ elapsed_minutes }} min.` This applies to persistent notifications, modern notify entities and legacy mobile notifications alike. Existing automations that omit the new inputs retain the previous default title/message wording.
+
+The visual **Actions AFTER each warning or reminder** selector is now located directly under Notifications. It keeps the existing `on_alert_actions` input key: configured actions migrate without changes. Actions execute after the configured notification services have been attempted (with `continue_on_error` for provider failures), for the initial warning and each scheduled reminder. They do not run when notification conditions suppress an alert or when a contact has recovered. Recovery actions remain separately configurable under Advanced options.
 
 ### Independent notification conditions
 
@@ -59,9 +82,9 @@ Use either rule, both rules or neither. Conditions inside each list are **AND** 
 
 Conditions are checked when a scheduled alert is due. They **do not stop sensor monitoring** and they **never block automatic clearing or recovery**. An unavailable sensor is still detected while an open-contact-only condition is false.
 
-**Important one-shot behavior:** When a condition is false at the initial warning deadline and reminders are disabled (the default), an alert may be missed even if the condition later becomes true. Enable **Repeat unresolved alerts** (for example 5 minutes) if you want the blueprint to reevaluate eligibility and notify after a condition later becomes true. This does not create an immediate threshold-crossing event: it checks again on the reminder schedule. The existing optional **Legacy shared conditions for BOTH warning types** is still respected for migrated automations, in addition to these two new lists.
+**Important one-shot behavior:** When a condition is false at the initial warning deadline and reminders are disabled (the default), an alert may be missed even if the condition later becomes true. Configure specific reminder offsets (for example `5,15`) or the legacy periodic interval to reevaluate notification eligibility at the next due time. This does not create an immediate threshold-crossing event: it checks again on the reminder schedule. The existing optional **Legacy shared conditions for BOTH warning types** is still respected for migrated automations, in addition to these two new lists.
 
-Custom alert and recovery actions remain available in Advanced options, using `room_name`, `contact_id`, `contact_label`, `alert_type` and the corresponding title/message/tag variables.
+Custom alert actions are in Notifications; custom recovery actions remain under Advanced options. Both use `room_name`, `contact_id`, `contact_label`, `alert_type` and the corresponding title/message/tag variables.
 
 ## Zigbee failure detection: exact limits
 
@@ -118,7 +141,9 @@ The blueprint relies on contact sensor states, not on event-based battery-teleme
 - Temporarily set a test contact state to `unavailable`, wait beyond the offline grace, and restore it. Verify only the matching alert is cleared.
 - Check `unknown` separately from `unavailable`, and avoid misclassifying sensor startup transitions.
 - If last_seen is supported, simulate a stale timestamp and a fresh update. If unsupported, confirm silence detection is inert.
-- Turn on reminders for testing and verify their interval and stable tags. Turn reminders back off afterward.
+- Configure reminder offsets `5,15` and verify the initial notification and both later reminders for the same contact; confirm no further periodic alerts after the last offset. Test old periodic interval settings separately.
+- Edit the title/message templates and confirm sensor/room substitution for open, offline and silent warnings. Add a visual custom action and verify it runs after notifications are attempted.
+- Verify the existing `on_alert_actions` key still works after moving the input into the Notifications section.
 - Test Home Assistant restart and automation reload with an already-open contact.
 - Validate push and tag deletion on each configured mobile app; notification service implementations differ.
 
