@@ -905,44 +905,7 @@ actions:
                                             - if:
                                                 - condition: template
                                                   value_template: >-
-                                                    {{ notify_action | regex_match('^notify\\.[a-z0-9_]+
-                                then:
-                                  - if:
-                                      - condition: template
-                                        value_template: "{{ notify_entity_ids | count > 0 }}"
-                                    then:
-                                      - action: notify.send_message
-                                        target:
-                                          entity_id: "{{ notify_entity_ids }}"
-                                        data:
-                                          title: "{{ recovery_title }}"
-                                          message: "{{ recovery_message }}"
-                                        continue_on_error: true
-                                  - repeat:
-                                      for_each: "{{ notify_csv.split(',') | map('trim') | reject('eq', '') | list }}"
-                                      sequence:
-                                        - variables:
-                                            notify_action: "{{ repeat.item }}"
-                                        - if:
-                                            - condition: template
-                                              value_template: >-
-                                                {{ notify_action | regex_match('^notify\\.[a-z0-9_]+$') }}
-                                          then:
-                                            - action: "{{ notify_action }}"
-                                              data:
-                                                title: "{{ recovery_title }}"
-                                                message: "{{ recovery_message }}"
-                                                data:
-                                                  tag: "{{ alert_tag }}_recovered"
-                                              continue_on_error: true
-                              - choose: []
-                                default: !input on_recovery_actions
-
-mode: queued
-max: 20
-max_exceeded: warning
-) and
-                                                       notify_action.startswith('notify.mobile_app_') }}
+                                                    {{ notify_action | regex_match('^notify\\.mobile_app_[a-z0-9_]+$') }}
                                               then:
                                                 - action: "{{ notify_action }}"
                                                   data:
@@ -989,43 +952,7 @@ max_exceeded: warning
                                                 - if:
                                                     - condition: template
                                                       value_template: >-
-                                                        {{ notify_action | regex_match('^notify\\.mobile_app_[a-z0-9_]+
-                                then:
-                                  - if:
-                                      - condition: template
-                                        value_template: "{{ notify_entity_ids | count > 0 }}"
-                                    then:
-                                      - action: notify.send_message
-                                        target:
-                                          entity_id: "{{ notify_entity_ids }}"
-                                        data:
-                                          title: "{{ recovery_title }}"
-                                          message: "{{ recovery_message }}"
-                                        continue_on_error: true
-                                  - repeat:
-                                      for_each: "{{ notify_csv.split(',') | map('trim') | reject('eq', '') | list }}"
-                                      sequence:
-                                        - variables:
-                                            notify_action: "{{ repeat.item }}"
-                                        - if:
-                                            - condition: template
-                                              value_template: >-
-                                                {{ notify_action | regex_match('^notify\\.[a-z0-9_]+$') }}
-                                          then:
-                                            - action: "{{ notify_action }}"
-                                              data:
-                                                title: "{{ recovery_title }}"
-                                                message: "{{ recovery_message }}"
-                                                data:
-                                                  tag: "{{ alert_tag }}_recovered"
-                                              continue_on_error: true
-                              - choose: []
-                                default: !input on_recovery_actions
-
-mode: queued
-max: 20
-max_exceeded: warning
-) }}
+                                                        {{ notify_action | regex_match('^notify\\.mobile_app_[a-z0-9_]+$') }}
                                                   then:
                                                     - action: "{{ notify_action }}"
                                                       data:
