@@ -334,7 +334,8 @@ async def test_specific_reminders_at_five_and_fifteen_minutes(tmp_path):
             creates=[x for x in calls if x[:2]==("persistent_notification","create")]
             actions=[x for x in calls if x[:2]==("test","record")]
             assert bool(creates)==expected,(elapsed,calls)
-            assert len(actions)==len(creates),(elapsed,calls)
+            # The migrated on_alert_actions input runs only for the first warning.
+            assert len(actions)==(1 if elapsed==630 else 0),(elapsed,calls)
             if creates:
                 assert creates[0][2]["notification_id"]=="contact_guard_open_summary"
     finally:
