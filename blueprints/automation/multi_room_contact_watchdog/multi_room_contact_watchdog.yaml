@@ -9,7 +9,8 @@ blueprint:
     Monitor any number of rooms, doors, and windows with ONE automation.
     Notify when a contact stays open too long, a contact becomes
     unknown/unavailable, or (optionally) its last_seen attribute is stale.
-    Send independent messages identifying the exact room and sensor.
+    Group notifications for multiple overdue contacts of the same
+    warning type, identifying each affected room and sensor.
     Support selectable notify entities, optional legacy Companion
     notification actions, persistent notifications and reminders.
     Configure separate visual conditions for open-contact warnings

@@ -448,6 +448,8 @@ async def test_warning_and_reminder_actions_are_separate(tmp_path):
         await run()
         assert [x[2]["kind"] for x in calls if x[:2]==("test","record")]==["initial"]
         calls.clear()
+        # Reset the test state so HA updates last_changed for the second run.
+        hass.states.async_set(sensor,"off")
         hass.states.async_set(sensor,"on",timestamp=time()-930)
         await run()
         assert [x[2]["kind"] for x in calls if x[:2]==("test","record")]==["reminder"]

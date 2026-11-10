@@ -40,7 +40,7 @@ For each sensor, the automation distinguishes these independent alert types:
 | **Unavailable / unknown** | HA contact state remains unknown/unavailable | 20 min | Contact reports ON or OFF |
 | **Silent last_seen** | Valid contact still shows ON/OFF but its last_seen attribute is old | Disabled | last_seen becomes fresh again |
 
-Each item has a distinct, stable notification ID/tag. Multiple rooms and contacts produce independent messages. Persistent notifications are created/updated by ID. Mobile app notifications reuse their tags so repeated alerts can replace prior phone notifications rather than creating a list of unrelated warnings, subject to app behavior.
+Each issue category has a distinct, stable shared notification ID/tag. Multiple rooms and contacts of the same alert type are combined into one summary, while different alert types stay separate. Persistent notifications update by ID. Legacy mobile app notifications reuse their group tags so subsequent alerts can replace earlier ones, subject to the mobile app. Generic notify entities cannot guarantee replacement.
 
 **Automatic clear** is enabled by default. It dismisses the matching persistent Home Assistant notification and sends `clear_notification` to configured `notify.mobile_app_*` services. Other notification providers are not sent the clear command because they may treat it as a literal message. Optionally enable a **recovery notification** so the phone explicitly says the contact is closed or online again.
 
