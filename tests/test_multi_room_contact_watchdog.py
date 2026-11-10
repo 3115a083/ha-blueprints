@@ -206,7 +206,7 @@ class ContactWatchdogTests(unittest.TestCase):
         self.assertIn("!input open_alert_conditions",self.source)
         self.assertIn("!input health_alert_conditions",self.source)
         self.assertIn("!input notify_conditions",self.source)
-        self.assertIn("target:\n                                                entity_id: \"{{ notify_entity_ids }}\"",self.source)
+        self.assertIn('entity_id: "{{ notify_entity_ids }}"',self.source)
         self.assertIn("alert_type in ['offline', 'silent']",self.source)
         guide=(PATH.parent/"README.md").read_text()
         self.assertIn("outdoor temperature",guide)

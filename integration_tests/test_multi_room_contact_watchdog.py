@@ -144,7 +144,7 @@ async def test_silent_last_seen_is_explicit_opt_in(tmp_path):
         await run("startup")
         create=[x for x in calls if x[:2]==("persistent_notification","create")]
         assert len(create)==1
-        assert create[0][2]["notification_id"].endswith("_silent")
+        assert create[0][2]["notification_id"]=="contact_guard_silent_summary"
         assert "Living room" in create[0][2]["title"]
     finally:
         await hass.async_stop()
