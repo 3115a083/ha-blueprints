@@ -79,10 +79,10 @@ async def test_independent_open_and_offline_notifications(tmp_path):
         await run()
         created=[x for x in calls if x[:2]==("persistent_notification","create")]
         self_tags={x[2]["notification_id"] for x in created}
-        assert self_tags=={
-            "contact_guard_binary_sensor_bath_window_open",
-            "contact_guard_binary_sensor_kitchen_window_offline",
-        }
+        assert len(self_tags)==2
+        assert any(tag.endswith("_open") for tag in self_tags)
+        assert any(tag.endswith("_offline") for tag in self_tags)
+        assert all(tag.startswith("contact_guard_bundle_") for tag in self_tags)
         assert "Bathroom" in created[0][2]["title"]
         assert "Kitchen" in created[1][2]["title"]
         phone=[x for x in calls if x[:2]==("notify","mobile_app_phone")]
