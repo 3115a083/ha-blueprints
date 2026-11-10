@@ -617,13 +617,34 @@ actions:
                                                     {% set delay = open_delay if alert_type == 'open' else
                                                                    offline_delay if alert_type == 'offline' else silent_delay %}
                                                     {% if active and started_at > 0 and now_ts - started_at >= delay %}
+                                                      {% set past_deadline = now_ts - started_at - delay %}
+                                                      {% set periodic = (repeat_minutes | int(0)) * 60 %}
+                                                      {% set offsets = namespace(enabled=false, due=false) %}
+                                                      {% for raw_offset in (reminder_offsets_csv | string).split(',')[:12] %}
+                                                        {% set token = raw_offset | trim %}
+                                                        {% if is_number(token) %}
+                                                          {% set value = token | float(0) %}
+                                                          {% if value == (value | int(0)) and 1 <= value <= 1440 %}
+                                                            {% set offsets.enabled = true %}
+                                                            {% if past_deadline >= value * 60 and past_deadline - value * 60 < 60 %}
+                                                              {% set offsets.due = true %}
+                                                            {% endif %}
+                                                          {% endif %}
+                                                        {% endif %}
+                                                      {% endfor %}
+                                                      {% set due_now = trigger.id == 'startup' or
+                                                                       past_deadline < 60 or offsets.due or
+                                                                       (not offsets.enabled and periodic > 0 and
+                                                                        past_deadline >= periodic and
+                                                                        past_deadline % periodic < 60) %}
                                                       {% set ns.items = ns.items + [{
                                                         'room_name': candidate_room.get('name', 'Unnamed room'),
                                                         'contact_id': eid,
                                                         'contact_label': state_attr(eid, 'friendly_name') or eid,
                                                         'contact_state': s,
                                                         'issue_state': issue,
-                                                        'elapsed_minutes': ((now_ts - started_at) / 60) | int(0)
+                                                        'elapsed_minutes': ((now_ts - started_at) / 60) | int(0),
+                                                        'notify_due': due_now
                                                       }] %}
                                                       {% set ns.seen = ns.seen + [eid] %}
                                                     {% endif %}
@@ -652,59 +673,68 @@ actions:
                                               - {{ member.contact_label }} ({{ member.room_name }}, {{ member.elapsed_minutes }} min)
                                                 {% endfor %}
                                               {% endif %}
+                                        - variables:
+                                            bundle_should_send: >-
+                                              {% set due_members = bundle_members | selectattr('notify_due') | list %}
+                                              {{ due_members | count > 0 and
+                                                 due_members[0].contact_id == contact_id }}
                                         - if:
                                             - condition: template
-                                              value_template: "{{ ha_notifications }}"
+                                              value_template: "{{ bundle_should_send }}"
                                           then:
-                                            - action: persistent_notification.create
-                                              data:
-                                                notification_id: "{{ bundle_tag }}"
-                                                title: "{{ bundle_notification_title }}"
-                                                message: "{{ bundle_notification_message }}"
-                                              continue_on_error: true
-                                        - if:
-                                            - condition: template
-                                              value_template: "{{ notify_entity_ids | count > 0 }}"
-                                          then:
-                                            - action: notify.send_message
-                                              target:
-                                                entity_id: "{{ notify_entity_ids }}"
-                                              data:
-                                                title: "{{ bundle_notification_title }}"
-                                                message: "{{ bundle_notification_message }}"
-                                              continue_on_error: true
-                                        - repeat:
-                                            for_each: "{{ notify_csv.split(',') | map('trim') | reject('eq', '') | list }}"
-                                            sequence:
-                                              - variables:
-                                                  notify_action: "{{ repeat.item }}"
-                                              - if:
-                                                  - condition: template
-                                                    value_template: >-
-                                                      {{ notify_action | regex_match('^notify\\.[a-z0-9_]+$') }}
-                                                then:
-                                                  - action: "{{ notify_action }}"
-                                                    data:
-                                                      title: "{{ bundle_notification_title }}"
-                                                      message: "{{ bundle_notification_message }}"
-                                                      data:
-                                                        tag: "{{ bundle_tag }}"
-                                                        url: "{{ notification_url }}"
-                                                        clickAction: "{{ notification_url }}"
-                                                        color: "{{ android_color }}"
-                                                        notification_icon: "{{ android_icon }}"
-                                                        push:
-                                                          interruption-level: "{{ ios_level }}"
-                                                    continue_on_error: true
-                                        - if:
-                                            - condition: template
-                                              value_template: "{{ alert_is_reminder }}"
-                                          then:
-                                            - choose: []
-                                              default: !input on_reminder_actions
-                                          else:
-                                            - choose: []
-                                              default: !input on_alert_actions
+                                            - if:
+                                                - condition: template
+                                                  value_template: "{{ ha_notifications }}"
+                                              then:
+                                                - action: persistent_notification.create
+                                                  data:
+                                                    notification_id: "{{ bundle_tag }}"
+                                                    title: "{{ bundle_notification_title }}"
+                                                    message: "{{ bundle_notification_message }}"
+                                                  continue_on_error: true
+                                            - if:
+                                                - condition: template
+                                                  value_template: "{{ notify_entity_ids | count > 0 }}"
+                                              then:
+                                                - action: notify.send_message
+                                                  target:
+                                                    entity_id: "{{ notify_entity_ids }}"
+                                                  data:
+                                                    title: "{{ bundle_notification_title }}"
+                                                    message: "{{ bundle_notification_message }}"
+                                                  continue_on_error: true
+                                            - repeat:
+                                                for_each: "{{ notify_csv.split(',') | map('trim') | reject('eq', '') | list }}"
+                                                sequence:
+                                                  - variables:
+                                                      notify_action: "{{ repeat.item }}"
+                                                  - if:
+                                                      - condition: template
+                                                        value_template: >-
+                                                          {{ notify_action | regex_match('^notify\\.[a-z0-9_]+$') }}
+                                                    then:
+                                                      - action: "{{ notify_action }}"
+                                                        data:
+                                                          title: "{{ bundle_notification_title }}"
+                                                          message: "{{ bundle_notification_message }}"
+                                                          data:
+                                                            tag: "{{ bundle_tag }}"
+                                                            url: "{{ notification_url }}"
+                                                            clickAction: "{{ notification_url }}"
+                                                            color: "{{ android_color }}"
+                                                            notification_icon: "{{ android_icon }}"
+                                                            push:
+                                                              interruption-level: "{{ ios_level }}"
+                                                        continue_on_error: true
+                                            - if:
+                                                - condition: template
+                                                  value_template: "{{ alert_is_reminder }}"
+                                              then:
+                                                - choose: []
+                                                  default: !input on_reminder_actions
+                                              else:
+                                                - choose: []
+                                                  default: !input on_alert_actions
       - alias: "Clear per-contact alerts when a sensor recovers or closes"
         conditions:
           - condition: template
@@ -830,13 +860,34 @@ actions:
                                           {% set delay = open_delay if alert_type == 'open' else
                                                          offline_delay if alert_type == 'offline' else silent_delay %}
                                           {% if active and started_at > 0 and now_ts - started_at >= delay %}
+                                            {% set past_deadline = now_ts - started_at - delay %}
+                                            {% set periodic = (repeat_minutes | int(0)) * 60 %}
+                                            {% set offsets = namespace(enabled=false, due=false) %}
+                                            {% for raw_offset in (reminder_offsets_csv | string).split(',')[:12] %}
+                                              {% set token = raw_offset | trim %}
+                                              {% if is_number(token) %}
+                                                {% set value = token | float(0) %}
+                                                {% if value == (value | int(0)) and 1 <= value <= 1440 %}
+                                                  {% set offsets.enabled = true %}
+                                                  {% if past_deadline >= value * 60 and past_deadline - value * 60 < 60 %}
+                                                    {% set offsets.due = true %}
+                                                  {% endif %}
+                                                {% endif %}
+                                              {% endif %}
+                                            {% endfor %}
+                                            {% set due_now = trigger.id == 'startup' or
+                                                             past_deadline < 60 or offsets.due or
+                                                             (not offsets.enabled and periodic > 0 and
+                                                              past_deadline >= periodic and
+                                                              past_deadline % periodic < 60) %}
                                             {% set ns.items = ns.items + [{
                                               'room_name': candidate_room.get('name', 'Unnamed room'),
                                               'contact_id': eid,
                                               'contact_label': state_attr(eid, 'friendly_name') or eid,
                                               'contact_state': s,
                                               'issue_state': issue,
-                                              'elapsed_minutes': ((now_ts - started_at) / 60) | int(0)
+                                              'elapsed_minutes': ((now_ts - started_at) / 60) | int(0),
+                                              'notify_due': due_now
                                             }] %}
                                             {% set ns.seen = ns.seen + [eid] %}
                                           {% endif %}

@@ -121,7 +121,7 @@ If a contact remains open and subsequently stops updating, an existing open aler
 - **Tags and clearing:** A `notify` entity receives standard message/title data, but this generic action has no tag-based removal mechanism. Tagged mobile notifications and `clear_notification` remain supported only via the legacy `notify.mobile_app_*` service when configured. Home Assistant persistent notifications can still clear on recovery.
 - **Mobile-only settings:** The click URL, Android icon/color and iOS interruption level apply to legacy Companion app actions. A generic notify entity may ignore or lack those features.
 - Persistent Home Assistant notifications work even without a phone configured. Ensure at least one notification destination is enabled. Shared tags are unique per automation entity ID and alert type.
-- Initial-warning custom actions, reminder custom actions and recovery custom actions run at their respective events, not on every sensor update. Multiple sensors due within the same minute can each cause an update to the same notification tag; some phones may vibrate more than once. Review custom actions before allowing them to operate devices.
+- Initial-warning custom actions, reminder custom actions and recovery custom actions run at their respective events, not on every sensor update. Contacts of the same alert type becoming due in the same minute share ONE combined notification update and execute the corresponding warning/reminder action once for the batch. The custom action can inspect `bundle_members` for the full affected list. Review custom actions before allowing them to operate devices.
 
 ## Performance, timing and restart behavior
 
