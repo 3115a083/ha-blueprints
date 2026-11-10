@@ -203,6 +203,54 @@ blueprint:
           default: false
           selector:
             boolean: {}
+        reminder_offsets_minutes:
+          name: "⏱️ Additional reminders after first alert (minutes)"
+          description: >-
+            Comma-separated minutes measured from the FIRST alert deadline,
+            e.g. 5,15 sends additional alerts 5 and 15 minutes later.
+            Leave blank to use the legacy repeat interval (if configured),
+            or to send only once. Non-integer, zero or out-of-range entries
+            are ignored; up to 12 offsets from 1 to 1440 minutes.
+            Each alert type and contact has its own schedule.
+          default: ""
+          selector:
+            text: {}
+    rules_section:
+      name: "🎛️ 04 | When to send warnings"
+      icon: mdi:filter-outline
+      description: >-
+        These are TWO INDEPENDENT condition editors. They control only
+        sending warnings, not monitoring or clearing resolved alerts.
+        Leave a list empty to allow all alerts of that type. Example:
+        for open contacts, set a Numeric state condition on outside
+        temperature BELOW 17. For offline or silent sensors, set
+        a State condition on a person to not_home. Multiple entries
+        are AND by default; add an OR group for alternatives.
+      input:
+        open_alert_conditions:
+          name: "Open door/window warnings: send only when"
+          description: >-
+            Example: Numeric state, choose the outdoor temperature sensor,
+            below 17. Leave empty to always allow open alerts. If a
+            one-time warning is suppressed, it can be missed unless
+            reminder notifications are enabled.
+          default: []
+          selector:
+            condition: {}
+        health_alert_conditions:
+          name: "Unavailable / silent sensor warnings: send only when"
+          description: >-
+            Example: State, choose a person, enter not_home. Applies to
+            unknown, unavailable and stale last_seen. Independent from
+            open alerts. Leave empty to always allow health alerts.
+          default: []
+          selector:
+            condition: {}
+    advanced_section:
+      name: "⚙️ 05 | Advanced options"
+      icon: mdi:tune
+      collapsed: true
+      input:
         alert_title_template:
           name: "✏️ Notification title (editable template)"
           description: >-
@@ -240,65 +288,25 @@ blueprint:
             {% endif %}
           selector:
             template: {}
-        reminder_offsets_minutes:
-          name: "⏱️ Additional reminders after first alert (minutes)"
-          description: >-
-            Comma-separated minutes measured from the FIRST alert deadline,
-            e.g. 5,15 sends additional alerts 5 and 15 minutes later.
-            Leave blank to use the legacy repeat interval (if configured),
-            or to send only once. Non-integer, zero or out-of-range entries
-            are ignored; up to 12 offsets from 1 to 1440 minutes.
-            Each alert type and contact has its own schedule.
-          default: ""
-          selector:
-            text: {}
         on_alert_actions:
-          name: "⚡ Actions AFTER each warning or reminder"
+          name: "⚡ Actions AFTER initial warning"
           description: >-
-            Optional visual action sequence, executed after notification
-            delivery has been attempted. Runs for the initial alert and
-            each due reminder. Available variables: room_name,
-            contact_id, contact_label, alert_type, contact_state,
-            alert_title, alert_message, alert_tag and elapsed_minutes.
+            Runs only after a newly due warning, not its reminders.
+            This keeps the existing on_alert_actions setting. Variables:
+            room_name, contact_id, contact_label, alert_type, alert_title,
+            alert_message, alert_tag, elapsed_minutes, alert_group_members.
           default: []
           selector:
             action: {}
-    rules_section:
-      name: "🎛️ 04 | When to send warnings"
-      icon: mdi:filter-outline
-      description: >-
-        These are TWO INDEPENDENT condition editors. They control only
-        sending warnings, not monitoring or clearing resolved alerts.
-        Leave a list empty to allow all alerts of that type. Example:
-        for open contacts, set a Numeric state condition on outside
-        temperature BELOW 17. For offline or silent sensors, set
-        a State condition on a person to not_home. Multiple entries
-        are AND by default; add an OR group for alternatives.
-      input:
-        open_alert_conditions:
-          name: "Open door/window warnings: send only when"
+        on_reminder_actions:
+          name: "🔁 Actions AFTER reminder"
           description: >-
-            Example: Numeric state, choose the outdoor temperature sensor,
-            below 17. Leave empty to always allow open alerts. If a
-            one-time warning is suppressed, it can be missed unless
-            reminder notifications are enabled.
+            Executes after each scheduled reminder notification attempt.
+            Variables match initial warning actions. Includes
+            alert_is_reminder, alert_group_members and alert_group_tag.
           default: []
           selector:
-            condition: {}
-        health_alert_conditions:
-          name: "Unavailable / silent sensor warnings: send only when"
-          description: >-
-            Example: State, choose a person, enter not_home. Applies to
-            unknown, unavailable and stale last_seen. Independent from
-            open alerts. Leave empty to always allow health alerts.
-          default: []
-          selector:
-            condition: {}
-    advanced_section:
-      name: "⚙️ 05 | Advanced options"
-      icon: mdi:tune
-      collapsed: true
-      input:
+            action: {}
         notify_services:
           name: "Legacy mobile notify action IDs (optional)"
           description: >-
@@ -415,6 +423,48 @@ triggers:
 conditions: []
 
 actions:
+  - variables:
+      # One list of mature, unresolved contacts per warning type.
+      alert_groups: >-
+        {% set now_ts = as_timestamp(now()) %}
+        {% set ns = namespace(open=[], offline=[], silent=[]) %}
+        {% for room in rooms | default([], true)
+               if room is mapping and room.get('enabled', true) %}
+          {% set open_delay = ((room.get('open_after_minutes', 0) | int(0))
+                               or (global_open_minutes | int(10))) * 60 %}
+          {% set offline_delay = ((room.get('offline_after_minutes', 0) | int(0))
+                                  or (global_offline_minutes | int(20))) * 60 %}
+          {% set silent_delay = (room.get('last_seen_hours', 0) | int(0)) * 3600 %}
+          {% set open_state = room.get('issue_state', 'on') %}
+          {% for eid in room.get('contacts', []) | default([], true) %}
+            {% set state = states[eid] %}
+            {% if state is not none %}
+              {% set changed_at = as_timestamp(state.last_changed, 0) %}
+              {% set seen_at = as_timestamp(state.attributes.get('last_seen'), 0) %}
+              {% set name = state.attributes.get('friendly_name') or eid %}
+              {% set member = {'entity_id': eid, 'label': name,
+                               'room_name': room.get('name', 'Unnamed room')} %}
+              {% if state.state == open_state and changed_at > 0 and
+                    now_ts - changed_at >= open_delay %}
+                {% set ns.open = ns.open + [
+                  dict(member, minutes=((now_ts - changed_at) / 60) | int(0))] %}
+              {% endif %}
+              {% if room.get('monitor_offline', true) and
+                    state.state in ['unknown', 'unavailable'] and
+                    changed_at > 0 and now_ts - changed_at >= offline_delay %}
+                {% set ns.offline = ns.offline + [
+                  dict(member, minutes=((now_ts - changed_at) / 60) | int(0))] %}
+              {% endif %}
+              {% if silent_delay > 0 and state.state in ['on', 'off'] and
+                    seen_at > 0 and now_ts - seen_at >= silent_delay %}
+                {% set ns.silent = ns.silent + [
+                  dict(member, minutes=((now_ts - seen_at) / 60) | int(0))] %}
+              {% endif %}
+            {% endif %}
+          {% endfor %}
+        {% endfor %}
+        {{ {'open': ns.open, 'offline': ns.offline, 'silent': ns.silent} }}
+      group_sent_this_run: []
   - choose:
       - alias: "Check all room contacts for due open, offline and silence alerts"
         conditions:
@@ -572,51 +622,78 @@ actions:
                                         - variables:
                                             alert_title: !input alert_title_template
                                             alert_message: !input alert_message_template
+                                            alert_group_members: "{{ alert_groups.get(alert_type, []) }}"
+                                            alert_group_tag: "{{ 'contact_guard_' ~ alert_type ~ '_summary' }}"
+                                            alert_is_reminder: >-
+                                              {{ trigger.id != 'startup' and
+                                                 (elapsed_seconds | float(0)) -
+                                                 (alert_delay | float(0)) >= 60 }}
+                                        - variables:
+                                            notification_title: >-
+                                              {{ alert_title }}{% if alert_group_members | count > 1 %} (+{{ (alert_group_members | count) - 1 }} more){% endif %}
+                                            notification_message: >-
+                                              {{ alert_message }}
+                                              {% if alert_group_members | count > 1 %}
+                                              Unresolved {{ alert_type }} contacts:
+                                              {% for member in alert_group_members %}
+                                              - {{ member.label }} ({{ member.room_name }}): {{ member.minutes }} min
+                                              {% endfor %}
+                                              {% endif %}
                                         - if:
                                             - condition: template
-                                              value_template: "{{ ha_notifications }}"
+                                              value_template: "{{ alert_type not in group_sent_this_run }}"
                                           then:
-                                            - action: persistent_notification.create
-                                              data:
-                                                notification_id: "{{ alert_tag }}"
-                                                title: "{{ alert_title }}"
-                                                message: "{{ alert_message }}"
-                                              continue_on_error: true
-                                        - if:
-                                            - condition: template
-                                              value_template: "{{ notify_entity_ids | count > 0 }}"
-                                          then:
-                                            - action: notify.send_message
-                                              target:
-                                                entity_id: "{{ notify_entity_ids }}"
-                                              data:
-                                                title: "{{ alert_title }}"
-                                                message: "{{ alert_message }}"
-                                              continue_on_error: true
-                                        - repeat:
-                                            for_each: "{{ notify_csv.split(',') | map('trim') | reject('eq', '') | list }}"
-                                            sequence:
-                                              - variables:
-                                                  notify_action: "{{ repeat.item }}"
-                                              - if:
-                                                  - condition: template
-                                                    value_template: >-
-                                                      {{ notify_action | regex_match('^notify\\.[a-z0-9_]+$') }}
-                                                then:
-                                                  - action: "{{ notify_action }}"
-                                                    data:
-                                                      title: "{{ alert_title }}"
-                                                      message: "{{ alert_message }}"
-                                                      data:
-                                                        tag: "{{ alert_tag }}"
-                                                        url: "{{ notification_url }}"
-                                                        clickAction: "{{ notification_url }}"
-                                                        color: "{{ android_color }}"
-                                                        notification_icon: "{{ android_icon }}"
-                                                        push:
-                                                          interruption-level: "{{ ios_level }}"
-                                                    continue_on_error: true
-                                        - choose: []
+                                            - variables:
+                                                group_sent_this_run: "{{ group_sent_this_run + [alert_type] }}"
+                                            - if:
+                                                - condition: template
+                                                  value_template: "{{ ha_notifications }}"
+                                              then:
+                                                - action: persistent_notification.create
+                                                  data:
+                                                    notification_id: "{{ alert_group_tag }}"
+                                                    title: "{{ notification_title }}"
+                                                    message: "{{ notification_message }}"
+                                                  continue_on_error: true
+                                            - if:
+                                                - condition: template
+                                                  value_template: "{{ notify_entity_ids | count > 0 }}"
+                                              then:
+                                                - action: notify.send_message
+                                                  target:
+                                                    entity_id: "{{ notify_entity_ids }}"
+                                                  data:
+                                                    title: "{{ notification_title }}"
+                                                    message: "{{ notification_message }}"
+                                                  continue_on_error: true
+                                            - repeat:
+                                                for_each: "{{ notify_csv.split(',') | map('trim') | reject('eq', '') | list }}"
+                                                sequence:
+                                                  - variables:
+                                                      notify_action: "{{ repeat.item }}"
+                                                  - if:
+                                                      - condition: template
+                                                        value_template: >-
+                                                          {{ notify_action | regex_match('^notify\\.[a-z0-9_]+$') }}
+                                                    then:
+                                                      - action: "{{ notify_action }}"
+                                                        data:
+                                                          title: "{{ notification_title }}"
+                                                          message: "{{ notification_message }}"
+                                                          data:
+                                                            tag: "{{ alert_group_tag }}"
+                                                            url: "{{ notification_url }}"
+                                                            clickAction: "{{ notification_url }}"
+                                                            color: "{{ android_color }}"
+                                                            notification_icon: "{{ android_icon }}"
+                                                            push:
+                                                              interruption-level: "{{ ios_level }}"
+                                                        continue_on_error: true
+                                        - choose:
+                                            - conditions:
+                                                - condition: template
+                                                  value_template: "{{ alert_is_reminder }}"
+                                              sequence: !input on_reminder_actions
                                           default: !input on_alert_actions
       - alias: "Clear per-contact alerts when a sensor recovers or closes"
         conditions:
@@ -742,6 +819,95 @@ actions:
                                                 data:
                                                   tag: "{{ alert_tag }}"
                                               continue_on_error: true
+                              # Update or dismiss shared notification on recovery.
+                              - if:
+                                  - condition: template
+                                    value_template: "{{ resolve_clear }}"
+                                then:
+                                  - variables:
+                                      remaining_group: "{{ alert_groups.get(alert_type, []) }}"
+                                      alert_group_tag: "{{ 'contact_guard_' ~ alert_type ~ '_summary' }}"
+                                  - if:
+                                      - condition: template
+                                        value_template: "{{ remaining_group | count == 0 }}"
+                                    then:
+                                      - if:
+                                          - condition: template
+                                            value_template: "{{ ha_notifications }}"
+                                        then:
+                                          - action: persistent_notification.dismiss
+                                            data:
+                                              notification_id: "{{ alert_group_tag }}"
+                                            continue_on_error: true
+                                      - repeat:
+                                          for_each: "{{ notify_csv.split(',') | map('trim') | reject('eq', '') | list }}"
+                                          sequence:
+                                            - variables:
+                                                notify_action: "{{ repeat.item }}"
+                                            - if:
+                                                - condition: template
+                                                  value_template: >-
+                                                    {{ notify_action | regex_match('^notify\\.mobile_app_[a-z0-9_]+$') }}
+                                              then:
+                                                - action: "{{ notify_action }}"
+                                                  data:
+                                                    message: "clear_notification"
+                                                    data:
+                                                      tag: "{{ alert_group_tag }}"
+                                                  continue_on_error: true
+                                    else:
+                                      - variables:
+                                          notification_title: >-
+                                            {{ alert_type | capitalize }}: {{ remaining_group | count }} unresolved contact(s)
+                                          notification_message: >-
+                                            Remaining {{ alert_type }} contacts:
+                                            {% for member in remaining_group %}
+                                            - {{ member.label }} ({{ member.room_name }}): {{ member.minutes }} min
+                                            {% endfor %}
+                                      - if:
+                                          - condition: template
+                                            value_template: "{{ ha_notifications }}"
+                                        then:
+                                          - action: persistent_notification.create
+                                            data:
+                                              notification_id: "{{ alert_group_tag }}"
+                                              title: "{{ notification_title }}"
+                                              message: "{{ notification_message }}"
+                                            continue_on_error: true
+                                      - if:
+                                          - condition: template
+                                            value_template: "{{ notify_entity_ids | count > 0 }}"
+                                        then:
+                                          - action: notify.send_message
+                                            target:
+                                              entity_id: "{{ notify_entity_ids }}"
+                                            data:
+                                              title: "{{ notification_title }}"
+                                              message: "{{ notification_message }}"
+                                            continue_on_error: true
+                                      - repeat:
+                                          for_each: "{{ notify_csv.split(',') | map('trim') | reject('eq', '') | list }}"
+                                          sequence:
+                                            - variables:
+                                                notify_action: "{{ repeat.item }}"
+                                            - if:
+                                                - condition: template
+                                                  value_template: >-
+                                                    {{ notify_action | regex_match('^notify\\.[a-z0-9_]+$') }}
+                                              then:
+                                                - action: "{{ notify_action }}"
+                                                  data:
+                                                    title: "{{ notification_title }}"
+                                                    message: "{{ notification_message }}"
+                                                    data:
+                                                      tag: "{{ alert_group_tag }}"
+                                                      url: "{{ notification_url }}"
+                                                      clickAction: "{{ notification_url }}"
+                                                      color: "{{ android_color }}"
+                                                      notification_icon: "{{ android_icon }}"
+                                                      push:
+                                                        interruption-level: "{{ ios_level }}"
+                                                  continue_on_error: true
                               - if:
                                   - condition: template
                                     value_template: "{{ recovery_enabled }}"

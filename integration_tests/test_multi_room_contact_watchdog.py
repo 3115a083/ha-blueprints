@@ -80,8 +80,8 @@ async def test_independent_open_and_offline_notifications(tmp_path):
         created=[x for x in calls if x[:2]==("persistent_notification","create")]
         self_tags={x[2]["notification_id"] for x in created}
         assert self_tags=={
-            "contact_guard_binary_sensor_bath_window_open",
-            "contact_guard_binary_sensor_kitchen_window_offline",
+            "contact_guard_open_summary",
+            "contact_guard_offline_summary",
         }
         assert "Bathroom" in created[0][2]["title"]
         assert "Kitchen" in created[1][2]["title"]
@@ -336,6 +336,119 @@ async def test_specific_reminders_at_five_and_fifteen_minutes(tmp_path):
             assert bool(creates)==expected,(elapsed,calls)
             assert len(actions)==len(creates),(elapsed,calls)
             if creates:
-                assert creates[0][2]["notification_id"]=="contact_guard_binary_sensor_hall_window_open"
+                assert creates[0][2]["notification_id"]=="contact_guard_open_summary"
+    finally:
+        await hass.async_stop()
+
+
+
+@pytest.mark.asyncio
+async def test_group_contacts_at_separate_deadlines_and_recovery(tmp_path):
+    first="binary_sensor.office_window"
+    second="binary_sensor.kitchen_window"
+    hass,calls,run=await build(
+        tmp_path,
+        [room("Office",[first]),room("Kitchen",[second])],
+        [first,second],
+        notify_entities=["notify.kitchen_phone"],
+        notify_services="notify.mobile_app_phone",
+    )
+    try:
+        # First contact reaches the initial 10-minute threshold.
+        hass.states.async_set(first,"on",{"friendly_name":"Office window"},timestamp=time()-630)
+        hass.states.async_set(second,"off")
+        await run()
+        initial=[x for x in calls if x[:2]==("persistent_notification","create")]
+        assert len(initial)==1
+        assert initial[0][2]["notification_id"]=="contact_guard_open_summary"
+        assert "Office window" in initial[0][2]["message"]
+        assert "Kitchen window" not in initial[0][2]["message"]
+        calls.clear()
+
+        # Second contact reaches its threshold while the first remains open.
+        hass.states.async_set(first,"on",{"friendly_name":"Office window"},timestamp=time()-830)
+        hass.states.async_set(second,"on",{"friendly_name":"Kitchen window"},timestamp=time()-630)
+        await run()
+        updated=[x for x in calls if x[:2]==("persistent_notification","create")]
+        assert len(updated)==1
+        assert updated[0][2]["notification_id"]=="contact_guard_open_summary"
+        assert "Office window" in updated[0][2]["message"]
+        assert "Kitchen window" in updated[0][2]["message"]
+        mobile=[x for x in calls if x[:2]==("notify","mobile_app_phone")]
+        assert len(mobile)==1
+        assert mobile[0][2]["data"]["tag"]=="contact_guard_open_summary"
+        calls.clear()
+
+        # Closing the second contact removes only that contact from the summary.
+        old_second=hass.states.get(second)
+        hass.states.async_set(second,"off",{"friendly_name":"Kitchen window"})
+        new_second=hass.states.get(second)
+        await run("contact_changed",entity_id=second,from_state=old_second,to_state=new_second)
+        remaining=[x for x in calls if x[:2]==("persistent_notification","create")]
+        assert len(remaining)==1
+        assert "Office window" in remaining[0][2]["message"]
+        assert "Kitchen window" not in remaining[0][2]["message"]
+        calls.clear()
+
+        # Final recovery dismisses the shared notification.
+        old_first=hass.states.get(first)
+        hass.states.async_set(first,"off",{"friendly_name":"Office window"})
+        new_first=hass.states.get(first)
+        await run("contact_changed",entity_id=first,from_state=old_first,to_state=new_first)
+        dismiss=[x[2]["notification_id"] for x in calls
+                 if x[:2]==("persistent_notification","dismiss")]
+        assert "contact_guard_open_summary" in dismiss
+        clear=[x for x in calls if x[:2]==("notify","mobile_app_phone")
+               and x[2].get("message")=="clear_notification"]
+        assert any(x[2]["data"]["tag"]=="contact_guard_open_summary" for x in clear)
+    finally:
+        await hass.async_stop()
+
+
+@pytest.mark.asyncio
+async def test_simultaneous_contacts_one_group_but_two_initial_actions(tmp_path):
+    first="binary_sensor.office_window"
+    second="binary_sensor.kitchen_window"
+    hass,calls,run=await build(
+        tmp_path,
+        [room("Office",[first]),room("Kitchen",[second])],
+        [first,second],
+        notify_entities=["notify.kitchen_phone"],
+        on_alert_actions=[{"action":"test.record","data":{"contact":"{{ contact_id }}"}}],
+        on_reminder_actions=[{"action":"test.record","data":{"contact":"reminder"}}],
+    )
+    try:
+        hass.states.async_set(first,"on",{"friendly_name":"Office window"},timestamp=time()-630)
+        hass.states.async_set(second,"on",{"friendly_name":"Kitchen window"},timestamp=time()-630)
+        await run()
+        persistent=[x for x in calls if x[:2]==("persistent_notification","create")]
+        notify=[x for x in calls if x[:2]==("notify","send_message")]
+        custom=[x[2]["contact"] for x in calls if x[:2]==("test","record")]
+        assert len(persistent)==1,calls
+        assert len(notify)==1,calls
+        assert "Office window" in persistent[0][2]["message"]
+        assert "Kitchen window" in persistent[0][2]["message"]
+        assert custom==[first,second]
+    finally:
+        await hass.async_stop()
+
+
+@pytest.mark.asyncio
+async def test_warning_and_reminder_actions_are_separate(tmp_path):
+    sensor="binary_sensor.office_window"
+    hass,calls,run=await build(
+        tmp_path,[room("Office",[sensor])],[sensor],
+        reminder_offsets_minutes="5",
+        on_alert_actions=[{"action":"test.record","data":{"kind":"initial"}}],
+        on_reminder_actions=[{"action":"test.record","data":{"kind":"reminder"}}],
+    )
+    try:
+        hass.states.async_set(sensor,"on",timestamp=time()-630)
+        await run()
+        assert [x[2]["kind"] for x in calls if x[:2]==("test","record")]==["initial"]
+        calls.clear()
+        hass.states.async_set(sensor,"on",timestamp=time()-930)
+        await run()
+        assert [x[2]["kind"] for x in calls if x[:2]==("test","record")]==["reminder"]
     finally:
         await hass.async_stop()

@@ -114,11 +114,13 @@ class ContactWatchdogTests(unittest.TestCase):
         notify_section=self.data["blueprint"]["input"]["notification_section"]["input"]
         advanced_section=self.data["blueprint"]["input"]["advanced_section"]["input"]
         for name in ("alert_title_template","alert_message_template"):
-            self.assertIn(name,notify_section)
-            self.assertEqual(notify_section[name]["selector"],{"template":{}})
-        self.assertIn("on_alert_actions",notify_section)
-        self.assertNotIn("on_alert_actions",advanced_section)
-        self.assertEqual(self.inputs["on_alert_actions"]["default"],[])
+            self.assertIn(name,advanced_section)
+            self.assertNotIn(name,notify_section)
+            self.assertEqual(advanced_section[name]["selector"],{"template":{}})
+        for name in ("on_alert_actions","on_reminder_actions"):
+            self.assertIn(name,advanced_section)
+            self.assertNotIn(name,notify_section)
+            self.assertEqual(self.inputs[name]["default"],[])
         self.assertEqual(self.inputs["reminder_offsets_minutes"]["default"],"")
         self.assertEqual(self.inputs["reminder_offsets_minutes"]["selector"],{"text":{}})
         vars=dict(alert_type="open",room_name="Office",contact_label="Office window",
@@ -136,7 +138,12 @@ class ContactWatchdogTests(unittest.TestCase):
         self.assertEqual(find_var(self.data["actions"],"alert_title"),"!input alert_title_template")
         guide=(PATH.parent/"README.md").read_text()
         self.assertIn("{{ contact_label }}",guide)
-        self.assertIn("Actions AFTER each warning",guide)
+        self.assertIn("Actions AFTER initial warning",guide)
+        self.assertIn("Actions AFTER reminder",guide)
+        self.assertIn("Grouped notifications",guide)
+        self.assertIn("group_sent_this_run",self.source)
+        self.assertIn("contact_guard_' ~ alert_type ~ '_summary",self.source)
+        self.assertIn("!input on_reminder_actions",self.source)
 
     def test_specific_reminder_offsets_and_legacy_fallback(self):
         base=dict(alert_active=True,alert_started=1000,alert_delay=600,
