@@ -1,3 +1,10 @@
+## 2026-11-10 | Grouped contact notifications and separate actions
+
+- Moved notification title and message templates and the warning action selector into Advanced options without renaming prior keys.
+- Added independent reminder-only actions using `on_reminder_actions`; existing `on_alert_actions` now runs for initial warnings only.
+- Grouped unresolved contacts by warning type under stable persistent notification IDs and legacy Companion app tags. Recovery refreshes or removes summaries.
+- Documented replacement limits for modern `notify` entities, preserved per-contact custom-action context, and added regression tests.
+
 ## 2026-11-10 | Custom message templates, post-notification actions and scheduled reminders
 
 - Added editable notification title and message templates with per-contact, per-room and alert-type copyable variables. Kept the existing default wording for unconfigured inputs.
