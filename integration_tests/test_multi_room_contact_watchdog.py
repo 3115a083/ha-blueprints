@@ -315,6 +315,7 @@ async def test_specific_reminders_at_five_and_fifteen_minutes(tmp_path):
         tmp_path,[room("Hall",[sensor])],[sensor],
         reminder_offsets_minutes="5,15",reminder_minutes=2,
         on_alert_actions=[{"action":"test.record","data":{"alert":"{{ alert_type }}"}}],
+        on_reminder_actions=[{"action":"test.record","data":{"alert":"{{ alert_type }}"}}],
     )
     try:
         for elapsed,expected in (
