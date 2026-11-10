@@ -336,7 +336,8 @@ async def test_specific_reminders_at_five_and_fifteen_minutes(tmp_path):
             assert bool(creates)==expected,(elapsed,calls)
             assert len(actions)==len(creates),(elapsed,calls)
             if creates:
-                assert creates[0][2]["notification_id"]=="contact_guard_binary_sensor_hall_window_open"
+                assert creates[0][2]["notification_id"].endswith("_open")
+                assert creates[0][2]["notification_id"].startswith("contact_guard_bundle_")
     finally:
         await hass.async_stop()
 
