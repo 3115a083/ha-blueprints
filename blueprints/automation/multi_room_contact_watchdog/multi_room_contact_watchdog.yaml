@@ -13,7 +13,9 @@ blueprint:
     Support selectable notify entities, optional legacy Companion
     notification actions, persistent notifications and reminders.
     Configure separate visual conditions for open-contact warnings
-    and unavailable/stale-sensor warnings.
+    and unavailable/stale-sensor warnings. Customize notification
+    titles and messages, run actions after delivery, and schedule
+    reminders at specific offsets after the first warning.
 
     First register ALL contact entities under Sensor monitoring so recovery
     changes are handled immediately. Then assign the same entities to
@@ -201,6 +203,66 @@ blueprint:
           default: false
           selector:
             boolean: {}
+        alert_title_template:
+          name: "✏️ Notification title (editable template)"
+          description: >-
+            Customize the title for all alert types. Copyable variables:
+            {{ room_name }}, {{ contact_label }}, {{ contact_id }},
+            {{ alert_type }}, {{ elapsed_minutes }}.
+            The default provides separate titles for open, offline
+            and silent contact alerts.
+          default: >-
+            {% if alert_type == 'open' %}
+              {{ room_name }}: {{ contact_label }} left {{ 'open' if issue_state == 'on' else 'in alert state (OFF)' }}
+            {% elif alert_type == 'offline' %}
+              {{ room_name }}: {{ contact_label }} unavailable
+            {% else %}
+              {{ room_name }}: {{ contact_label }} no recent Zigbee report
+            {% endif %}
+          selector:
+            template: {}
+        alert_message_template:
+          name: "✏️ Notification message (editable template)"
+          description: >-
+            Write your own text, or edit the prefilled example. Copyable
+            variables: {{ contact_label }} (friendly sensor name),
+            {{ contact_id }} (entity ID), {{ room_name }}, {{ alert_type }}
+            (open/offline/silent), {{ contact_state }} (on/off/unknown/
+            unavailable), {{ elapsed_minutes }}, {{ alert_tag }}
+            and {{ issue_state }}. Jinja templates are supported.
+          default: >-
+            {% if alert_type == 'open' %}
+              {{ contact_label }} in {{ room_name }} has stayed {{ 'open' if issue_state == 'on' else 'OFF' }} for {{ elapsed_minutes }} minutes. Please check it.
+            {% elif alert_type == 'offline' %}
+              {{ contact_label }} in {{ room_name }} has been {{ contact_state }} for {{ elapsed_minutes }} minutes. Check the battery and Zigbee connection.
+            {% else %}
+              {{ contact_label }} in {{ room_name }} has not updated its last_seen attribute for {{ elapsed_minutes }} minutes. The device may have stopped reporting. Check its battery and Zigbee connection.
+            {% endif %}
+          selector:
+            template: {}
+        reminder_offsets_minutes:
+          name: "⏱️ Additional reminders after first alert (minutes)"
+          description: >-
+            Comma-separated minutes measured from the FIRST alert deadline,
+            e.g. 5,15 sends additional alerts 5 and 15 minutes later.
+            Leave blank to use the legacy repeat interval (if configured),
+            or to send only once. Non-integer, zero or out-of-range entries
+            are ignored; up to 12 offsets from 1 to 1440 minutes.
+            Each alert type and contact has its own schedule.
+          default: ""
+          selector:
+            text: {}
+        on_alert_actions:
+          name: "⚡ Actions AFTER each warning or reminder"
+          description: >-
+            Optional visual action sequence, executed after notification
+            delivery has been attempted. Runs for the initial alert and
+            each due reminder. Available variables: room_name,
+            contact_id, contact_label, alert_type, contact_state,
+            alert_title, alert_message, alert_tag and elapsed_minutes.
+          default: []
+          selector:
+            action: {}
     rules_section:
       name: "🎛️ 04 | When to send warnings"
       icon: mdi:filter-outline
@@ -248,11 +310,12 @@ blueprint:
           selector:
             text: {}
         reminder_minutes:
-          name: "Repeat unresolved alerts every N minutes (0 = once)"
+          name: "Legacy periodic reminder interval (0 = disabled)"
           description: >-
-            Each sensor and alert type has its own schedule. Reminders
-            use the same mobile notification tag and persistent ID.
-            Set 0 to notify only on the initial deadline.
+            Existing settings remain supported. Applies ONLY if the
+            additional reminder offsets under Notifications are blank
+            or contain no valid entries. Each contact and alert type has
+            its own schedule and stable notification tag.
           default: 0
           selector:
             number:
@@ -303,14 +366,6 @@ blueprint:
           default: []
           selector:
             condition: {}
-        on_alert_actions:
-          name: "Optional actions when a warning is sent"
-          description: >-
-            Variables: room_name, contact_id, contact_label, alert_type,
-            alert_title, alert_message, alert_tag, elapsed_minutes.
-          default: []
-          selector:
-            action: {}
         on_recovery_actions:
           name: "Optional actions when an alert resolves"
           description: >-
@@ -336,6 +391,7 @@ variables:
   resolve_clear: !input clear_on_recovery
   recovery_enabled: !input recovery_message
   repeat_minutes: !input reminder_minutes
+  reminder_offsets_csv: !input reminder_offsets_minutes
   notification_url: !input mobile_click_url
   android_color: !input notification_color
   android_icon: !input notification_icon
@@ -466,12 +522,27 @@ actions:
                                       {% set age = elapsed_seconds | float(0) %}
                                       {% set delay = alert_delay | float(0) %}
                                       {% set repeats = (repeat_minutes | int(0)) * 60 %}
+                                      {% set offsets = namespace(enabled=false, due=false) %}
+                                      {% for raw_offset in (reminder_offsets_csv | string).split(',')[:12] %}
+                                        {% set token = raw_offset | trim %}
+                                        {% if is_number(token) %}
+                                          {% set value = token | float(0) %}
+                                          {% if value == (value | int(0)) and 1 <= value <= 1440 %}
+                                            {% set offsets.enabled = true %}
+                                            {% if age >= delay + value * 60 and
+                                                  age - delay - value * 60 < 60 %}
+                                              {% set offsets.due = true %}
+                                            {% endif %}
+                                          {% endif %}
+                                        {% endif %}
+                                      {% endfor %}
                                       {{ alert_active and
                                          alert_started | float(0) > 0 and
                                          age >= delay and
                                          (trigger.id == 'startup' or
                                           age - delay < 60 or
-                                          (repeats > 0 and
+                                          offsets.due or
+                                          (not offsets.enabled and repeats > 0 and
                                            (age - delay) >= repeats and
                                            (age - delay) % repeats < 60)) }}
                                 - if:
@@ -499,22 +570,8 @@ actions:
                                                       conditions: !input health_alert_conditions
                                       then:
                                         - variables:
-                                            alert_title: >-
-                                              {% if alert_type == 'open' %}
-                                                {{ room_name }}: {{ contact_label }} left {{ 'open' if issue_state == 'on' else 'in alert state (OFF)' }}
-                                              {% elif alert_type == 'offline' %}
-                                                {{ room_name }}: {{ contact_label }} unavailable
-                                              {% else %}
-                                                {{ room_name }}: {{ contact_label }} no recent Zigbee report
-                                              {% endif %}
-                                            alert_message: >-
-                                              {% if alert_type == 'open' %}
-                                                {{ contact_label }} in {{ room_name }} has stayed {{ 'open' if issue_state == 'on' else 'OFF' }} for {{ elapsed_minutes }} minutes. Please check it.
-                                              {% elif alert_type == 'offline' %}
-                                                {{ contact_label }} in {{ room_name }} has been {{ contact_state }} for {{ elapsed_minutes }} minutes. Check the battery and Zigbee connection.
-                                              {% else %}
-                                                {{ contact_label }} in {{ room_name }} has not updated its last_seen attribute for {{ elapsed_minutes }} minutes. The device may have stopped reporting. Check its battery and Zigbee connection.
-                                              {% endif %}
+                                            alert_title: !input alert_title_template
+                                            alert_message: !input alert_message_template
                                         - if:
                                             - condition: template
                                               value_template: "{{ ha_notifications }}"

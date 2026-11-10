@@ -1,3 +1,11 @@
+## 2026-11-10 | Custom message templates, post-notification actions and scheduled reminders
+
+- Added editable notification title and message templates with per-contact, per-room and alert-type copyable variables. Kept the existing default wording for unconfigured inputs.
+- Moved the existing post-alert custom action selector into Notifications without changing its input key or behavior.
+- Added comma-separated reminder offsets (for example `5,15`) measured from the initial alert deadline; supports independent open/offline/silent schedules and ignores invalid values.
+- Preserved the existing periodic reminder setting as a fallback when no valid specific offsets are configured. Scheduled offsets take precedence.
+- Added static and real Home Assistant regression tests and updated the upgrade documentation.
+
 # Changelog
 
 ## 2026-11-08 | Notification picker and independent alert conditions

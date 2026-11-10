@@ -38,6 +38,7 @@ class ContactWatchdogTests(unittest.TestCase):
         cls.inputs={name:value for section in cls.data["blueprint"]["input"].values()
                     for name,value in section["input"].items()}
         cls.jinja=jinja2.Environment(trim_blocks=True,lstrip_blocks=True)
+        cls.jinja.globals["is_number"]=lambda value: bool(re.fullmatch(r"[0-9]+(?:\\.[0-9]+)?",str(value).strip()))
 
     def render(self,key,**vars):
         return self.jinja.from_string(find_var(self.data["actions"],key)).render(**vars).strip()
@@ -94,7 +95,8 @@ class ContactWatchdogTests(unittest.TestCase):
 
     def test_due_is_single_window_or_bounded_reminder(self):
         base=dict(alert_active=True,alert_started=1000,alert_delay=600,
-                  trigger=SimpleNamespace(id="deadline_check"),repeat_minutes=0)
+                  trigger=SimpleNamespace(id="deadline_check"),repeat_minutes=0,
+                  reminder_offsets_csv="")
         def due(age,**kw):
             return self.render("alert_due",elapsed_seconds=age,**(base|kw))=="True"
         self.assertFalse(due(599))
@@ -107,6 +109,53 @@ class ContactWatchdogTests(unittest.TestCase):
         self.assertFalse(due(1260,repeat_minutes=10))
         self.assertFalse(due(1200,alert_active=False,repeat_minutes=10))
         self.assertTrue(due(1200,trigger=SimpleNamespace(id="startup")))
+
+    def test_custom_notification_inputs_and_default_templates(self):
+        notify_section=self.data["blueprint"]["input"]["notification_section"]["input"]
+        advanced_section=self.data["blueprint"]["input"]["advanced_section"]["input"]
+        for name in ("alert_title_template","alert_message_template"):
+            self.assertIn(name,notify_section)
+            self.assertEqual(notify_section[name]["selector"],{"template":{}})
+        self.assertIn("on_alert_actions",notify_section)
+        self.assertNotIn("on_alert_actions",advanced_section)
+        self.assertEqual(self.inputs["on_alert_actions"]["default"],[])
+        self.assertEqual(self.inputs["reminder_offsets_minutes"]["default"],"")
+        self.assertEqual(self.inputs["reminder_offsets_minutes"]["selector"],{"text":{}})
+        vars=dict(alert_type="open",room_name="Office",contact_label="Office window",
+                  contact_id="binary_sensor.office_window",contact_state="on",
+                  elapsed_minutes=12,issue_state="on")
+        message=self.jinja.from_string(self.inputs["alert_message_template"]["default"]).render(**vars)
+        title=self.jinja.from_string(self.inputs["alert_title_template"]["default"]).render(**vars)
+        self.assertIn("Office window in Office has stayed open for 12 minutes",message)
+        self.assertIn("Office: Office window left open",title)
+        for kind in ("offline","silent"):
+            rendered=self.jinja.from_string(self.inputs["alert_message_template"]["default"]).render(
+                **(vars|{"alert_type":kind,"contact_state":"unavailable"}))
+            self.assertIn("Office window",rendered)
+        self.assertEqual(find_var(self.data["actions"],"alert_message"),"!input alert_message_template")
+        self.assertEqual(find_var(self.data["actions"],"alert_title"),"!input alert_title_template")
+        guide=(PATH.parent/"README.md").read_text()
+        self.assertIn("{{ contact_label }}",guide)
+        self.assertIn("Actions AFTER each warning",guide)
+
+    def test_specific_reminder_offsets_and_legacy_fallback(self):
+        base=dict(alert_active=True,alert_started=1000,alert_delay=600,
+                  trigger=SimpleNamespace(id="deadline_check"),repeat_minutes=2,
+                  reminder_offsets_csv="5,15")
+        def due(age,**kw):
+            return self.render("alert_due",elapsed_seconds=age,**(base|kw))=="True"
+        self.assertTrue(due(630))            # first alert at 10 minutes
+        self.assertFalse(due(735))           # periodic interval suppressed
+        self.assertTrue(due(930))            # 5 minutes after first deadline
+        self.assertFalse(due(990))
+        self.assertFalse(due(1230))
+        self.assertTrue(due(1530))           # 15 minutes after first deadline
+        self.assertFalse(due(1590))
+        self.assertFalse(due(1830))          # no unexpected future repeats
+        self.assertFalse(due(930,alert_active=False))
+        self.assertTrue(due(930,reminder_offsets_csv="abc,-1,0,5,1500,15"))
+        self.assertTrue(due(735,reminder_offsets_csv="invalid",repeat_minutes=2))
+        self.assertFalse(due(930,reminder_offsets_csv="",repeat_minutes=0))
 
     def test_offline_and_last_seen_recovery(self):
         base=dict(prior_state="on",new_state="off",open_seconds=600,
