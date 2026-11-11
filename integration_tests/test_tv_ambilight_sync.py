@@ -49,8 +49,11 @@ async def build(tmp_path, **extra):
             ("homeassistant", "turn_on"), ("homeassistant", "turn_off"),
             ("input_boolean", "turn_on"), ("input_boolean", "turn_off"),
         }:
-            entity_id = data["entity_id"]
-            hass.states.async_set(entity_id, "on" if call.service == "turn_on" else "off")
+            entity_ids = data["entity_id"]
+            if isinstance(entity_ids, str):
+                entity_ids = [entity_ids]
+            for entity_id in entity_ids:
+                hass.states.async_set(entity_id, "on" if call.service == "turn_on" else "off")
 
     for domain, services in (
         ("homeassistant", ("turn_on", "turn_off")),
