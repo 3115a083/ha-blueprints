@@ -1,0 +1,339 @@
+blueprint:
+  name: "📺 TV Ambilight Sync | Conditional Lighting & Timeout Guard"
+  author: "3115a083"
+  domain: automation
+  homeassistant:
+    min_version: "2026.11.0"
+  source_url: https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/tv_ambilight_sync/tv_ambilight_sync.yaml
+  description: >-
+    Synchronize a retrofit Ambilight light or switch with the TV power
+    state reported by the official Android TV Remote integration.
+    Add any combination of Home Assistant conditions, including sun,
+    lux, time windows, and occupancy. Conditions are reevaluated
+    continuously while TV power stays on, so the Ambilight turns off
+    when eligibility ends and back on when eligibility returns.
+
+    Optional maximum-on protection can directly turn off Ambilight
+    or send a Companion app notification with a Turn off action.
+    The watchdog REQUIRES a dedicated input_boolean helper when its
+    duration is nonzero. The helper prevents unintended reactivation
+    if the TV entity becomes stuck at ON. It resets only when the TV
+    reports OFF. Without the helper, the automation fails safely
+    instead of enabling Ambilight with an unguarded timeout.
+
+    Add relevant condition entities under Recheck when these entities
+    change for immediate reactions. A one-minute safety check also
+    reevaluates arbitrary conditions, including time boundaries.
+    This automation does not measure physical TV power and cannot
+    detect stale states except through the configurable timeout.
+  input:
+    devices:
+      name: "📺 01 | Television and Ambilight"
+      icon: mdi:television-ambient-light
+      input:
+        tv_entity:
+          name: "Television (Android TV Remote media player)"
+          description: >-
+            Select the TV media_player created by the official
+            Android TV Remote integration, not an unrelated TV entity.
+            ON, PLAYING, PAUSED, IDLE and BUFFERING count as active.
+            OFF, STANDBY, UNKNOWN and UNAVAILABLE count as inactive.
+          selector:
+            entity:
+              filter:
+                - domain: media_player
+        ambilight_entity:
+          name: "Ambilight (light or switch)"
+          description: >-
+            Select the retrofit Ambilight entity. Only this entity
+            is switched by the automation.
+          selector:
+            entity:
+              filter:
+                - domain: light
+                - domain: switch
+    conditions_section:
+      name: "🎛️ 02 | Freely combined permission conditions"
+      icon: mdi:filter-outline
+      description: >-
+        Conditions are optional. Use the visual condition editor
+        to combine ANY supported Home Assistant conditions. All
+        top-level entries must pass (AND). Add OR/AND groups for
+        other combinations. Examples: sun below horizon, numeric
+        lux below 20, time 18:00-23:30, or occupancy sensor ON.
+        Whenever TV is active but a condition fails, Ambilight
+        is turned OFF. A later passing condition can turn it ON.
+      input:
+        enable_conditions:
+          name: "When Ambilight is allowed to be on"
+          description: >-
+            Any mix of Sun, Numeric state, Time, State, Device,
+            Template, AND and OR conditions. Leave empty for
+            unconditional TV-following.
+          default: []
+          selector:
+            condition: {}
+        watch_entities:
+          name: "Recheck immediately when these entities change"
+          description: >-
+            Include the occupancy, lux, presence or other sensor
+            entities referenced above for immediate updates.
+            sun.sun is selected by default. Keep at least one
+            entity selected. Time conditions are also checked
+            every minute even without a time sensor.
+          default:
+            - sun.sun
+          selector:
+            entity:
+              multiple: true
+    safety_section:
+      name: "⏱️ 03 | Optional maximum-on safety guard"
+      icon: mdi:shield-clock-outline
+      collapsed: true
+      description: >-
+        A stuck TV ON state cannot be verified from Home Assistant
+        alone. Set a duration to cap one Ambilight ON session.
+        Create a dedicated input_boolean helper and select it below.
+        When the limit is reached, the helper locks out automatic
+        reactivation until the TV reports OFF. An HA restart can
+        reset entity state timestamps and thus the elapsed time.
+      input:
+        max_on_minutes:
+          name: "Maximum continuous Ambilight ON time (0 = off)"
+          description: >-
+            Counted from the Ambilight entity's last OFF-to-ON
+            state change, not from a TV app/source change.
+            Requires the timeout lockout helper below if nonzero.
+          default: 0
+          selector:
+            number:
+              min: 0
+              max: 1440
+              step: 1
+              mode: box
+              unit_of_measurement: min
+        timeout_behavior:
+          name: "When maximum ON time is reached"
+          description: >-
+            Turn off immediately, or send an actionable Companion
+            notification and leave Ambilight ON until the button
+            is tapped. If no valid mobile notify action is configured
+            in notify mode, the safe fallback is direct turn off.
+          default: turn_off
+          selector:
+            select:
+              options:
+                - label: "Turn Ambilight off immediately"
+                  value: turn_off
+                - label: "Notify with a Turn off button"
+                  value: notify
+        timeout_lockout:
+          name: "Dedicated timeout lockout helper (required if limit > 0)"
+          description: >-
+            Create an input_boolean helper under Settings > Devices
+            & Services > Helpers. Use one helper per Ambilight
+            automation. The automation turns it ON at timeout
+            and clears it when TV reports OFF.
+          default: ""
+          selector:
+            entity:
+              filter:
+                - domain: input_boolean
+        mobile_notify_action:
+          name: "Companion mobile notification action (notify mode)"
+          description: >-
+            Example notify.mobile_app_phone. The standard Companion
+            mobile app notify action supports a Turn off button;
+            generic notify entities may not. If this is empty or
+            invalid, the fallback is to turn Ambilight off and
+            create a persistent configuration warning.
+          default: ""
+          selector:
+            text: {}
+
+variables:
+  tv_entity: !input tv_entity
+  ambilight_entity: !input ambilight_entity
+  max_on_minutes: !input max_on_minutes
+  timeout_behavior: !input timeout_behavior
+  timeout_lockout: !input timeout_lockout
+  mobile_notify_action: !input mobile_notify_action
+  off_action_key: "{{ 'TV_AMBILIGHT_OFF_' ~ this.entity_id }}"
+  timeout_notice_id: "{{ 'tv_ambilight_timeout_' ~ (this.entity_id | replace('.', '_')) }}"
+  helper_configured: "{{ timeout_lockout is string and timeout_lockout.startswith('input_boolean.') }}"
+  tv_is_active: "{{ states(tv_entity) in ['on', 'playing', 'paused', 'idle', 'buffering'] }}"
+  ambilight_is_on: "{{ is_state(ambilight_entity, 'on') }}"
+  lockout_is_on: "{{ helper_configured and is_state(timeout_lockout, 'on') }}"
+  on_age_seconds: >-
+    {% set entity = states[ambilight_entity] %}
+    {{ [0, as_timestamp(now()) - as_timestamp(entity.last_changed, 0)] | max
+       if entity is not none and entity.state == 'on' else 0 }}
+
+triggers:
+  - trigger: state
+    entity_id: !input tv_entity
+    id: tv_changed
+  - trigger: state
+    entity_id: !input ambilight_entity
+    id: ambilight_changed
+  - trigger: state
+    entity_id: !input watch_entities
+    id: dependency_changed
+  - trigger: time_pattern
+    minutes: "/1"
+    id: reconcile
+  - trigger: homeassistant
+    event: start
+    id: startup
+  - trigger: event
+    event_type: mobile_app_notification_action
+    id: notification_action
+
+conditions: []
+
+actions:
+  - choose:
+      - alias: "Handle only this automation's actionable notification"
+        conditions:
+          - condition: template
+            value_template: >-
+              {{ trigger.id == 'notification_action' and
+                 trigger.event.data.get('action') == off_action_key }}
+        sequence:
+          - if:
+              - condition: template
+                value_template: "{{ helper_configured }}"
+            then:
+              - action: input_boolean.turn_on
+                target:
+                  entity_id: "{{ timeout_lockout }}"
+          - if:
+              - condition: template
+                value_template: "{{ is_state(ambilight_entity, 'on') }}"
+            then:
+              - action: homeassistant.turn_off
+                target:
+                  entity_id: "{{ ambilight_entity }}"
+      - alias: "Reconcile the TV, permission conditions and maximum-on timer"
+        conditions:
+          - condition: template
+            value_template: "{{ trigger.id != 'notification_action' }}"
+        sequence:
+          - if:
+              - condition: template
+                value_template: "{{ is_state(tv_entity, 'off') and helper_configured and lockout_is_on }}"
+            then:
+              - action: input_boolean.turn_off
+                target:
+                  entity_id: "{{ timeout_lockout }}"
+          - choose:
+              - alias: "Fail safely if timeout enabled without its lockout helper"
+                conditions:
+                  - condition: template
+                    value_template: "{{ max_on_minutes | int(0) > 0 and not helper_configured }}"
+                sequence:
+                  - if:
+                      - condition: template
+                        value_template: "{{ is_state(ambilight_entity, 'on') }}"
+                    then:
+                      - action: homeassistant.turn_off
+                        target:
+                          entity_id: "{{ ambilight_entity }}"
+                  - if:
+                      - condition: template
+                        value_template: "{{ trigger.id in ['tv_changed', 'startup'] }}"
+                    then:
+                      - action: persistent_notification.create
+                        data:
+                          notification_id: "{{ timeout_notice_id }}_missing_helper"
+                          title: "TV Ambilight: timeout helper required"
+                          message: >-
+                            Maximum-on protection is enabled, but no
+                            dedicated input_boolean helper is selected.
+                            Ambilight remains off until the helper is
+                            configured, or the maximum duration is set
+                            to zero.
+              - alias: "TV is active and all selected permission conditions pass"
+                conditions:
+                  - condition: template
+                    value_template: "{{ tv_is_active }}"
+                  - condition: and
+                    conditions: !input enable_conditions
+                sequence:
+                  - choose:
+                      - alias: "One ON session has reached its maximum runtime"
+                        conditions:
+                          - condition: template
+                            value_template: >-
+                              {{ is_state(ambilight_entity, 'on') and
+                                 max_on_minutes | int(0) > 0 and
+                                 not lockout_is_on and
+                                 on_age_seconds | float(0) >=
+                                   (max_on_minutes | int(0) * 60) }}
+                        sequence:
+                          - action: input_boolean.turn_on
+                            target:
+                              entity_id: "{{ timeout_lockout }}"
+                          - choose:
+                              - alias: "Send an actionable mobile push and wait for manual OFF"
+                                conditions:
+                                  - condition: template
+                                    value_template: >-
+                                      {{ timeout_behavior == 'notify' and
+                                         mobile_notify_action |
+                                         regex_match('^notify\\.mobile_app_[a-z0-9_]+$') }}
+                                sequence:
+                                  - action: "{{ mobile_notify_action }}"
+                                    data:
+                                      title: "TV Ambilight: time limit reached"
+                                      message: >-
+                                        Ambilight has been on for at least
+                                        {{ max_on_minutes | int(0) }} minutes.
+                                        Turn it off using the action below.
+                                      data:
+                                        tag: "{{ timeout_notice_id }}"
+                                        actions:
+                                          - action: "{{ off_action_key }}"
+                                            title: "Turn off Ambilight"
+                                    continue_on_error: true
+                            default:
+                              - action: homeassistant.turn_off
+                                target:
+                                  entity_id: "{{ ambilight_entity }}"
+                              - if:
+                                  - condition: template
+                                    value_template: "{{ timeout_behavior == 'notify' }}"
+                                then:
+                                  - action: persistent_notification.create
+                                    data:
+                                      notification_id: "{{ timeout_notice_id }}"
+                                      title: "TV Ambilight: turned off at time limit"
+                                      message: >-
+                                        No valid notify.mobile_app_* action
+                                        was configured for the actionable
+                                        notification. Ambilight was turned
+                                        off for safety. Configure a Companion
+                                        notification action to enable the
+                                        Turn off button.
+                      - alias: "Switch ON only if there is no timeout lockout"
+                        conditions:
+                          - condition: template
+                            value_template: >-
+                              {{ is_state(ambilight_entity, 'off') and
+                                 not is_state(timeout_lockout, 'on') }}
+                        sequence:
+                          - action: homeassistant.turn_on
+                            target:
+                              entity_id: "{{ ambilight_entity }}"
+            default:
+              - alias: "TV is inactive or permission conditions no longer pass"
+                if:
+                  - condition: template
+                    value_template: "{{ is_state(ambilight_entity, 'on') }}"
+                then:
+                  - action: homeassistant.turn_off
+                    target:
+                      entity_id: "{{ ambilight_entity }}"
+
+mode: restart
+max_exceeded: silent
