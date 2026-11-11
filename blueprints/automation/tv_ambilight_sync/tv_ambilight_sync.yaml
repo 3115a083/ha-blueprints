@@ -281,63 +281,7 @@ actions:
                                     value_template: >-
                                       {{ timeout_behavior == 'notify' and
                                          mobile_notify_action |
-                                         regex_match('^notify\\.mobile_app_[a-z0-9_]+ }}
-                                sequence:
-                                  - action: "{{ mobile_notify_action }}"
-                                    data:
-                                      title: "TV Ambilight: time limit reached"
-                                      message: >-
-                                        Ambilight has been on for at least
-                                        {{ max_on_minutes | int(0) }} minutes.
-                                        Turn it off using the action below.
-                                      data:
-                                        tag: "{{ timeout_notice_id }}"
-                                        actions:
-                                          - action: "{{ off_action_key }}"
-                                            title: "Turn off Ambilight"
-                                    continue_on_error: true
-                            default:
-                              - action: homeassistant.turn_off
-                                target:
-                                  entity_id: "{{ ambilight_entity }}"
-                              - if:
-                                  - condition: template
-                                    value_template: "{{ timeout_behavior == 'notify' }}"
-                                then:
-                                  - action: persistent_notification.create
-                                    data:
-                                      notification_id: "{{ timeout_notice_id }}"
-                                      title: "TV Ambilight: turned off at time limit"
-                                      message: >-
-                                        No valid notify.mobile_app_* action
-                                        was configured for the actionable
-                                        notification. Ambilight was turned
-                                        off for safety. Configure a Companion
-                                        notification action to enable the
-                                        Turn off button.
-                      - alias: "Switch ON only if there is no timeout lockout"
-                        conditions:
-                          - condition: template
-                            value_template: >-
-                              {{ is_state(ambilight_entity, 'off') and
-                                 not is_state(timeout_lockout, 'on') }}
-                        sequence:
-                          - action: homeassistant.turn_on
-                            target:
-                              entity_id: "{{ ambilight_entity }}"
-            default:
-              - alias: "TV is inactive or permission conditions no longer pass"
-                if:
-                  - condition: template
-                    value_template: "{{ is_state(ambilight_entity, 'on') }}"
-                then:
-                  - action: homeassistant.turn_off
-                    target:
-                      entity_id: "{{ ambilight_entity }}"
-
-mode: restart
-max_exceeded: silent
-) }}
+                                         regex_match('^notify\\.mobile_app_[a-z0-9_]+$') }}
                                 sequence:
                                   - action: "{{ mobile_notify_action }}"
                                     data:
