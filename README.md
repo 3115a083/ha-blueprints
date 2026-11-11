@@ -8,6 +8,7 @@ A collection of reusable, configurable **Home Assistant blueprints** maintained 
 | --- | --- | --- | --- | --- |
 | **🔐 Unlock Sequence** | Detect ordered button/event/MQTT sequences with independent time limits, optional persistent lockout and explicit authorization checks. | [Setup and security](blueprints/automation/unlock_sequence/README.md) | [Import blueprint](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2F3115a083%2Fha-blueprints%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Funlock_sequence%2Funlock_sequence.yaml) | `https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/unlock_sequence/unlock_sequence.yaml` · [Copy URL](#copy-unlock-sequence-url) |
 | **🚪 Multi-Room Door & Window Watchdog** | Monitor contacts across multiple rooms in one automation: long-open alerts, Zigbee offline/unknown warnings, optional last_seen silence checks, reminders and mobile/persistent notifications. | [Setup and limitations](blueprints/automation/multi_room_contact_watchdog/README.md) | [Import blueprint](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2F3115a083%2Fha-blueprints%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fmulti_room_contact_watchdog%2Fmulti_room_contact_watchdog.yaml) | `https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/multi_room_contact_watchdog/multi_room_contact_watchdog.yaml` · [Copy URL](#copy-multi-room-door-window-watchdog-url) |
+| **📺 TV Ambilight Sync** | Synchronize a retrofit light/switch with Android TV Remote using freely combined conditions and an optional timeout safeguard with an actionable notification. | [Setup and safeguards](blueprints/automation/tv_ambilight_sync/README.md) | [Import blueprint](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2F3115a083%2Fha-blueprints%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Ftv_ambilight_sync%2Ftv_ambilight_sync.yaml) | `https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/tv_ambilight_sync/tv_ambilight_sync.yaml` · [Copy URL](#copy-tv-ambilight-sync-url) |
 | **💡 Multi-Zone Motion Lights** | Control any number of motion-lit rooms in one automation. Each zone has its own light targets, lux/sun conditions and off timer; adjacent-room occupancy can keep its lights on and add an exit grace period. | [Setup and behavior](blueprints/automation/multi_zone_motion_lights/README.md) | [Import blueprint](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2F3115a083%2Fha-blueprints%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fmulti_zone_motion_lights%2Fmulti_zone_motion_lights.yaml) | `https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/multi_zone_motion_lights/multi_zone_motion_lights.yaml` · [Copy URL](#copy-multi-zone-motion-lights-url) |
 | **🏠 Area Occupancy Manager** | Detect occupied/vacant areas using people, devices, and optional sensors. Run configurable actions, with guest/sleep protections and independent timed routines. | [Setup and examples](blueprints/automation/occupancy/README.md) | [Import blueprint](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2F3115a083%2Fha-blueprints%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Foccupancy%2Farea_occupancy_manager.yaml) | `https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/occupancy/area_occupancy_manager.yaml` · [Copy URL](#copy-area-occupancy-manager-url) |
 | **🌅 Sunrise Alarm / Light Wake-Up** | Start lights a configurable time before a phone alarm. Linear, ramp-up or instant brightening, with optional start, completion and alarm-time actions. | [Setup and examples](blueprints/automation/alarm_light/README.md) | [Import blueprint](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2F3115a083%2Fha-blueprints%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Falarm_light%2Falarm_light.yaml) | `https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/alarm_light/alarm_light.yaml` · [Copy URL](#copy-sunrise-alarm-light-wake-up-url) |
@@ -26,6 +27,12 @@ Paste a **blueprint YAML URL**, not a My Home Assistant redirect, into **Setting
 
 ```text
 https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/unlock_sequence/unlock_sequence.yaml
+```
+
+### Copy TV Ambilight Sync URL
+
+```text
+https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/tv_ambilight_sync/tv_ambilight_sync.yaml
 ```
 
 ### Copy Multi-Room Door Window Watchdog URL
@@ -125,6 +132,10 @@ blueprints/
       README.md
     multi_room_contact_watchdog/
       multi_room_contact_watchdog.yaml
+      README.md
+      CHANGELOG.md
+    tv_ambilight_sync/
+      tv_ambilight_sync.yaml
       README.md
       CHANGELOG.md
     multi_zone_motion_lights/
