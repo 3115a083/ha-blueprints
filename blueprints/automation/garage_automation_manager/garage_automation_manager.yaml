@@ -1,0 +1,664 @@
+blueprint:
+  name: "🚗 Garage Automation Manager | Calendar, Arrival & Safe Closing"
+  author: "3115a083"
+  domain: automation
+  homeassistant:
+    min_version: "2026.11.0"
+  source_url: https://github.com/3115a083/ha-blueprints/blob/main/blueprints/automation/garage_automation_manager/garage_automation_manager.yaml
+  description: >-
+    Open one garage door from matching calendar events with an adjustable
+    advance offset, a weekly Schedule helper, a deliberate custom
+    request, or a proximity sensor that crosses the arrival threshold
+    while a selected Android Auto/Bluetooth connection sensor is ON.
+    Each opening route can be disabled. Shared opening conditions can
+    be combined freely using Home Assistant's visual AND/OR editor.
+
+    Optionally close automatically after a configurable time, after
+    a selected door opens, or after an explicit request. The closing
+    timer uses a dedicated date-and-time input_datetime helper so
+    its deadline and notification extensions survive automation reloads.
+    A configurable Companion app warning supports Extend, Close now
+    and Cancel buttons. Automatic closing does NOT require approval,
+    but it is forbidden unless a real obstruction/clearance sensor
+    currently confirms a clear path and the cover reports OPEN.
+    Missing or unavailable safety information always blocks closing.
+
+    This blueprint only issues cover.open_cover/cover.close_cover.
+    It cannot replace a physical garage-door entrapment detector,
+    motor auto-reverse mechanism, or certified safety hardware.
+    Test hardware safety separately before enabling automatic closing.
+  input:
+    door_section:
+      name: "🚪 01 | Garage door"
+      icon: mdi:garage
+      input:
+        garage_cover:
+          name: "Garage cover entity"
+          description: >-
+            Select a cover with reliable closed/open/opening/closing
+            feedback and native cover.open_cover / cover.close_cover
+            commands. Do not use an unverified toggle relay.
+          selector:
+            entity:
+              filter:
+                - domain: cover
+        open_conditions:
+          name: "Optional shared opening permission conditions"
+          description: >-
+            Use any Home Assistant conditions. Top-level entries use
+            AND; add OR groups for alternatives. Applies to all
+            automatic opening routes. Empty means no extra restriction.
+          default: []
+          selector:
+            condition: {}
+        close_conditions:
+          name: "Optional shared closing permission conditions"
+          description: >-
+            These are checked IMMEDIATELY BEFORE every close command,
+            including the mobile Close now action. Empty means no
+            additional restrictions, but the clearance sensor remains
+            mandatory.
+          default: []
+          selector:
+            condition: {}
+    calendar_section:
+      name: "📅 02 | Calendar-based opening"
+      icon: mdi:calendar-clock
+      collapsed: true
+      input:
+        calendar_enabled:
+          name: "Enable opening before matching calendar events"
+          default: false
+          selector:
+            boolean: {}
+        calendar_entity:
+          name: "Calendar to watch"
+          default: calendar.garage_placeholder
+          selector:
+            entity:
+              filter:
+                - domain: calendar
+        calendar_offset:
+          name: "Calendar event start offset (choose Before)"
+          description: >-
+            Default: 15 minutes BEFORE the event. Use the
+            offset-style duration selector to pick any other
+            advance time. Positive After offsets are supported
+            by Home Assistant but are not typical for this use.
+          default:
+            minutes: -15
+          selector:
+            duration:
+              mode: offset
+              enable_day: false
+              enable_second: false
+        calendar_summary_filter:
+          name: "Event title contains (case-insensitive)"
+          description: >-
+            Default: Garage. Only matching event titles open
+            the garage. Leave empty to match every event.
+            Does not search descriptions.
+          default: "Garage"
+          selector:
+            text: {}
+        calendar_allow_all_day:
+          name: "Allow all-day events to open the garage"
+          description: >-
+            Disabled by default to avoid opening the garage at
+            midnight for an all-day calendar entry.
+          default: false
+          selector:
+            boolean: {}
+    schedule_section:
+      name: "🗓️ 03 | Weekly schedule opening"
+      icon: mdi:calendar-week
+      collapsed: true
+      input:
+        schedule_enabled:
+          name: "Enable weekly schedule opening"
+          default: false
+          selector:
+            boolean: {}
+        schedule_entity:
+          name: "Schedule helper with selected times and weekdays"
+          description: >-
+            Create a Schedule helper in Settings > Devices & Services
+            > Helpers. The garage opens when a scheduled block
+            STARTS (the helper changes to ON).
+          default: schedule.garage_placeholder
+          selector:
+            entity:
+              filter:
+                - domain: schedule
+    custom_open_section:
+      name: "🎛️ 04 | Custom opening request"
+      icon: mdi:gesture-tap
+      collapsed: true
+      input:
+        custom_open_enabled:
+          name: "Enable custom opening request"
+          default: false
+          selector:
+            boolean: {}
+        custom_open_requests:
+          name: "Request entities (OFF to ON)"
+          description: >-
+            Select one or more input_boolean or binary_sensor
+            entities. Switching a selected entity ON is an
+            opening request. Add restrictions above under
+            Shared opening permission conditions.
+          default:
+            - input_boolean.garage_open_request_placeholder
+          selector:
+            entity:
+              multiple: true
+              filter:
+                - domain: input_boolean
+                - domain: binary_sensor
+    vehicle_section:
+      name: "🚗 05 | Approaching home by car"
+      icon: mdi:car-connected
+      collapsed: true
+      input:
+        vehicle_enabled:
+          name: "Enable approach-based opening"
+          default: false
+          selector:
+            boolean: {}
+        vehicle_distance_sensor:
+          name: "Proximity distance sensor to home"
+          description: >-
+            Prefer an individual sensor from Home Assistant Proximity.
+            It must report a numerical distance. The threshold uses
+            the SAME units as this sensor (km, mi or meters).
+          default: sensor.garage_arrival_distance_placeholder
+          selector:
+            entity:
+              filter:
+                - domain: sensor
+        vehicle_direction_sensor:
+          name: "Proximity direction sensor"
+          description: >-
+            From the same tracked person/device as the distance
+            sensor. Must report towards, not stationary or arrived.
+          default: sensor.garage_arrival_direction_placeholder
+          selector:
+            entity:
+              filter:
+                - domain: sensor
+        vehicle_connection_sensors:
+          name: "Android Auto or car Bluetooth connected sensors"
+          description: >-
+            Select binary sensors whose ON state confirms the
+            car connection. If several are selected, ANY may
+            be ON. Companion sensors vary across phones; you
+            may create a template binary sensor for Bluetooth.
+          default: []
+          selector:
+            entity:
+              multiple: true
+              filter:
+                - domain: binary_sensor
+        vehicle_distance_threshold:
+          name: "Open when distance crosses below"
+          description: >-
+            Must use the selected distance sensor's native
+            units. Requires a valid previous value ABOVE
+            the threshold and a current value BELOW or EQUAL.
+          default: 0.5
+          selector:
+            number:
+              min: 0.01
+              max: 10000
+              step: any
+              mode: box
+    closing_section:
+      name: "🔒 06 | Automatic closing"
+      icon: mdi:shield-check
+      description: >-
+        Every closing route requires the cover to report OPEN,
+        a real clearance sensor to report its configured safe
+        state, and the shared closing conditions to pass.
+        No bypass is provided for automatic closing.
+      input:
+        automatic_closing_enabled:
+          name: "Enable time-based automatic closing"
+          default: false
+          selector:
+            boolean: {}
+        close_after_minutes:
+          name: "Close after this many minutes OPEN"
+          description: >-
+            The timer starts when the cover changes to OPEN,
+            not when an open command is issued.
+          default: 20
+          selector:
+            number:
+              min: 1
+              max: 1440
+              step: 1
+              mode: box
+              unit_of_measurement: min
+        close_deadline_helper:
+          name: "Date AND time helper (required for timed closing)"
+          description: >-
+            Create a dedicated input_datetime helper with both
+            Date and Time enabled. Its stored deadline survives
+            automation reloads and can be extended by mobile.
+            A missing helper disables timed closing.
+          default: input_datetime.garage_close_deadline_placeholder
+          selector:
+            entity:
+              filter:
+                - domain: input_datetime
+        safety_clear_sensor:
+          name: "Obstruction / clearance binary sensor (required for ALL closing)"
+          description: >-
+            Select a sensor that independently confirms it is
+            SAFE to close. By default OFF means clear and ON
+            means blocked; invert below if needed. Unknown,
+            unavailable and an unconfigured placeholder are
+            NEVER treated as clear. Physical motor safety must
+            also be independently installed and verified.
+          default: binary_sensor.garage_clearance_placeholder
+          selector:
+            entity:
+              filter:
+                - domain: binary_sensor
+        safety_clear_state:
+          name: "Sensor state that means clear / safe"
+          default: "off"
+          selector:
+            select:
+              options:
+                - label: "OFF means clear"
+                  value: "off"
+                - label: "ON means clear (inverted contact)"
+                  value: "on"
+        door_open_close_enabled:
+          name: "Close when the selected house door opens"
+          default: false
+          selector:
+            boolean: {}
+        house_door_sensor:
+          name: "House door contact sensor"
+          description: "When this contact becomes ON (open), request garage closing."
+          default: binary_sensor.garage_house_door_placeholder
+          selector:
+            entity:
+              filter:
+                - domain: binary_sensor
+        custom_close_enabled:
+          name: "Enable custom closing request"
+          default: false
+          selector:
+            boolean: {}
+        custom_close_requests:
+          name: "Request closing when these entities become ON"
+          description: >-
+            Select binary sensors or input_boolean entities.
+            Shared closing conditions and clearance sensor
+            are still enforced.
+          default:
+            - input_boolean.garage_close_request_placeholder
+          selector:
+            entity:
+              multiple: true
+              filter:
+                - domain: input_boolean
+                - domain: binary_sensor
+    notification_section:
+      name: "🔔 07 | Timed close warning & extensions"
+      icon: mdi:bell-alert-outline
+      collapsed: true
+      input:
+        notify_before_minutes:
+          name: "Warn this many minutes before timed close (0 = none)"
+          description: >-
+            Runs once when the deadline enters the warning
+            window. Intended for a mobile Companion notify
+            action that supports buttons.
+          default: 5
+          selector:
+            number:
+              min: 0
+              max: 120
+              step: 1
+              mode: box
+              unit_of_measurement: min
+        mobile_notify_action:
+          name: "Companion notification service (optional)"
+          description: >-
+            Example notify.mobile_app_phone. Supports
+            Extend, Close now and Cancel automatic closing.
+            Without it, automatic closing still occurs when
+            enabled and safe.
+          default: ""
+          selector:
+            text: {}
+        extension_minutes:
+          name: "Minutes added by an Extend button"
+          default: 10
+          selector:
+            number:
+              min: 1
+              max: 240
+              step: 1
+              mode: box
+              unit_of_measurement: min
+    advanced_section:
+      name: "⚙️ 08 | Additional actions & diagnostics"
+      icon: mdi:tune
+      collapsed: true
+      input:
+        on_open_command:
+          name: "Optional actions after sending an OPEN command"
+          description: >-
+            Runs after the command is attempted, not after
+            verified physical opening. Does not bypass safety.
+          default: []
+          selector:
+            action: {}
+        on_close_command:
+          name: "Optional actions after sending a CLOSE command"
+          description: >-
+            Runs after the command is attempted, not after
+            verified physical closing. Does not bypass safety.
+          default: []
+          selector:
+            action: {}
+        warn_configuration:
+          name: "Warn if timed closing lacks a configured deadline / safety sensor"
+          default: true
+          selector:
+            boolean: {}
+
+variables:
+  garage: !input garage_cover
+  calendar_enabled: !input calendar_enabled
+  calendar_filter: !input calendar_summary_filter
+  calendar_all_day: !input calendar_allow_all_day
+  schedule_enabled: !input schedule_enabled
+  custom_open_enabled: !input custom_open_enabled
+  vehicle_enabled: !input vehicle_enabled
+  distance_threshold: !input vehicle_distance_threshold
+  distance_sensor: !input vehicle_distance_sensor
+  direction_sensor: !input vehicle_direction_sensor
+  vehicle_connection_sensors: !input vehicle_connection_sensors
+  close_enabled: !input automatic_closing_enabled
+  close_after: !input close_after_minutes
+  deadline_helper: !input close_deadline_helper
+  safety_sensor: !input safety_clear_sensor
+  safe_state: !input safety_clear_state
+  door_close_enabled: !input door_open_close_enabled
+  custom_close_enabled: !input custom_close_enabled
+  notification_advance: !input notify_before_minutes
+  notify_action: !input mobile_notify_action
+  extend_minutes: !input extension_minutes
+  warn_configuration: !input warn_configuration
+  helper_ready: >-
+    {{ deadline_helper != 'input_datetime.garage_close_deadline_placeholder'
+       and states(deadline_helper) not in ['unknown', 'unavailable'] }}
+  clearance_ready: >-
+    {{ safety_sensor != 'binary_sensor.garage_clearance_placeholder'
+       and states(safety_sensor) == safe_state }}
+  deadline_ts: >-
+    {{ as_timestamp(states(deadline_helper), 0) if
+       deadline_helper != 'input_datetime.garage_close_deadline_placeholder'
+       else 0 }}
+  timestamp_now: "{{ as_timestamp(now()) }}"
+  action_extend: "{{ 'GARAGE_EXTEND_' ~ this.entity_id }}"
+  action_cancel: "{{ 'GARAGE_CANCEL_' ~ this.entity_id }}"
+  action_close_now: "{{ 'GARAGE_CLOSE_NOW_' ~ this.entity_id }}"
+  notice_tag: "{{ 'garage_auto_close_' ~ (this.entity_id | replace('.', '_')) }}"
+
+triggers:
+  - trigger: calendar
+    id: calendar_open
+    entity_id: !input calendar_entity
+    event: start
+    offset: !input calendar_offset
+    enabled: !input calendar_enabled
+  - trigger: state
+    id: schedule_open
+    entity_id: !input schedule_entity
+    to: "on"
+    enabled: !input schedule_enabled
+  - trigger: state
+    id: custom_open
+    entity_id: !input custom_open_requests
+    to: "on"
+    enabled: !input custom_open_enabled
+  - trigger: state
+    id: vehicle_approach
+    entity_id: !input vehicle_distance_sensor
+    enabled: !input vehicle_enabled
+  - trigger: state
+    id: garage_opened
+    entity_id: !input garage_cover
+    to: "open"
+  - trigger: state
+    id: house_door_opened
+    entity_id: !input house_door_sensor
+    to: "on"
+    enabled: !input door_open_close_enabled
+  - trigger: state
+    id: custom_close
+    entity_id: !input custom_close_requests
+    to: "on"
+    enabled: !input custom_close_enabled
+  - trigger: state
+    id: deadline_changed
+    entity_id: !input close_deadline_helper
+    enabled: !input automatic_closing_enabled
+  - trigger: time_pattern
+    id: minute_check
+    minutes: "/1"
+  - trigger: event
+    id: mobile_action
+    event_type: mobile_app_notification_action
+  - trigger: homeassistant
+    id: startup
+    event: start
+
+conditions: []
+
+actions:
+  - variables:
+      is_mobile_extend: >-
+        {{ trigger.id == 'mobile_action'
+           and trigger.event.data.get('action') == action_extend }}
+      is_mobile_cancel: >-
+        {{ trigger.id == 'mobile_action'
+           and trigger.event.data.get('action') == action_cancel }}
+      is_mobile_close: >-
+        {{ trigger.id == 'mobile_action'
+           and trigger.event.data.get('action') == action_close_now }}
+      calendar_match: >-
+        {{ calendar_enabled and trigger.id == 'calendar_open'
+           and (calendar_all_day
+                or not trigger.calendar_event.all_day | default(false))
+           and (calendar_filter | lower in
+                (trigger.calendar_event.summary | default('', true) | lower)) }}
+      arrival_match: >-
+        {% if trigger.id == 'vehicle_approach' and vehicle_enabled
+              and trigger.from_state is not none
+              and trigger.to_state is not none %}
+          {% set previous = trigger.from_state.state %}
+          {% set current = trigger.to_state.state %}
+          {% set connected = expand(vehicle_connection_sensors)
+              | selectattr('state', 'eq', 'on') | list | count > 0 %}
+          {{ is_number(previous) and is_number(current)
+             and previous | float(99999) > distance_threshold | float(0)
+             and current | float(99999) <= distance_threshold | float(0)
+             and states(direction_sensor) == 'towards'
+             and connected }}
+        {% else %}
+          false
+        {% endif %}
+      open_requested: >-
+        {{ calendar_match
+           or (trigger.id == 'schedule_open' and schedule_enabled)
+           or (trigger.id == 'custom_open' and custom_open_enabled)
+           or arrival_match }}
+      close_requested: >-
+        {{ (trigger.id == 'house_door_opened' and door_close_enabled)
+           or (trigger.id == 'custom_close' and custom_close_enabled)
+           or is_mobile_close
+           or (trigger.id == 'minute_check' and close_enabled
+               and helper_ready | bool(false)
+               and deadline_ts | float(0) > 0
+               and timestamp_now | float(0) >= deadline_ts | float(0)
+               and timestamp_now | float(0) -
+                   deadline_ts | float(0) <= 300) }}
+  - choose:
+      - alias: "Extend the stored close deadline from a matching phone action"
+        conditions:
+          - condition: template
+            value_template: >-
+              {{ is_mobile_extend and close_enabled
+                 and helper_ready | bool(false)
+                 and is_state(garage, 'open')
+                 and deadline_ts | float(0) > 0
+                 and deadline_ts | float(0) >
+                     timestamp_now | float(0) - 300 }}
+        sequence:
+          - action: input_datetime.set_datetime
+            target:
+              entity_id: "{{ deadline_helper }}"
+            data:
+              timestamp: >-
+                {{ ([deadline_ts | float(0),
+                     timestamp_now | float(0)] | max) +
+                   (extend_minutes | int(10)) * 60 }}
+      - alias: "Cancel this opening cycle's automatic close via phone"
+        conditions:
+          - condition: template
+            value_template: >-
+              {{ is_mobile_cancel and close_enabled
+                 and helper_ready | bool(false)
+                 and is_state(garage, 'open') }}
+        sequence:
+          - action: input_datetime.set_datetime
+            target:
+              entity_id: "{{ deadline_helper }}"
+            data:
+              timestamp: "{{ timestamp_now | float(0) - 86400 }}"
+      - alias: "Start a fresh close deadline on real garage OPEN transition"
+        conditions:
+          - condition: template
+            value_template: >-
+              {{ trigger.id == 'garage_opened'
+                 and close_enabled
+                 and helper_ready | bool(false)
+                 and trigger.from_state is not none
+                 and trigger.from_state.state != 'open' }}
+        sequence:
+          - action: input_datetime.set_datetime
+            target:
+              entity_id: "{{ deadline_helper }}"
+            data:
+              timestamp: >-
+                {{ timestamp_now | float(0) +
+                   (close_after | int(20)) * 60 }}
+  - if:
+      - condition: template
+        value_template: >-
+          {{ trigger.id in ['minute_check', 'deadline_changed']
+             and close_enabled
+             and helper_ready | bool(false)
+             and is_state(garage, 'open')
+             and deadline_ts | float(0) > 0
+             and notification_advance | int(0) > 0
+             and notify_action | regex_match('^notify\\.mobile_app_[a-z0-9_]+$')
+             and timestamp_now | float(0) < deadline_ts | float(0)
+             and deadline_ts | float(0) -
+                 timestamp_now | float(0) <=
+                 (notification_advance | int(0)) * 60
+             and (trigger.id == 'deadline_changed'
+                  or deadline_ts | float(0) -
+                     timestamp_now | float(0) >
+                     (notification_advance | int(0) - 1) * 60) }}
+    then:
+      - action: "{{ notify_action }}"
+        data:
+          title: "Garage closes soon"
+          message: >-
+            The garage is scheduled to close in approximately
+            {{ ((deadline_ts | float(0) -
+                timestamp_now | float(0)) / 60) | round(0) | int }} minute(s).
+            Extend or cancel if needed. Closing remains subject to
+            the obstruction sensor and all closing conditions.
+          data:
+            tag: "{{ notice_tag }}"
+            actions:
+              - action: "{{ action_extend }}"
+                title: "Extend"
+              - action: "{{ action_close_now }}"
+                title: "Close now"
+              - action: "{{ action_cancel }}"
+                title: "Cancel automatic closing"
+        continue_on_error: true
+  - choose:
+      - alias: "Open once for a permitted event"
+        conditions:
+          - condition: template
+            value_template: "{{ open_requested and is_state(garage, 'closed') }}"
+          - condition: and
+            conditions: !input open_conditions
+        sequence:
+          - action: cover.open_cover
+            target:
+              entity_id: "{{ garage }}"
+            continue_on_error: true
+          - choose: []
+            default: !input on_open_command
+      - alias: "Close only with a current independent clearance confirmation"
+        conditions:
+          - condition: template
+            value_template: >-
+              {{ close_requested and is_state(garage, 'open')
+                 and clearance_ready | bool(false) }}
+          - condition: and
+            conditions: !input close_conditions
+        sequence:
+          - action: cover.close_cover
+            target:
+              entity_id: "{{ garage }}"
+            continue_on_error: true
+          - if:
+              - condition: template
+                value_template: "{{ close_enabled and helper_ready | bool(false) }}"
+            then:
+              - action: input_datetime.set_datetime
+                target:
+                  entity_id: "{{ deadline_helper }}"
+                data:
+                  timestamp: "{{ timestamp_now | float(0) - 86400 }}"
+          - choose: []
+            default: !input on_close_command
+      - alias: "Surface missing safety or deadline configuration"
+        conditions:
+          - condition: template
+            value_template: >-
+              {{ warn_configuration and trigger.id in
+                   ['startup', 'garage_opened'] and
+                 ((close_enabled and not helper_ready | bool(false)) or
+                  ((close_enabled or door_close_enabled or
+                    custom_close_enabled) and
+                    safety_sensor == 'binary_sensor.garage_clearance_placeholder')) }}
+        sequence:
+          - action: persistent_notification.create
+            data:
+              notification_id: "garage_manager_setup_{{ this.entity_id | replace('.', '_') }}"
+              title: "Garage automation requires safety configuration"
+              message: >-
+                Automatic close requires a real clearance sensor.
+                Timed close additionally needs a dedicated date-and-time
+                input_datetime helper. Missing requirements disable
+                affected closing routes. Do not bypass physical
+                garage-door safety mechanisms.
+
+mode: queued
+max: 20
+max_exceeded: warning
