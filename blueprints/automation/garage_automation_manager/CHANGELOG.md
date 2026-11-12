@@ -1,3 +1,10 @@
+## 2026-11-12 | GPS direction fluctuation tolerance
+
+- Ignore transient Proximity `away_from` states while tracking an approaching car.
+- Require a configurable continuous `away_from` period (default 3 minutes) before canceling the trip, using a native state trigger with `for`.
+- Preserve the trip across short `towards` / `away_from` oscillations and `stationary` stops; still cancel on observed vehicle disconnect, unknown direction, stale trip, or arrival.
+- Added regression tests for transient direction changes and confirmed sustained departure. Documented the native Proximity tolerance-distance setting.
+
 ## 2026-11-12 | Calendar permissions, notification targets, Proximity arrival
 
 - Added optional calendar-only person-at-home restriction and visual AND/OR conditions without changing other opening routes.

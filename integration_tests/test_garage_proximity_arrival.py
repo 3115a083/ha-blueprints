@@ -144,7 +144,7 @@ async def test_optional_extra_home_center_radius_blocks_early_zone_arrival(tmp_p
 
 
 @pytest.mark.asyncio
-async def test_bluetooth_disconnection_or_direction_away_resets_trip(tmp_path):
+async def test_bluetooth_disconnect_and_sustained_away_reset_trip(tmp_path):
     hass, calls, setup, run = await build(tmp_path, **config())
     try:
         setup()
@@ -160,6 +160,15 @@ async def test_bluetooth_disconnection_or_direction_away_resets_trip(tmp_path):
         assert hass.states.get(TRIP).state != "", (
             "Stopping briefly in traffic must not discard a car trip")
         await run("vehicle_approach", to_state=direction(hass, "away_from"))
+        assert hass.states.get(TRIP).state != "", (
+            "A single spurious away_from update must not lose the trip")
+        await run("vehicle_approach", to_state=direction(hass, "towards"))
+        assert hass.states.get(TRIP).state != ""
+        await run("vehicle_approach", to_state=direction(hass, "away_from"))
+        assert hass.states.get(TRIP).state != ""
+        # Represents the separate state trigger firing after its 3-minute
+        # continuous away_from requirement, not the initial noisy update.
+        await run("vehicle_away_confirmed", to_state=hass.states.get(DIRECTION))
         assert hass.states.get(TRIP).state == ""
 
         trip(hass)

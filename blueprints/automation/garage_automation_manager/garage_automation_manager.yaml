@@ -331,6 +331,24 @@ blueprint:
               step: 1
               mode: box
               unit_of_measurement: min
+        vehicle_away_confirmation_minutes:
+          name: "Confirm sustained travel AWAY before resetting trip"
+          description: >-
+            GPS fluctuations can make Proximity alternate between
+            towards and away_from. Ignore short away_from reports.
+            Cancel the stored car approach only when Proximity
+            stays continuously away_from for this many minutes.
+            Default 3 minutes. A new towards or stationary state
+            resets the confirmation timer. Bluetooth disconnects
+            and unknown Proximity state still cancel the trip.
+          default: 3
+          selector:
+            number:
+              min: 1
+              max: 15
+              step: 1
+              mode: box
+              unit_of_measurement: min
         vehicle_nearby_meters:
           name: "Optional extra distance limit (0 = Home zone only)"
           description: >-
@@ -593,6 +611,7 @@ variables:
   vehicle_session_helper: !input vehicle_session_helper
   vehicle_min_approach_meters: !input vehicle_min_approach_meters
   vehicle_min_connection_minutes: !input vehicle_min_connection_minutes
+  vehicle_away_confirmation_minutes: !input vehicle_away_confirmation_minutes
   vehicle_max_trip_minutes: !input vehicle_max_trip_minutes
   vehicle_ha_distance_unit: !input vehicle_ha_distance_unit
   close_enabled: !input automatic_closing_enabled
@@ -645,6 +664,13 @@ triggers:
   - trigger: state
     id: vehicle_approach
     entity_id: !input vehicle_proximity_direction
+    enabled: !input vehicle_enabled
+  - trigger: state
+    id: vehicle_away_confirmed
+    entity_id: !input vehicle_proximity_direction
+    to: "away_from"
+    for:
+      minutes: !input vehicle_away_confirmation_minutes
     enabled: !input vehicle_enabled
   - trigger: state
     id: vehicle_distance_changed
@@ -818,7 +844,7 @@ actions:
                and timestamp_now | float(0) -
                    deadline_ts | float(0) <= 300) }}
   - choose:
-      - alias: "Reset observed trip when car disconnects or Proximity turns away"
+      - alias: "Reset trip after disconnect, bad proximity or sustained departure"
         conditions:
           - condition: template
             value_template: >-
@@ -830,7 +856,9 @@ actions:
                        and not (car_connected | bool(false)))
                    or (trigger.id == 'vehicle_approach'
                        and trigger.to_state is not none
-                       and trigger.to_state.state in ['away_from', 'unknown'])) }}
+                       and trigger.to_state.state == 'unknown')
+                   or (trigger.id == 'vehicle_away_confirmed'
+                       and is_state(vehicle_proximity_direction, 'away_from'))) }}
         sequence:
           - action: input_text.set_value
             target:

@@ -87,6 +87,7 @@ class GarageManagerTests(unittest.TestCase):
         self.assertEqual(self.inputs["vehicle_proximity_distance"]["selector"]["entity"]["filter"], [{"domain": "sensor"}])
         self.assertEqual(self.inputs["vehicle_max_gps_accuracy_meters"]["default"], 25)
         self.assertEqual(self.inputs["vehicle_min_connection_minutes"]["default"], 2)
+        self.assertEqual(self.inputs["vehicle_away_confirmation_minutes"]["default"], 3)
         self.assertEqual(self.inputs["vehicle_min_approach_meters"]["default"], 300)
         self.assertEqual(
             self.inputs["vehicle_session_helper"]["selector"]["entity"]["filter"],
@@ -242,18 +243,30 @@ class GarageManagerTests(unittest.TestCase):
             "calendar_open", "schedule_open", "custom_open", "vehicle_approach",
             "garage_opened", "house_door_opened", "custom_close",
             "vehicle_bluetooth_changed", "vehicle_distance_changed",
-            "vehicle_android_auto_changed",
+            "vehicle_android_auto_changed", "vehicle_away_confirmed",
             "deadline_changed", "minute_check", "mobile_action", "startup",
         })
         for trigger in self.data["triggers"]:
             if trigger["id"] in {
                 "calendar_open", "schedule_open", "custom_open", "vehicle_approach",
                 "vehicle_bluetooth_changed", "vehicle_distance_changed",
-                "vehicle_android_auto_changed",
+                "vehicle_android_auto_changed", "vehicle_away_confirmed",
                 "house_door_opened", "custom_close", "deadline_changed",
             }:
                 self.assertIn("enabled", trigger)
         self.assertNotIn("state_changed", self.text)
+        confirm = next(t for t in self.data["triggers"]
+                       if t["id"] == "vehicle_away_confirmed")
+        self.assertEqual(confirm["to"], "away_from")
+        self.assertEqual(confirm["for"], {
+            "minutes": "!input vehicle_away_confirmation_minutes"
+        })
+        self.assertIn(
+            "trigger.id == 'vehicle_away_confirmed'", self.text
+        )
+        self.assertNotIn(
+            "trigger.to_state.state in ['away_from', 'unknown']", self.text
+        )
 
     def test_all_closing_routes_enforce_safety(self):
         source = self.text
