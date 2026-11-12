@@ -772,8 +772,10 @@ actions:
         {% endif %}
       trip_session: >-
         {% if trip_helper_ready | bool(false) %}
-          {% set value = states(vehicle_session_helper) | from_json(default={}) %}
-          {{ value if value is mapping else {} }}
+          {% set parts = states(vehicle_session_helper).split('|') %}
+          {{ dict(s=parts[0] | int(0), d=parts[1] | float(0))
+             if parts | count == 2 and is_number(parts[0])
+             and is_number(parts[1]) else {} }}
         {% else %}
           {{ {} }}
         {% endif %}
@@ -855,8 +857,7 @@ actions:
               entity_id: "{{ vehicle_session_helper }}"
             data:
               value: >-
-                {{ dict(s=timestamp_now | int(0),
-                        d=proximity_distance_meters | float(0)) | to_json }}
+                {{ timestamp_now | int(0) }}|{{ proximity_distance_meters | float(0) }}
   - choose:
       - alias: "Extend the stored close deadline from a matching phone action"
         conditions:

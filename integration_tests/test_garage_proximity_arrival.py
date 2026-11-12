@@ -1,5 +1,4 @@
 """Proximity direction, sustained Bluetooth, calendar and notify target tests."""
-import json
 from datetime import datetime, timezone
 from time import time
 
@@ -41,10 +40,9 @@ def car(hass, name="My Car"):
 
 
 def trip(hass, start_distance=900, since_seconds=180):
-    hass.states.async_set(TRIP, json.dumps({
-        "s": int(time()) - since_seconds,
-        "d": start_distance,
-    }))
+    hass.states.async_set(
+        TRIP, f"{int(time()) - since_seconds}|{start_distance}"
+    )
 
 
 def config(**kwargs):
@@ -78,9 +76,10 @@ async def test_proximity_towards_starts_trip_arrived_opens_after_approach_and_ti
         assert not actions(calls, "cover", "open_cover")
         writes = actions(calls, "input_text", "set_value")
         assert len(writes) == 1
-        saved = json.loads(writes[0]["value"])
-        assert 899 <= saved["d"] <= 901
-        assert saved["s"] > 0
+        parts = writes[0]["value"].split("|")
+        assert len(parts) == 2
+        assert 899 <= float(parts[1]) <= 901
+        assert int(parts[0]) > 0
 
         # A connection observed only a few seconds ago cannot open the door.
         distance(hass, 0)
