@@ -818,7 +818,7 @@ actions:
                and timestamp_now | float(0) -
                    deadline_ts | float(0) <= 300) }}
   - choose:
-      - alias: "Reset old approach session when car connection drops or direction changes"
+      - alias: "Reset observed trip when car disconnects or Proximity turns away"
         conditions:
           - condition: template
             value_template: >-
@@ -830,7 +830,7 @@ actions:
                        and not (car_connected | bool(false)))
                    or (trigger.id == 'vehicle_approach'
                        and trigger.to_state is not none
-                       and trigger.to_state.state not in ['towards', 'arrived'])) }}
+                       and trigger.to_state.state in ['away_from', 'unknown'])) }}
         sequence:
           - action: input_text.set_value
             target:

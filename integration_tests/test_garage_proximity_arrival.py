@@ -156,6 +156,9 @@ async def test_bluetooth_disconnection_or_direction_away_resets_trip(tmp_path):
 
         car(hass)
         trip(hass)
+        await run("vehicle_approach", to_state=direction(hass, "stationary"))
+        assert hass.states.get(TRIP).state != "", (
+            "Stopping briefly in traffic must not discard a car trip")
         await run("vehicle_approach", to_state=direction(hass, "away_from"))
         assert hass.states.get(TRIP).state == ""
 
