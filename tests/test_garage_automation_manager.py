@@ -161,12 +161,19 @@ class GarageManagerTests(unittest.TestCase):
         self.assertIn("trigger.event.data.get('action') == action_extend", source)
         self.assertIn("trigger.event.data.get('action') == action_close_now", source)
         self.assertIn("trigger.event.data.get('action') == action_cancel", source)
+        allowed = {
+            "cover.open_cover", "cover.close_cover", "input_datetime.set_datetime",
+            "persistent_notification.create", "{{ notify_action }}",
+            "{{ action_extend }}", "{{ action_cancel }}", "{{ action_close_now }}",
+        }
         self.assertEqual(
             {s["action"] for s in walk(self.data["actions"])
-             if isinstance(s, dict) and "action" in s},
-            {"cover.open_cover", "cover.close_cover", "input_datetime.set_datetime",
-             "persistent_notification.create", "{{ notify_action }}"},
+             if isinstance(s, dict) and "action" in s}, allowed
         )
+        self.assertIn("calendar_match | bool(false)", source)
+        self.assertIn("arrival_match | bool(false)", source)
+        self.assertIn("open_requested | bool(false)", source)
+        self.assertIn("close_requested | bool(false)", source)
 
 
 if __name__ == "__main__":
