@@ -46,4 +46,4 @@ jobs:
       - name: Install pinned Home Assistant 2026.11.0
         run: python -m pip install -r integration_tests/requirements-2026.11.0.txt
       - name: Validate all schemas and exercise contact watchdog on real HA 2026.11.0
-        run: timeout 120s python -m pytest integration_tests/test_catalog.py integration_tests/test_multi_room_contact_watchdog.py integration_tests/test_tv_ambilight_sync.py integration_tests/test_garage_automation_manager.py -vv --maxfail=1
+        run: timeout 120s python -m pytest integration_tests/test_catalog.py integration_tests/test_multi_room_contact_watchdog.py integration_tests/test_tv_ambilight_sync.py integration_tests/test_garage_automation_manager.py integration_tests/test_garage_proximity_arrival.py -vv --maxfail=1

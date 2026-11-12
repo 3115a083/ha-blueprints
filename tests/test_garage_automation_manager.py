@@ -68,10 +68,34 @@ class GarageManagerTests(unittest.TestCase):
         self.assertEqual(self.inputs["calendar_summary_filter"]["default"], "Garage")
         self.assertEqual(self.inputs["calendar_offset"]["default"], {"minutes": -15})
         self.assertEqual(self.inputs["calendar_allow_all_day"]["default"], False)
+        self.assertEqual(self.inputs["calendar_home_person"]["default"], "")
+        self.assertEqual(self.inputs["calendar_open_conditions"]["default"], [])
+        self.assertEqual(
+            self.inputs["calendar_open_conditions"]["selector"], {"condition": {}}
+        )
         self.assertEqual(self.inputs["open_conditions"]["selector"], {"condition": {}})
         self.assertEqual(self.inputs["close_conditions"]["selector"], {"condition": {}})
         self.assertEqual(self.inputs["close_after_minutes"]["default"], 20)
         self.assertEqual(self.inputs["safety_clear_sensor"]["default"], "")
+        self.assertEqual(self.inputs["notify_entities"]["default"], [])
+        self.assertEqual(
+            self.inputs["notify_entities"]["selector"]["entity"]["filter"],
+            [{"domain": "notify"}],
+        )
+        self.assertEqual(self.inputs["vehicle_nearby_meters"]["default"], 0)
+        self.assertEqual(self.inputs["vehicle_proximity_direction"]["selector"]["entity"]["filter"], [{"domain": "sensor"}])
+        self.assertEqual(self.inputs["vehicle_proximity_distance"]["selector"]["entity"]["filter"], [{"domain": "sensor"}])
+        self.assertEqual(self.inputs["vehicle_max_gps_accuracy_meters"]["default"], 25)
+        self.assertEqual(self.inputs["vehicle_min_connection_minutes"]["default"], 2)
+        self.assertEqual(self.inputs["vehicle_min_approach_meters"]["default"], 300)
+        self.assertEqual(
+            self.inputs["vehicle_session_helper"]["selector"]["entity"]["filter"],
+            [{"domain": "input_text"}],
+        )
+        self.assertEqual(self.inputs["vehicle_bluetooth_device"]["default"], "")
+        self.assertEqual(self.inputs["vehicle_bluetooth_list_attribute"]["default"],
+                         "connected_paired_devices")
+        self.assertNotIn("vehicle_distance_sensor", self.inputs)
 
     def test_calendar_filter_and_all_day_guard(self):
         trigger = SimpleNamespace(
@@ -91,36 +115,117 @@ class GarageManagerTests(unittest.TestCase):
                                      calendar_enabled=True, calendar_all_day=False,
                                      calendar_filter="Garage"), "False")
 
-    def test_arrival_requires_threshold_crossing_direction_and_car(self):
-        def expand(items):
-            return [SimpleNamespace(state=x) for x in items]
-        base = dict(
-            trigger=SimpleNamespace(
-                id="vehicle_approach",
-                from_state=SimpleNamespace(state="1.0"),
-                to_state=SimpleNamespace(state="0.4"),
-            ),
-            vehicle_enabled=True, distance_threshold=0.5,
-            vehicle_connection_sensors=["on", "off"],
-            direction_sensor="sensor.direction",
-            states=lambda eid: "towards",
-            is_number=lambda x: bool(re.fullmatch(r"\d+(?:\.\d+)?", str(x))),
-            expand=expand,
-        )
-        self.assertEqual(self.render("arrival_match", **base), "True")
-        self.assertEqual(self.render(
-            "arrival_match", **(base | {"vehicle_connection_sensors": ["off"]})), "False")
-        self.assertEqual(self.render(
-            "arrival_match", **(base | {"states": lambda eid: "stationary"})), "False")
-        self.assertEqual(self.render(
-            "arrival_match", **(base | {"trigger": SimpleNamespace(
-                id="vehicle_approach", from_state=SimpleNamespace(state="0.2"),
-                to_state=SimpleNamespace(state="0.1"))})), "False")
-        self.assertEqual(self.render(
-            "arrival_match", **(base | {"trigger": SimpleNamespace(
-                id="vehicle_approach", from_state=SimpleNamespace(state="unknown"),
-                to_state=SimpleNamespace(state="0.4"))})), "False")
+    def test_bluetooth_exact_device_attribute_matching(self):
+        def expand(entities):
+            return [SimpleNamespace(state=v) for v in entities]
 
+        base = {
+            "vehicle_connection_sensors": [],
+            "vehicle_bluetooth_sensor": "sensor.phone_bluetooth_connection",
+            "vehicle_bluetooth_device": "My Car",
+            "vehicle_bluetooth_list_attribute": "connected_paired_devices",
+            "expand": expand,
+            "states": lambda e: "1",
+            "state_attr": lambda e, a: ["AA:BB:CC (My Car)", "11:22 (Headphones)"],
+        }
+        self.assertEqual(self.render("car_connected", **base), "True")
+        self.assertEqual(self.render(
+            "car_connected", **(base | {"vehicle_bluetooth_device": "My"})), "False")
+        self.assertEqual(self.render(
+            "car_connected", **(base | {
+                "vehicle_bluetooth_device": "My Car",
+                "state_attr": lambda e, a: ["AA:BB:CC (Other Car)"],
+            })), "False")
+        self.assertEqual(self.render(
+            "car_connected", **(base | {
+                "vehicle_bluetooth_device": "AA:BB:CC",
+            })), "True")
+        self.assertEqual(self.render(
+            "car_connected", **(base | {
+                "vehicle_bluetooth_device": "my car",
+                "states": lambda e: "unavailable",
+            })), "False")
+        self.assertEqual(self.render(
+            "car_connected", **(base | {
+                "vehicle_bluetooth_device": "",
+                "vehicle_connection_sensors": ["on"],
+            })), "True")
+
+    def test_arrival_requires_proximity_arrived_trip_distance_and_connection_duration(self):
+        base = {
+            "trigger": SimpleNamespace(
+                id="vehicle_approach",
+                to_state=SimpleNamespace(state="arrived"),
+            ),
+            "vehicle_enabled": True,
+            "trip_helper_ready": True,
+            "car_connected": True,
+            "gps_ready": True,
+            "gps_home_distance_meters": 40,
+            "proximity_distance_meters": 0,
+            "trip_session": {"s": 1000, "d": 550},
+            "trip_age_seconds": 180,
+            "vehicle_min_connection_minutes": 2,
+            "vehicle_min_approach_meters": 300,
+            "vehicle_max_trip_minutes": 90,
+            "vehicle_nearby_meters": 0,
+        }
+        self.assertEqual(self.render("arrival_match", **base), "True")
+        self.assertEqual(self.render("arrival_match", **(
+            base | {"trip_age_seconds": 30})), "False")
+        self.assertEqual(self.render("arrival_match", **(
+            base | {"trip_session": {"s": 1000, "d": 140}})), "False")
+        self.assertEqual(self.render("arrival_match", **(
+            base | {"car_connected": False})), "False")
+        self.assertEqual(self.render("arrival_match", **(
+            base | {"gps_ready": False})), "False")
+        self.assertEqual(self.render("arrival_match", **(
+            base | {"trip_age_seconds": 10000})), "False")
+        self.assertEqual(self.render("arrival_match", **(
+            base | {"vehicle_nearby_meters": 25})), "False")
+        self.assertEqual(self.render("arrival_match", **(
+            base | {"trigger": SimpleNamespace(
+                id="vehicle_approach", to_state=SimpleNamespace(state="towards"))})), "False")
+
+    def test_gps_accuracy_is_configurable_and_fresh(self):
+        import datetime
+
+        updated = datetime.datetime.fromtimestamp(
+            10000, datetime.timezone.utc,
+        )
+        tracker = SimpleNamespace(
+            state="home", last_updated=updated,
+            attributes={
+                "latitude": 52.52, "longitude": 13.405,
+                "gps_accuracy": 18,
+            },
+        )
+        base = {
+            "states": {"device_tracker.phone": tracker},
+            "vehicle_gps_tracker": "device_tracker.phone",
+            "vehicle_max_gps_accuracy_meters": 25,
+            "timestamp_now": 10050,
+            "as_timestamp": lambda val, default=0: val.timestamp(),
+            "is_number": lambda n: isinstance(n, (int, float)),
+        }
+        self.assertEqual(self.render("gps_ready", **base), "True")
+        self.assertEqual(self.render("gps_ready", **(
+            base | {"vehicle_max_gps_accuracy_meters": 10})), "False")
+        self.assertEqual(self.render("gps_ready", **(
+            base | {"timestamp_now": 10500})), "False")
+        tracker.attributes.pop("gps_accuracy")
+        self.assertEqual(self.render("gps_ready", **base), "False")
+
+    def test_proximity_distance_units_and_towards_state(self):
+        base = {
+            "vehicle_proximity_distance": "sensor.driver_distance",
+            "vehicle_ha_distance_unit": "km",
+            "states": lambda eid: "0.65",
+            "is_number": lambda s: True,
+        }
+        self.assertEqual(float(self.render("proximity_distance_meters", **base)), 650.0)
+        self.assertAlmostEqual(float(self.render("proximity_distance_meters", **(
+            base | {"vehicle_ha_distance_unit": "mi"}))), 1046.1, delta=0.2)
     def test_all_template_inputs_declared_and_parse(self):
         refs = set(re.findall(r"!input\s+([A-Za-z0-9_]+)", self.text))
         self.assertFalse(refs - set(self.inputs))
@@ -136,11 +241,15 @@ class GarageManagerTests(unittest.TestCase):
         self.assertEqual(ids, {
             "calendar_open", "schedule_open", "custom_open", "vehicle_approach",
             "garage_opened", "house_door_opened", "custom_close",
+            "vehicle_bluetooth_changed", "vehicle_distance_changed",
+            "vehicle_android_auto_changed",
             "deadline_changed", "minute_check", "mobile_action", "startup",
         })
         for trigger in self.data["triggers"]:
             if trigger["id"] in {
                 "calendar_open", "schedule_open", "custom_open", "vehicle_approach",
+                "vehicle_bluetooth_changed", "vehicle_distance_changed",
+                "vehicle_android_auto_changed",
                 "house_door_opened", "custom_close", "deadline_changed",
             }:
                 self.assertIn("enabled", trigger)
@@ -165,6 +274,7 @@ class GarageManagerTests(unittest.TestCase):
         allowed = {
             "cover.open_cover", "cover.close_cover", "input_datetime.set_datetime",
             "persistent_notification.create", "{{ notify_action }}",
+            "input_text.set_value", "notify.send_message",
             "{{ action_extend }}", "{{ action_cancel }}", "{{ action_close_now }}",
         }
         self.assertEqual(
@@ -175,6 +285,12 @@ class GarageManagerTests(unittest.TestCase):
         self.assertIn("arrival_match | bool(false)", source)
         self.assertIn("open_requested | bool(false)", source)
         self.assertIn("close_requested | bool(false)", source)
+        self.assertIn("conditions: !input calendar_open_conditions", source)
+        self.assertIn("is_state(calendar_home_person, 'home')", source)
+        self.assertIn("trip_session.get('s', 0)", source)
+        self.assertIn("trip_session.get('d', 0)", source)
+        self.assertIn("input_text.garage_arrival_trip_placeholder", source)
+        self.assertIn("action: notify.send_message", source)
 
 
 if __name__ == "__main__":
