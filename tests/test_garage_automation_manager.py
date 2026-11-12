@@ -71,8 +71,7 @@ class GarageManagerTests(unittest.TestCase):
         self.assertEqual(self.inputs["open_conditions"]["selector"], {"condition": {}})
         self.assertEqual(self.inputs["close_conditions"]["selector"], {"condition": {}})
         self.assertEqual(self.inputs["close_after_minutes"]["default"], 20)
-        self.assertEqual(self.inputs["safety_clear_sensor"]["default"],
-                         "binary_sensor.garage_clearance_placeholder")
+        self.assertEqual(self.inputs["safety_clear_sensor"]["default"], "")
 
     def test_calendar_filter_and_all_day_guard(self):
         trigger = SimpleNamespace(
@@ -153,7 +152,9 @@ class GarageManagerTests(unittest.TestCase):
         self.assertIn("and clearance_ready | bool(false)", source)
         self.assertIn("conditions: !input close_conditions", source)
         self.assertIn("is_state(garage, 'open')", source)
-        self.assertIn("binary_sensor.garage_clearance_placeholder", source)
+        self.assertIn("safety_sensor in ['', none]", source)
+        self.assertIn("states(safety_sensor) == safe_state", source)
+        self.assertNotIn("close_without_clearance_sensor", source)
         self.assertIn("as_timestamp(states(deadline_helper), 0)", source)
         self.assertIn("timestamp_now | float(0) - 86400", source)
         self.assertIn("timestamp_now | float(0) >= deadline_ts | float(0)", source)

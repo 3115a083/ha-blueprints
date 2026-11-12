@@ -312,3 +312,69 @@ async def test_unconfigured_deadline_does_not_send_automatic_close(tmp_path):
         assert not actions(calls, "cover", "close_cover")
     finally:
         await hass.async_stop()
+
+
+@pytest.mark.asyncio
+async def test_timer_closes_without_home_assistant_clearance_sensor(tmp_path):
+    hass, calls, setup, run = await build(
+        tmp_path, automatic_closing_enabled=True,
+        safety_clear_sensor="",
+    )
+    try:
+        setup(garage="open", safety="unknown")
+        hass.states.async_set(DEADLINE, datetime.fromtimestamp(
+            time() - 40, timezone.utc).strftime("%Y-%m-%d %H:%M:%S"))
+        await run("minute_check")
+        assert len(actions(calls, "cover", "close_cover")) == 1
+        assert hass.states.get(GARAGE).state == "closed"
+    finally:
+        await hass.async_stop()
+
+
+@pytest.mark.asyncio
+async def test_house_door_trigger_closes_without_home_assistant_clearance_sensor(tmp_path):
+    hass, calls, setup, run = await build(
+        tmp_path, door_open_close_enabled=True, house_door_sensor=DOOR,
+        safety_clear_sensor="",
+    )
+    try:
+        setup(garage="open", safety="unavailable")
+        await run("house_door_opened")
+        assert len(actions(calls, "cover", "close_cover")) == 1
+    finally:
+        await hass.async_stop()
+
+
+@pytest.mark.asyncio
+async def test_mobile_close_now_without_home_assistant_clearance_sensor(tmp_path):
+    hass, calls, setup, run = await build(
+        tmp_path, safety_clear_sensor="",
+    )
+    try:
+        setup(garage="open", safety="unknown")
+        await run("mobile_action", event=SimpleNamespace(
+            data={"action": "GARAGE_CLOSE_NOW_automation.garage_manager"}))
+        assert len(actions(calls, "cover", "close_cover")) == 1
+    finally:
+        await hass.async_stop()
+
+
+@pytest.mark.asyncio
+async def test_configured_sensor_blocks_closing_even_if_it_fails(tmp_path):
+    hass, calls, setup, run = await build(
+        tmp_path, automatic_closing_enabled=True,
+        safety_clear_sensor=CLEAR,
+    )
+    try:
+        setup(garage="open", safety="off")
+        hass.states.async_set(DEADLINE, datetime.fromtimestamp(
+            time() - 45, timezone.utc).strftime("%Y-%m-%d %H:%M:%S"))
+        for blocked in ("on", "unknown", "unavailable"):
+            hass.states.async_set(CLEAR, blocked)
+            await run("minute_check")
+            assert not actions(calls, "cover", "close_cover"), blocked
+        hass.states.async_set(CLEAR, "off")
+        await run("minute_check")
+        assert len(actions(calls, "cover", "close_cover")) == 1
+    finally:
+        await hass.async_stop()

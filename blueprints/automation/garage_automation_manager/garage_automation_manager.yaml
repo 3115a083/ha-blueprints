@@ -18,10 +18,13 @@ blueprint:
     timer uses a dedicated date-and-time input_datetime helper so
     its deadline and notification extensions survive automation reloads.
     A configurable Companion app warning supports Extend, Close now
-    and Cancel buttons. Automatic closing does NOT require approval,
-    but it is forbidden unless a real obstruction/clearance sensor
-    currently confirms a clear path and the cover reports OPEN.
-    Missing or unavailable safety information always blocks closing.
+    and Cancel buttons. Automatic closing does NOT require approval.
+    A Home Assistant obstruction sensor is OPTIONAL: when none is
+    selected, the garage can still close based on the cover state and
+    closing conditions, relying on the garage opener's independent
+    built-in obstruction detection and automatic reversal.
+    If a sensor is selected, an obstructed, unknown or unavailable
+    state always blocks the closing command.
 
     This blueprint only issues cover.open_cover/cover.close_cover.
     It cannot replace a physical garage-door entrapment detector,
@@ -56,8 +59,8 @@ blueprint:
           description: >-
             These are checked IMMEDIATELY BEFORE every close command,
             including the mobile Close now action. Empty means no
-            additional restrictions, but the clearance sensor remains
-            mandatory.
+            additional restrictions. A clearance sensor is optional;
+            if selected, it must confirm CLEAR before every close.
           default: []
           selector:
             condition: {}
@@ -216,10 +219,12 @@ blueprint:
       name: "🔒 06 | Automatic closing"
       icon: mdi:shield-check
       description: >-
-        Every closing route requires the cover to report OPEN,
-        a real clearance sensor to report its configured safe
-        state, and the shared closing conditions to pass.
-        No bypass is provided for automatic closing.
+        Every closing route requires the cover to report OPEN and
+        the shared closing conditions to pass. A Home Assistant
+        obstruction sensor is optional, and leaving it empty does
+        not disable automatic closing. When selected it must
+        report CLEAR. The garage motor must have independently
+        working obstruction detection and automatic reversal.
       input:
         automatic_closing_enabled:
           name: "Enable time-based automatic closing"
@@ -252,21 +257,21 @@ blueprint:
               filter:
                 - domain: input_datetime
         safety_clear_sensor:
-          name: "Obstruction / clearance binary sensor (required for ALL closing)"
+          name: "Optional obstruction / clearance binary sensor"
           description: >-
-            Select a sensor that independently confirms it is
-            SAFE to close. By default OFF means clear and ON
-            means blocked; invert below if needed. Unknown,
-            unavailable and an unconfigured placeholder are
-            NEVER treated as clear. Physical motor safety must
-            also be independently installed and verified.
-          default: binary_sensor.garage_clearance_placeholder
+            Leave empty if the garage opener uses its own built-in
+            obstruction detection and automatic reversal. In this
+            case no Home Assistant clearance sensor is required.
+            If you select a sensor, it must report the configured
+            CLEAR state. Blocked, unknown or unavailable always
+            prevents closing. Never disable physical motor safety.
+          default: ""
           selector:
             entity:
               filter:
                 - domain: binary_sensor
         safety_clear_state:
-          name: "Sensor state that means clear / safe"
+          name: "Sensor state that means clear / safe (if selected)"
           default: "off"
           selector:
             select:
@@ -297,8 +302,8 @@ blueprint:
           name: "Request closing when these entities become ON"
           description: >-
             Select binary sensors or input_boolean entities.
-            Shared closing conditions and clearance sensor
-            are still enforced.
+            Shared closing conditions always apply. If a
+            clearance sensor is selected, it must report CLEAR.
           default:
             - input_boolean.garage_close_request_placeholder
           selector:
@@ -368,7 +373,7 @@ blueprint:
           selector:
             action: {}
         warn_configuration:
-          name: "Warn if timed closing lacks a configured deadline / safety sensor"
+          name: "Warn if timed closing lacks a date-and-time helper"
           default: true
           selector:
             boolean: {}
@@ -400,8 +405,10 @@ variables:
     {{ deadline_helper != 'input_datetime.garage_close_deadline_placeholder'
        and states(deadline_helper) not in ['unknown', 'unavailable'] }}
   clearance_ready: >-
-    {{ safety_sensor != 'binary_sensor.garage_clearance_placeholder'
-       and states(safety_sensor) == safe_state }}
+    {{ safety_sensor in ['', none]
+       or (safety_sensor is string
+           and safety_sensor.startswith('binary_sensor.')
+           and states(safety_sensor) == safe_state) }}
   deadline_ts: >-
     {{ as_timestamp(states(deadline_helper), 0) if
        deadline_helper != 'input_datetime.garage_close_deadline_placeholder'
@@ -588,7 +595,7 @@ actions:
             {{ ((deadline_ts | float(0) -
                 timestamp_now | float(0)) / 60) | round(0) | int }} minute(s).
             Extend or cancel if needed. Closing remains subject to
-            the obstruction sensor and all closing conditions.
+            any selected obstruction sensor and all closing conditions.
           data:
             tag: "{{ notice_tag }}"
             actions:
@@ -613,7 +620,7 @@ actions:
             continue_on_error: true
           - choose: []
             default: !input on_open_command
-      - alias: "Close only with a current independent clearance confirmation"
+      - alias: "Close with current cover status and optional clearance sensor"
         conditions:
           - condition: template
             value_template: >-
@@ -637,27 +644,25 @@ actions:
                   timestamp: "{{ timestamp_now | float(0) - 86400 }}"
           - choose: []
             default: !input on_close_command
-      - alias: "Surface missing safety or deadline configuration"
+      - alias: "Warn when the timed close helper is missing"
         conditions:
           - condition: template
             value_template: >-
               {{ warn_configuration and trigger.id in
-                   ['startup', 'garage_opened'] and
-                 ((close_enabled and not helper_ready | bool(false)) or
-                  ((close_enabled or door_close_enabled or
-                    custom_close_enabled) and
-                    safety_sensor == 'binary_sensor.garage_clearance_placeholder')) }}
+                   ['startup', 'garage_opened'] and close_enabled
+                 and not helper_ready | bool(false) }}
         sequence:
           - action: persistent_notification.create
             data:
               notification_id: "garage_manager_setup_{{ this.entity_id | replace('.', '_') }}"
-              title: "Garage automation requires safety configuration"
+              title: "Garage automation: timed close helper missing"
               message: >-
-                Automatic close requires a real clearance sensor.
-                Timed close additionally needs a dedicated date-and-time
-                input_datetime helper. Missing requirements disable
-                affected closing routes. Do not bypass physical
-                garage-door safety mechanisms.
+                Time-based closing requires a dedicated input_datetime
+                helper with both date and time enabled. Without the
+                helper, timed closing stays disabled. A Home Assistant
+                obstruction sensor is optional; the garage opener
+                must provide independent physical obstruction detection
+                and automatic reversal.
 
 mode: queued
 max: 20

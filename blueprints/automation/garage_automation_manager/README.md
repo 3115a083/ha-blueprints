@@ -13,7 +13,7 @@ A single Home Assistant automation for **one garage cover**, with independently 
 2. Enable any combination of opening routes in sections 02 through 05. None is enabled by default.
 3. Optionally add opening and closing permission conditions in section 01. Use the Home Assistant visual condition editor, including nested AND/OR groups.
 4. To enable **automatic closing after a time**, create a dedicated Date and Time helper with BOTH date and time and select it in section 06. This is not just a timer reset on restart: the deadline is stored for reloads and button extensions.
-5. Choose an actual **clearance/obstruction binary sensor** that reports whether the closing path is safe. This is mandatory for ALL closing routes, including the Close now button. Set the state representing CLEAR, normally OFF. Unknown/unavailable, missing, or placeholder means **do not close**.
+5. **Optional:** Select a Home Assistant clearance/obstruction binary sensor. Leave it empty if your garage opener has its own independently functioning physical obstacle detection and automatic reversal. Automatic closing works without a Home Assistant sensor. If one is selected, the state representing CLEAR (normally OFF) is required for every close command. Blocked, unknown or unavailable always prevents closing.
 6. For actionable close-warning notifications, enter a valid Companion app service, such as notify.mobile_app_phone.
 
 ## Opening routes
@@ -44,9 +44,9 @@ Calendars may be refreshed by Home Assistant only approximately every 15 minutes
 | Own closing request | One or more chosen binary_sensor/input_boolean entities switch to ON |
 | Companion mobile button | Close now requests immediate closing after all current safety checks |
 
-**All closing routes check the same requirements:** The cover reports OPEN, the selected real obstruction/clearance sensor reports exactly the configured CLEAR state, and every configured shared closing permission condition passes. No closing command is sent while the garage is opening/closing, the sensor is unavailable/unknown, or the pathway is reported blocked.
+**All closing routes check the same requirements:** The cover reports OPEN and every configured shared closing permission condition passes. If a Home Assistant obstruction sensor was selected, it must also report the configured CLEAR state. **Without a selected sensor, automatic closing is allowed**, provided the opener's own physical obstruction detection and automatic reversal have been independently verified. No close command is sent while the cover reports opening, closing or an unavailable state. With a configured sensor, blocked, unknown and unavailable states prevent closing.
 
-No unsafe bypass is provided. A sensor state of "clear" is not proof of unobstructed physical space. The garage opener must independently handle beam interruption, load detection, obstruction reversal and local manual control.
+A Home Assistant sensor is supplementary to the opener's built-in protection. A sensor state of "clear" does not prove the closing path is unobstructed. The opener must independently handle beam interruption, load detection, obstruction reversal and local manual control. Do not use this blueprint to replace or disable those functions.
 
 **Timing:** The deadline is stored in an input_datetime with both date and time. A once-per-minute reconciliation requests closing when the deadline is reached and is no more than **5 minutes overdue**. Older overdue deadlines are deliberately not executed after a long outage. Blocked closing does NOT produce endless retries; once the 5-minute overdue window passes, that cycle needs manual inspection or a new deliberate request. After sending a close command, the stored deadline is invalidated to prevent repeated close commands. The automation does not claim that a service call proves the physical door completed its movement.
 
@@ -57,7 +57,7 @@ No unsafe bypass is provided. A sensor state of "clear" is not proof of unobstru
 Optionally send a Companion-app notification shortly before the timed deadline, e.g. 5 minutes in advance, with these buttons:
 
 - **Extend** adds a configurable number of minutes, default 10, to the stored deadline. A new warning can appear at the new deadline.
-- **Close now** requests immediate closing, subject to the current clearance sensor and all closing conditions.
+- **Close now** requests immediate closing, subject to any selected clearance sensor and all closing conditions.
 - **Cancel automatic closing** invalidates the current countdown. It applies to the current timed close only and does not disable independent house-door/custom close routes. A new physical OPEN transition creates a new countdown.
 
 The warning does **not** require confirmation to close. At the deadline, closing proceeds automatically if all safety checks pass. The Companion app action needs a service such as notify.mobile_app_phone. Without it, time-based closing still works but will not deliver the mobile warning. A valid service can be temporarily unreachable, so warnings are best-effort, not a safety control.
@@ -66,7 +66,7 @@ The warning does **not** require confirmation to close. At the deadline, closing
 
 - **Optional inputs:** Each opening and closing route can be disabled independently. Disabled triggers have valid placeholder entity IDs rather than wildcard event subscriptions; do not use these placeholders as actual sensors.
 - **Open/close race protection:** Automation runs are queued. Opening commands are issued only if the cover reports CLOSED; closing commands only if it reports OPEN.
-- **Safety sensor requirement:** Any automatic close route without a correctly configured and currently CLEAR sensor is blocked. Timed closing additionally needs the dedicated date-and-time helper.
+- **Optional Home Assistant safety sensor:** The field can be empty, with no additional software opt-in. If selected, the sensor must currently report CLEAR. Timed closing additionally needs the dedicated date-and-time helper. The opener's built-in collision detection and auto-reverse must remain independently functional.
 - **No unbounded polling:** Real changes use calendar, schedule and state triggers; a one-minute reconciliation handles the stored deadline and warning boundaries.
 - **Custom actions:** Optional actions run after an open or close command was attempted. These are not proof of final physical position. Cover state feedback must be checked separately.
 - **Vehicle direction:** Bluetooth and Android Auto integration sensors vary across phones. Use template binary_sensor helpers when needed. The presence of a car connection is only a gate; the spatial approach comes from a separate Proximity sensor.
@@ -77,8 +77,8 @@ The warning does **not** require confirmation to close. At the deadline, closing
 1. Validate actual hardware motor safety, manual stop, beam interruption and reversal independent of Home Assistant.
 2. With automatic closing OFF, test each opening source separately. Verify calendar title filter and all-day exclusion, exact schedule weekdays and distance crossing only while the car is connected and moving towards home.
 3. Select a test cover in a safe test environment. Confirm that shared opening conditions suppress unauthorized opens.
-4. Set a short close interval and a dedicated date/time helper. Verify deadline and that the cover only closes after the deadline when the clearance sensor reports CLEAR.
-5. Force the safety sensor to ON, unknown and unavailable. Verify no close command for timer, house-door trigger or Close now.
+4. Set a short close interval and a dedicated date/time helper. Verify that the cover closes after the deadline with **no Home Assistant safety sensor selected**, relying on the garage opener's built-in protection.
+5. Optionally select a Home Assistant sensor, then force it to ON, unknown and unavailable. Verify no close command for timer, house-door trigger or Close now. Restore CLEAR and verify closing is possible.
 6. Verify mobile warning, Extend and Cancel. Verify no automatic close after Cancel, and that safety checks still apply when Close now is used.
 7. Restart Home Assistant while a deadline is pending. Verify the helper's deadline persists; a long-overdue deadline must not trigger a surprise close.
 8. After any close command, independently check that the cover actually reaches CLOSED. Investigate failures; do not add blind repeated close commands.
