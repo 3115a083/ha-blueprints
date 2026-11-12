@@ -112,6 +112,28 @@ blueprint:
           default: false
           selector:
             boolean: {}
+        calendar_home_person:
+          name: "Optional person who must be HOME for calendar opening"
+          description: >-
+            Example: choose your person so a matching calendar entry
+            opens the garage only when that person is home. Leave
+            empty to skip this restriction. Does not affect other
+            opening routes.
+          default: ""
+          selector:
+            entity:
+              filter:
+                - domain: person
+        calendar_open_conditions:
+          name: "Extra permission conditions ONLY for calendar events"
+          description: >-
+            Combine any visual HA conditions, such as presence,
+            home occupancy, time, sun and AND/OR groups.
+            The title, optional person, these conditions and
+            shared opening permissions must ALL pass.
+          default: []
+          selector:
+            condition: {}
     schedule_section:
       name: "🗓️ 03 | Weekly schedule opening"
       icon: mdi:calendar-week
@@ -168,53 +190,228 @@ blueprint:
           default: false
           selector:
             boolean: {}
-        vehicle_distance_sensor:
-          name: "Proximity distance sensor to home"
+        vehicle_proximity_direction:
+          name: "Proximity direction sensor for Home"
           description: >-
-            Prefer an individual sensor from Home Assistant Proximity.
-            It must report a numerical distance. The threshold uses
-            the SAME units as this sensor (km, mi or meters).
-          default: sensor.garage_arrival_distance_placeholder
+            Choose the direction-of-travel sensor for the DRIVER
+            from the native Proximity integration. It reports
+            towards while approaching, and arrived on arrival.
+            Do not use the Nearest Direction sensor when it can
+            represent other people.
+          default: sensor.garage_proximity_direction_placeholder
           selector:
             entity:
               filter:
                 - domain: sensor
-        vehicle_direction_sensor:
-          name: "Proximity direction sensor"
+        vehicle_proximity_distance:
+          name: "Matching Proximity distance sensor for Home"
           description: >-
-            From the same tracked person/device as the distance
-            sensor. Must report towards, not stationary or arrived.
-          default: sensor.garage_arrival_direction_placeholder
+            Choose the distance sensor for the SAME DRIVER and
+            Home zone as the direction sensor above. Proximity
+            reports the distance from the EDGE of the zone,
+            and zero when arrived. It uses km or miles according
+            to Home Assistant's unit system.
+          default: sensor.garage_proximity_distance_placeholder
           selector:
             entity:
               filter:
                 - domain: sensor
+        vehicle_gps_tracker:
+          name: "Driver phone GPS tracker for accuracy"
+          description: >-
+            Choose the same driver's GPS device_tracker, usually
+            from the Companion app. GPS accuracy and optional
+            extra center-distance checks are taken from its
+            attributes. Missing/stale or imprecise GPS blocks
+            opening. Do not use a combined Wi-Fi/GPS person
+            entity for this accuracy check.
+          default: device_tracker.garage_arrival_gps_placeholder
+          selector:
+            entity:
+              filter:
+                - domain: device_tracker
         vehicle_connection_sensors:
-          name: "Android Auto or car Bluetooth connected sensors"
+          name: "Optional Android Auto connection binary sensors"
           description: >-
-            Select binary sensors whose ON state confirms the
-            car connection. If several are selected, ANY may
-            be ON. Companion sensors vary across phones; you
-            may create a template binary sensor for Bluetooth.
-          default: []
+            Select one or more binary sensors that are ON while
+            connected to the car. ANY one authorizes the
+            Proximity approach. Alternatively use the Bluetooth
+            Connection sensor and car device identity below.
+            When using only Bluetooth, leave the harmless
+            placeholder selected so the optional trigger
+            has a valid entity to watch.
+          default:
+            - binary_sensor.garage_car_connection_placeholder
           selector:
             entity:
               multiple: true
               filter:
                 - domain: binary_sensor
-        vehicle_distance_threshold:
-          name: "Open when distance crosses below"
+        vehicle_bluetooth_sensor:
+          name: "Optional phone Bluetooth Connection sensor"
           description: >-
-            Must use the selected distance sensor's native
-            units. Requires a valid previous value ABOVE
-            the threshold and a current value BELOW or EQUAL.
-          default: 0.5
+            Choose the Companion app SENSOR that counts connected
+            Bluetooth devices (not the Bluetooth on/off binary
+            sensor). It reports device lists in attributes.
+          default: sensor.garage_bluetooth_placeholder
+          selector:
+            entity:
+              filter:
+                - domain: sensor
+        vehicle_bluetooth_list_attribute:
+          name: "Connected Bluetooth device list"
+          description: >-
+            Normally connected_paired_devices. Never use
+            paired_devices: it includes disconnected car devices.
+          default: connected_paired_devices
+          selector:
+            select:
+              options:
+                - label: "Connected paired devices"
+                  value: connected_paired_devices
+                - label: "Connected non-paired devices"
+                  value: connected_not_paired_devices
+        vehicle_bluetooth_device:
+          name: "Car Bluetooth identity (exact name, MAC or list entry)"
+          description: >-
+            Copy a connected car entry from Developer Tools >
+            States > selected Bluetooth sensor. Enter its
+            exact device name, MAC address, or full displayed
+            entry e.g. AA:BB:CC:DD:EE:FF (Car Name).
+            The comparison ignores case but NOT partial names.
+            A dynamic dropdown of device VALUES is not
+            available in the native Blueprint selector.
+            Leave blank to use only the Android Auto sensor.
+          default: ""
+          selector:
+            text: {}
+        vehicle_session_helper:
+          name: "Trip session storage (required for car arrival)"
+          description: >-
+            Create a dedicated Text helper under Settings > Devices
+            & Services > Helpers > Text. Leave its initial value
+            empty, and ensure it can hold at least 100 characters.
+            The automation tracks a sustained car connection
+            while Proximity reports towards, the initial
+            Proximity distance from Home, and the trip start time.
+            It checks those records when Proximity reports arrived.
+            One helper per garage. Missing helper blocks opening.
+          default: input_text.garage_arrival_trip_placeholder
+          selector:
+            entity:
+              filter:
+                - domain: input_text
+        vehicle_min_approach_meters:
+          name: "Minimum measured approach towards home (meters)"
+          description: >-
+            The Proximity distance from the EDGE of the Home
+            zone must decrease by at least this amount during
+            an observed towards trip with car Bluetooth connected.
+            Default 300m. This is net approach, not wheel mileage.
+          default: 300
           selector:
             number:
-              min: 0.01
-              max: 10000
-              step: any
+              min: 50
+              max: 5000
+              step: 10
               mode: box
+              unit_of_measurement: m
+        vehicle_min_connection_minutes:
+          name: "Car connected for at least this long (minutes)"
+          description: >-
+            Counts from the first Proximity towards observation
+            with the car connection active, away from Home.
+            A reported Bluetooth or Android Auto disconnection
+            invalidates the trip. Default 2 minutes.
+          default: 2
+          selector:
+            number:
+              min: 1
+              max: 30
+              step: 1
+              mode: box
+              unit_of_measurement: min
+        vehicle_away_confirmation_minutes:
+          name: "Confirm sustained travel AWAY before resetting trip"
+          description: >-
+            GPS fluctuations can make Proximity alternate between
+            towards and away_from. Ignore short away_from reports.
+            Cancel the stored car approach only when Proximity
+            stays continuously away_from for this many minutes.
+            Default 3 minutes. A new towards or stationary state
+            resets the confirmation timer. Bluetooth disconnects
+            and unknown Proximity state still cancel the trip.
+          default: 3
+          selector:
+            number:
+              min: 1
+              max: 15
+              step: 1
+              mode: box
+              unit_of_measurement: min
+        vehicle_nearby_meters:
+          name: "Optional extra distance limit (0 = Home zone only)"
+          description: >-
+            With 0, opening occurs when Proximity reports
+            arrived and both trip requirements pass. The zone
+            may have a large radius; enter 25m to require
+            that the phone ALSO be that close to the center
+            of Home when the arrived event is received. This
+            can prevent opening if GPS hasn't updated in time.
+          default: 0
+          selector:
+            number:
+              min: 0
+              max: 150
+              step: 1
+              mode: box
+              unit_of_measurement: m
+        vehicle_max_gps_accuracy_meters:
+          name: "Maximum permitted phone GPS uncertainty (meters)"
+          description: >-
+            Adjustable maximum GPS uncertainty at Home arrival.
+            Default 25m, selectable 5 to 250. The selected
+            tracker must supply gps_accuracy and have updated
+            within the last five minutes. Smaller values can
+            reject valid arrivals on devices with poor GPS.
+          default: 25
+          selector:
+            number:
+              min: 5
+              max: 250
+              step: 1
+              mode: box
+              unit_of_measurement: m
+        vehicle_max_trip_minutes:
+          name: "Maximum age of an approach trip (minutes)"
+          description: >-
+            Ignore old connection/trip records after this period
+            to avoid opening on an unrelated later home arrival.
+            Default 90 minutes. A new observation away from
+            home can start a new trip.
+          default: 90
+          selector:
+            number:
+              min: 5
+              max: 240
+              step: 5
+              mode: box
+              unit_of_measurement: min
+        vehicle_ha_distance_unit:
+          name: "Home Assistant distance units for GPS calculations"
+          description: >-
+            Home Assistant's distance() returns km for metric
+            setups and miles for US setups. Choose the matching
+            unit so the close range is correctly converted to
+            meters. Wrong units may open too early.
+          default: km
+          selector:
+            select:
+              options:
+                - label: "Kilometers (metric)"
+                  value: km
+                - label: "Miles (US customary)"
+                  value: mi
     closing_section:
       name: "🔒 06 | Automatic closing"
       icon: mdi:shield-check
@@ -331,13 +528,28 @@ blueprint:
               step: 1
               mode: box
               unit_of_measurement: min
-        mobile_notify_action:
-          name: "Companion notification service (optional)"
+        notify_entities:
+          name: "Notification recipients (select one or more)"
           description: >-
-            Example notify.mobile_app_phone. Supports
-            Extend, Close now and Cancel automatic closing.
-            Without it, automatic closing still occurs when
-            enabled and safe.
+            Choose notify entities using the native picker.
+            These receive a text warning. Action buttons
+            require the Companion mobile service below,
+            because generic notify entities do not guarantee
+            actionable-push data. Avoid sending to the same
+            phone twice unless duplicates are wanted.
+          default: []
+          selector:
+            entity:
+              multiple: true
+              filter:
+                - domain: notify
+        mobile_notify_action:
+          name: "Companion service for actionable buttons (optional)"
+          description: >-
+            Example notify.mobile_app_phone. Enables Extend,
+            Close now and Cancel buttons. Notify entities above
+            only receive plain text. Leave empty if buttons
+            are not needed. Closing still works without it.
           default: ""
           selector:
             text: {}
@@ -383,13 +595,25 @@ variables:
   calendar_enabled: !input calendar_enabled
   calendar_filter: !input calendar_summary_filter
   calendar_all_day: !input calendar_allow_all_day
+  calendar_home_person: !input calendar_home_person
   schedule_enabled: !input schedule_enabled
   custom_open_enabled: !input custom_open_enabled
   vehicle_enabled: !input vehicle_enabled
-  distance_threshold: !input vehicle_distance_threshold
-  distance_sensor: !input vehicle_distance_sensor
-  direction_sensor: !input vehicle_direction_sensor
+  vehicle_gps_tracker: !input vehicle_gps_tracker
+  vehicle_proximity_direction: !input vehicle_proximity_direction
+  vehicle_proximity_distance: !input vehicle_proximity_distance
   vehicle_connection_sensors: !input vehicle_connection_sensors
+  vehicle_bluetooth_sensor: !input vehicle_bluetooth_sensor
+  vehicle_bluetooth_list_attribute: !input vehicle_bluetooth_list_attribute
+  vehicle_bluetooth_device: !input vehicle_bluetooth_device
+  vehicle_nearby_meters: !input vehicle_nearby_meters
+  vehicle_max_gps_accuracy_meters: !input vehicle_max_gps_accuracy_meters
+  vehicle_session_helper: !input vehicle_session_helper
+  vehicle_min_approach_meters: !input vehicle_min_approach_meters
+  vehicle_min_connection_minutes: !input vehicle_min_connection_minutes
+  vehicle_away_confirmation_minutes: !input vehicle_away_confirmation_minutes
+  vehicle_max_trip_minutes: !input vehicle_max_trip_minutes
+  vehicle_ha_distance_unit: !input vehicle_ha_distance_unit
   close_enabled: !input automatic_closing_enabled
   close_after: !input close_after_minutes
   deadline_helper: !input close_deadline_helper
@@ -399,6 +623,7 @@ variables:
   custom_close_enabled: !input custom_close_enabled
   notification_advance: !input notify_before_minutes
   notify_action: !input mobile_notify_action
+  notify_entity_ids: !input notify_entities
   extend_minutes: !input extension_minutes
   warn_configuration: !input warn_configuration
   helper_ready: >-
@@ -438,7 +663,26 @@ triggers:
     enabled: !input custom_open_enabled
   - trigger: state
     id: vehicle_approach
-    entity_id: !input vehicle_distance_sensor
+    entity_id: !input vehicle_proximity_direction
+    enabled: !input vehicle_enabled
+  - trigger: state
+    id: vehicle_away_confirmed
+    entity_id: !input vehicle_proximity_direction
+    to: "away_from"
+    for:
+      minutes: !input vehicle_away_confirmation_minutes
+    enabled: !input vehicle_enabled
+  - trigger: state
+    id: vehicle_distance_changed
+    entity_id: !input vehicle_proximity_distance
+    enabled: !input vehicle_enabled
+  - trigger: state
+    id: vehicle_bluetooth_changed
+    entity_id: !input vehicle_bluetooth_sensor
+    enabled: !input vehicle_enabled
+  - trigger: state
+    id: vehicle_android_auto_changed
+    entity_id: !input vehicle_connection_sensors
     enabled: !input vehicle_enabled
   - trigger: state
     id: garage_opened
@@ -487,22 +731,103 @@ actions:
                 or not trigger.calendar_event.all_day | default(false))
            and (calendar_filter | lower in
                 (trigger.calendar_event.summary | default('', true) | lower)) }}
-      arrival_match: >-
-        {% if trigger.id == 'vehicle_approach' and vehicle_enabled
-              and trigger.from_state is not none
-              and trigger.to_state is not none %}
-          {% set previous = trigger.from_state.state %}
-          {% set current = trigger.to_state.state %}
-          {% set connected = expand(vehicle_connection_sensors)
-              | selectattr('state', 'eq', 'on') | list | count > 0 %}
-          {{ is_number(previous) and is_number(current)
-             and previous | float(99999) > distance_threshold | float(0)
-             and current | float(99999) <= distance_threshold | float(0)
-             and states(direction_sensor) == 'towards'
-             and connected }}
-        {% else %}
-          false
+      trip_helper_ready: >-
+        {{ vehicle_session_helper is string
+           and vehicle_session_helper.startswith('input_text.')
+           and vehicle_session_helper != 'input_text.garage_arrival_trip_placeholder'
+           and states(vehicle_session_helper) not in ['unknown', 'unavailable'] }}
+      car_connected: >-
+        {% set match = namespace(ok=false) %}
+        {% for ent in expand(vehicle_connection_sensors) if ent.state == 'on' %}
+          {% set match.ok = true %}
+        {% endfor %}
+        {% set wanted = vehicle_bluetooth_device | trim | lower %}
+        {% if wanted and vehicle_bluetooth_sensor is string
+              and vehicle_bluetooth_sensor.startswith('sensor.')
+              and vehicle_bluetooth_sensor != 'sensor.garage_bluetooth_placeholder'
+              and states(vehicle_bluetooth_sensor) not in ['unknown', 'unavailable'] %}
+          {% set devices = state_attr(vehicle_bluetooth_sensor,
+                                     vehicle_bluetooth_list_attribute) %}
+          {% if devices is sequence and devices is not string %}
+            {% for raw in devices %}
+              {% set entry = raw | string | trim | lower %}
+              {% if entry == wanted
+                    or entry.startswith(wanted ~ ' (')
+                    or entry.endswith(' (' ~ wanted ~ ')') %}
+                {% set match.ok = true %}
+              {% endif %}
+            {% endfor %}
+          {% endif %}
         {% endif %}
+        {{ match.ok }}
+      proximity_distance_meters: >-
+        {% if vehicle_proximity_distance !=
+              'sensor.garage_proximity_distance_placeholder'
+              and is_number(states(vehicle_proximity_distance)) %}
+          {% set factor = 1609.344 if vehicle_ha_distance_unit == 'mi' else 1000 %}
+          {{ (states(vehicle_proximity_distance) | float(0) * factor) | round(1) }}
+        {% else %}
+          -1
+        {% endif %}
+      gps_ready: >-
+        {% set tracker = states[vehicle_gps_tracker] %}
+        {{ vehicle_gps_tracker != 'device_tracker.garage_arrival_gps_placeholder'
+           and tracker is not none
+           and tracker.state not in ['unknown', 'unavailable']
+           and is_number(tracker.attributes.get('latitude'))
+           and is_number(tracker.attributes.get('longitude'))
+           and is_number(tracker.attributes.get('gps_accuracy'))
+           and tracker.attributes.get('latitude') | float(999) >= -90
+           and tracker.attributes.get('latitude') | float(999) <= 90
+           and tracker.attributes.get('longitude') | float(999) >= -180
+           and tracker.attributes.get('longitude') | float(999) <= 180
+           and tracker.attributes.get('gps_accuracy') | float(999) <=
+               vehicle_max_gps_accuracy_meters | float(25)
+           and timestamp_now | float(0) -
+               as_timestamp(tracker.last_updated, 0) <= 300 }}
+      gps_home_distance_meters: >-
+        {% set tracker = states[vehicle_gps_tracker] %}
+        {% if gps_ready | bool(false) and tracker is not none %}
+          {% set latitude = tracker.attributes.get('latitude') | float %}
+          {% set longitude = tracker.attributes.get('longitude') | float %}
+          {% set dist = distance(latitude, longitude) %}
+          {% set factor = 1609.344 if vehicle_ha_distance_unit == 'mi' else 1000 %}
+          {{ (dist | float(-1) * factor) | round(1) }}
+        {% else %}
+          -1
+        {% endif %}
+      trip_session: >-
+        {% if trip_helper_ready | bool(false) %}
+          {% set parts = states(vehicle_session_helper).split('|') %}
+          {{ dict(s=parts[0] | int(0), d=parts[1] | float(0))
+             if parts | count == 2 and is_number(parts[0])
+             and is_number(parts[1]) else {} }}
+        {% else %}
+          {{ {} }}
+        {% endif %}
+      trip_age_seconds: >-
+        {{ timestamp_now | float(0) -
+           (trip_session.get('s', 0) | float(0)) }}
+      arrival_match: >-
+        {{ vehicle_enabled and trigger.id == 'vehicle_approach'
+           and trigger.to_state is not none
+           and trigger.to_state.state == 'arrived'
+           and trip_helper_ready | bool(false)
+           and car_connected | bool(false)
+           and gps_ready | bool(false)
+           and gps_home_distance_meters | float(-1) >= 0
+           and proximity_distance_meters | float(-1) >= 0
+           and trip_session.get('s', 0) | float(0) > 0
+           and trip_age_seconds | float(-1) >=
+                vehicle_min_connection_minutes | float(2) * 60
+           and trip_age_seconds | float(0) <=
+                vehicle_max_trip_minutes | float(90) * 60
+           and trip_session.get('d', 0) | float(0) -
+                proximity_distance_meters | float(999999) >=
+                vehicle_min_approach_meters | float(300)
+           and (vehicle_nearby_meters | float(0) == 0
+                or gps_home_distance_meters | float(999999) <=
+                    vehicle_nearby_meters | float(0)) }}
       open_requested: >-
         {{ (calendar_match | bool(false))
            or (trigger.id == 'schedule_open' and schedule_enabled)
@@ -518,6 +843,49 @@ actions:
                and timestamp_now | float(0) >= deadline_ts | float(0)
                and timestamp_now | float(0) -
                    deadline_ts | float(0) <= 300) }}
+  - choose:
+      - alias: "Reset trip after disconnect, bad proximity or sustained departure"
+        conditions:
+          - condition: template
+            value_template: >-
+              {{ vehicle_enabled and trip_helper_ready | bool(false)
+                 and (trigger.id == 'startup'
+                   or (trigger.id in
+                       ['vehicle_approach', 'vehicle_distance_changed',
+                        'vehicle_bluetooth_changed', 'vehicle_android_auto_changed']
+                       and not (car_connected | bool(false)))
+                   or (trigger.id == 'vehicle_approach'
+                       and trigger.to_state is not none
+                       and trigger.to_state.state == 'unknown')
+                   or (trigger.id == 'vehicle_away_confirmed'
+                       and is_state(vehicle_proximity_direction, 'away_from'))) }}
+        sequence:
+          - action: input_text.set_value
+            target:
+              entity_id: "{{ vehicle_session_helper }}"
+            data:
+              value: ""
+      - alias: "Start observing a car trip while Proximity says towards"
+        conditions:
+          - condition: template
+            value_template: >-
+              {{ vehicle_enabled
+                 and trigger.id in ['vehicle_approach', 'vehicle_distance_changed']
+                 and trip_helper_ready | bool(false)
+                 and car_connected | bool(false)
+                 and is_state(vehicle_proximity_direction, 'towards')
+                 and proximity_distance_meters | float(-1) >=
+                     vehicle_min_approach_meters | float(300)
+                 and (trip_session.get('s', 0) | float(0) == 0
+                      or trip_age_seconds | float(0) >
+                         vehicle_max_trip_minutes | float(90) * 60) }}
+        sequence:
+          - action: input_text.set_value
+            target:
+              entity_id: "{{ vehicle_session_helper }}"
+            data:
+              value: >-
+                {{ timestamp_now | int(0) }}|{{ proximity_distance_meters | float(0) }}
   - choose:
       - alias: "Extend the stored close deadline from a matching phone action"
         conditions:
@@ -577,7 +945,8 @@ actions:
              and is_state(garage, 'open')
              and deadline_ts | float(0) > 0
              and notification_advance | int(0) > 0
-             and notify_action | regex_match('^notify\\.mobile_app_[a-z0-9_]+$')
+             and (notify_action | regex_match('^notify\\.mobile_app_[a-z0-9_]+$')
+                  or notify_entity_ids | count > 0)
              and timestamp_now | float(0) < deadline_ts | float(0)
              and deadline_ts | float(0) -
                  timestamp_now | float(0) <=
@@ -587,25 +956,59 @@ actions:
                      timestamp_now | float(0) >
                      (notification_advance | int(0) - 1) * 60) }}
     then:
-      - action: "{{ notify_action }}"
-        data:
-          title: "Garage closes soon"
-          message: >-
+      - variables:
+          closing_warning_title: "Garage closes soon"
+          closing_warning_message: >-
             The garage is scheduled to close in approximately
             {{ ((deadline_ts | float(0) -
                 timestamp_now | float(0)) / 60) | round(0) | int }} minute(s).
             Extend or cancel if needed. Closing remains subject to
             any selected obstruction sensor and all closing conditions.
-          data:
-            tag: "{{ notice_tag }}"
-            actions:
-              - action: "{{ action_extend }}"
-                title: "Extend"
-              - action: "{{ action_close_now }}"
-                title: "Close now"
-              - action: "{{ action_cancel }}"
-                title: "Cancel automatic closing"
-        continue_on_error: true
+      - if:
+          - condition: template
+            value_template: "{{ notify_entity_ids | count > 0 }}"
+        then:
+          - action: notify.send_message
+            target:
+              entity_id: "{{ notify_entity_ids }}"
+            data:
+              title: "{{ closing_warning_title }}"
+              message: "{{ closing_warning_message }}"
+            continue_on_error: true
+      - if:
+          - condition: template
+            value_template: >-
+              {{ notify_action | regex_match('^notify\\.mobile_app_[a-z0-9_]+$') }}
+        then:
+          - action: "{{ notify_action }}"
+            data:
+              title: "{{ closing_warning_title }}"
+              message: "{{ closing_warning_message }}"
+              data:
+                tag: "{{ notice_tag }}"
+                actions:
+                  - action: "{{ action_extend }}"
+                    title: "Extend"
+                  - action: "{{ action_close_now }}"
+                    title: "Close now"
+                  - action: "{{ action_cancel }}"
+                    title: "Cancel automatic closing"
+            continue_on_error: true
+  - choose:
+      - alias: "Discard a completed arrived event to prevent repeated openings"
+        conditions:
+          - condition: template
+            value_template: >-
+              {{ vehicle_enabled and trigger.id == 'vehicle_approach'
+                 and trigger.to_state is not none
+                 and trigger.to_state.state == 'arrived'
+                 and trip_helper_ready | bool(false) }}
+        sequence:
+          - action: input_text.set_value
+            target:
+              entity_id: "{{ vehicle_session_helper }}"
+            data:
+              value: ""
   - choose:
       - alias: "Open once for a permitted event"
         conditions:
@@ -613,6 +1016,18 @@ actions:
             value_template: "{{ (open_requested | bool(false)) and is_state(garage, 'closed') }}"
           - condition: and
             conditions: !input open_conditions
+          - condition: or
+            conditions:
+              - condition: template
+                value_template: "{{ trigger.id != 'calendar_open' }}"
+              - condition: and
+                conditions:
+                  - condition: template
+                    value_template: >-
+                      {{ calendar_home_person in ['', none]
+                         or is_state(calendar_home_person, 'home') }}
+                  - condition: and
+                    conditions: !input calendar_open_conditions
         sequence:
           - action: cover.open_cover
             target:

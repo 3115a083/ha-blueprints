@@ -24,8 +24,9 @@ GARAGE = "cover.test_garage"
 CLEAR = "binary_sensor.test_clearance"
 DEADLINE = "input_datetime.test_garage_close_deadline"
 DOOR = "binary_sensor.test_house_door"
-ARRIVAL = "sensor.test_distance"
-DIRECTION = "sensor.test_direction"
+GPS = "device_tracker.test_phone_gps"
+BT = "sensor.test_phone_bluetooth_connection"
+TRIP = "input_text.test_garage_car_trip"
 PHONE = "binary_sensor.test_car_connected"
 
 
@@ -47,6 +48,8 @@ def expanded(**extra):
 
 async def build(tmp_path, **options):
     hass = HomeAssistant(str(tmp_path))
+    hass.config.latitude = 52.5200
+    hass.config.longitude = 13.4050
     hass.config_entries = ConfigEntries(hass, {})
     loader.async_setup(hass)
     await trigger_helper.async_setup(hass)
@@ -70,11 +73,18 @@ async def build(tmp_path, **options):
             for entity_id in names:
                 hass.states.async_set(entity_id, datetime.fromtimestamp(
                     stamp, timezone.utc).strftime("%Y-%m-%d %H:%M:%S"))
+        if (call.domain, call.service) == ("input_text", "set_value"):
+            names = data.get("entity_id", [])
+            if isinstance(names, str):
+                names = [names]
+            for entity_id in names:
+                hass.states.async_set(entity_id, data["value"])
 
     for domain, services in (
         ("cover", ("open_cover", "close_cover")),
         ("input_datetime", ("set_datetime",)),
-        ("notify", ("mobile_app_phone",)),
+        ("input_text", ("set_value",)),
+        ("notify", ("mobile_app_phone", "send_message")),
         ("persistent_notification", ("create",)),
         ("test", ("marker",)),
     ):
@@ -92,6 +102,7 @@ async def build(tmp_path, **options):
         hass.states.async_set(CLEAR, safety)
         hass.states.async_set(DEADLINE, "2020-01-01 00:00:00")
         hass.states.async_set(DOOR, "off")
+        hass.states.async_set(TRIP, "")
 
     async def run(kind, **kwargs):
         await script.async_run({
@@ -148,30 +159,6 @@ async def test_schedule_and_custom_open_request_with_conditions(tmp_path):
         calls.clear()
         await run("schedule_open")
         assert not actions(calls, "cover", "open_cover")  # already open
-    finally:
-        await hass.async_stop()
-
-
-@pytest.mark.asyncio
-async def test_approach_needs_car_connection_and_towards(tmp_path):
-    hass, calls, setup, run = await build(
-        tmp_path, vehicle_enabled=True,
-        vehicle_distance_sensor=ARRIVAL, vehicle_direction_sensor=DIRECTION,
-        vehicle_connection_sensors=[PHONE], vehicle_distance_threshold=0.5,
-    )
-    try:
-        setup()
-        hass.states.async_set(DIRECTION, "towards")
-        hass.states.async_set(PHONE, "off")
-        old = hass.states.async_set(ARRIVAL, "0.8")
-        previous = hass.states.get(ARRIVAL)
-        hass.states.async_set(ARRIVAL, "0.3")
-        current = hass.states.get(ARRIVAL)
-        await run("vehicle_approach", from_state=previous, to_state=current)
-        assert not actions(calls, "cover", "open_cover")
-        hass.states.async_set(PHONE, "on")
-        await run("vehicle_approach", from_state=previous, to_state=current)
-        assert len(actions(calls, "cover", "open_cover")) == 1
     finally:
         await hass.async_stop()
 
